@@ -14,6 +14,8 @@ TRIGGERS = {
     "atlas-test": ["test", "lint", "typecheck", "e2e", "screenshot", "verify", "eval smoke"],
     "atlas-handoff": ["handoff", "fresh agent", "another agent", "devret", "first 30 minutes"],
     "atlas-pr": ["open pr", "create pr", "pull request", "pr body", "reviewable pr", "babysit", "ci green", "until green", "preview deploy", "resolve comments"],
+    "atlas-api": ["endpoint", "openapi", "api contract", "api version", "breaking change", "generated client"],
+    "atlas-backfill": ["backfill", "re-embed", "reembed", "bulk update", "one-off script", "recompute", "data migration"],
     "atlas-plan": ["plan", "implementation plan", "roadmap", "tasarla", "nasıl yap", "grill me", "stress-test", "requirements are vague"],
     "atlas-implement": ["implement", "build", "fix", "uygula"],
     "atlas-create-skills": ["skill", "create skill", "hook", "populate skills"],

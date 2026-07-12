@@ -55,6 +55,8 @@ These should usually be loaded by lifecycle skills, not used as the whole workfl
 | `/atlas-db` | Postgres, migrations, pgvector, relation visibility, indexes. |
 | `/atlas-ai` | Ingestion, extraction, RAG, citations, prompt/model metadata, action risk, and retrieval/extraction/privacy/action-safety evals. |
 | `/atlas-security` | OAuth, tokens, permissions, privacy, sharing, export/delete, audit. |
+| `/atlas-api` | HTTP contract discipline: schema-first endpoints, generated client and docs as required artifacts, contract guard test, dated append-only versioning for breaking changes. |
+| `/atlas-backfill` | Bulk/one-off data changes as idempotent, batched, throttled, dry-runnable, audited jobs. Enforces the migration-vs-data split with `/atlas-db`. |
 
 Keep `/atlas-frontend` and `/atlas-backend`. They are not lifecycle skills; they are implementation lenses with different source docs and failure modes. `/atlas-design` owns product/visual/design-system decisions. `/atlas-frontend` owns Next.js implementation boundaries. `/atlas-backend` owns services/API/workflows/adapters.
 
@@ -66,7 +68,7 @@ Provider/env verification flows through `/atlas-deploy` and `/atlas-test`. New p
 
 ## Merged Skills
 
-The set is now 18 skills. Three former skills were merged into existing ones under the Deletion Rule because they shared mode, source docs, and safety behavior with their target:
+The set is now 20 skills. Three former skills were merged into existing ones under the Deletion Rule because they shared mode, source docs, and safety behavior with their target:
 
 - `/atlas-babysit` merged into `/atlas-pr` as Mode B (babysit to merge-ready). Opening a PR and shepherding it to green are one lifecycle.
 - `/atlas-grill-me` merged into `/atlas-plan` as Phase 0 (grill). Grilling vague requirements is the read-only front of planning, not a separate mode.
@@ -99,3 +101,10 @@ Delete or merge a skill when:
 - It has the same mode, same source docs, same output, and same safety behavior as another skill.
 - It only repeats generic agent instructions.
 - It is not referenced by README, `CLAUDE.md`, `docs/process/agent-alignment.md`, or hooks.
+
+## Added Skills
+
+Two skills were added under the Rule (they change required evidence and protect Atlas invariants):
+
+- `/atlas-api`: an endpoint change is done only when contract, generated client, and docs land together; breaking changes ship as dated append-only version units.
+- `/atlas-backfill`: bulk data changes run as idempotent, batched, audited jobs, keeping data movement out of migrations.

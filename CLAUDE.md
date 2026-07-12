@@ -14,7 +14,8 @@ Use Atlas skills in `.claude/skills/` when the task matches a repeatable workflo
 - `/atlas-issue` for issue drafting.
 - `/atlas-test` for lint/typecheck/tests/e2e/evals/screenshots and evidence.
 - `/atlas-handoff` for transferring work to another teammate or agent.
-- `/atlas-db`, `/atlas-backend`, `/atlas-frontend`, `/atlas-design`, `/atlas-ai`, `/atlas-security` for domain-specific implementation. `/atlas-ai` also owns retrieval/extraction/privacy/action-safety eval design and review.
+- `/atlas-db`, `/atlas-backend`, `/atlas-frontend`, `/atlas-design`, `/atlas-ai`, `/atlas-security`, `/atlas-api` for domain-specific implementation. `/atlas-ai` also owns retrieval/extraction/privacy/action-safety eval design and review. `/atlas-api` owns HTTP contract and versioning discipline.
+- `/atlas-backfill` for bulk or one-off data changes (re-embedding, recomputing derived data). Migrations change schema; backfills move data.
 - `/atlas-deploy` for deployment checks.
 - `/atlas-weekly-report` for senior project summaries.
 
