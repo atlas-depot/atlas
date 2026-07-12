@@ -1,0 +1,22 @@
+---
+description: Rules for creating and maintaining Atlas agent skills and prompt/reference files.
+globs:
+  - .claude/skills/**/*
+  - .cursor/rules/**/*
+  - AGENTS.md
+  - CLAUDE.md
+alwaysApply: false
+---
+
+# Atlas Agent Skill Rules
+
+- Keep always-on instructions short and non-contradictory.
+- Put long procedures in skills, not root instructions.
+- Each skill must have a clear `name` and `description`.
+- Skills should be task-specific and auditable.
+- Do not include secrets or private credentials in skills.
+- Do not create skills that bypass review, tests, permissions, or approval gates.
+- Update docs when changing process rules.
+- Owner/onboarding skills must point agents to the relevant docs instead of duplicating long architecture sections.
+- Project hooks may suggest skills and source-of-truth docs, but must not silently edit files, push branches, post comments, deploy, or bypass approvals.
+- New Atlas skills must be added to `README.md`, `CLAUDE.md`, `docs/process/agent-alignment.md`, and `docs/process/file-map.md`.

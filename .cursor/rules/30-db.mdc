@@ -1,0 +1,19 @@
+---
+description: Database, migration, pgvector, permission, and data-integrity rules for Atlas.
+globs:
+  - packages/db/**/*
+  - '**/*migration*'
+  - '**/*.sql'
+alwaysApply: false
+---
+
+# Atlas Database Rules
+
+- Postgres is canonical.
+- pgvector is MVP vector search.
+- Every memory object needs workspace, owner, visibility, source, status, and timestamps.
+- Relation edges must be typed, sourced, confidence-scored, and visibility-filtered.
+- Destructive migrations require explicit approval and rollback plan.
+- Add indexes for workspace, visibility, type, status, timestamps, full-text, and vector search as needed.
+- Do not use JSONB as a lazy replacement for core relational fields.
+- Add tests for private/shared leakage when touching schema or queries.

@@ -1,0 +1,63 @@
+name: Bug
+description: Report incorrect Atlas behavior.
+title: "fix: "
+labels: ["bug", "triage"]
+body:
+  - type: textarea
+    id: observed
+    attributes:
+      label: Observed behavior
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      value: |
+        1. 
+        2. 
+        3. 
+    validations:
+      required: true
+  - type: textarea
+    id: impact
+    attributes:
+      label: Impact
+      description: Who is affected and how serious is it?
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Evidence
+      description: Logs, screenshots, preview URL, test data.
+    validations:
+      required: false
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - UI
+        - Frontend
+        - Backend
+        - Database
+        - AI
+        - Permissions/privacy
+        - Deployment
+        - Unknown
+    validations:
+      required: true
+  - type: textarea
+    id: tests
+    attributes:
+      label: Regression test required
+      description: What test should fail before the fix and pass after?
+    validations:
+      required: true

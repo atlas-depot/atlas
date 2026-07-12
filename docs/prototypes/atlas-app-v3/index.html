@@ -1,0 +1,775 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>Atlas</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <!-- Icon sprite: 24 viewBox, 1.5 stroke, matches hairline language -->
+    <svg width="0" height="0" style="position:absolute" aria-hidden="true">
+      <defs>
+        <symbol id="i-today" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></symbol>
+        <symbol id="i-inbox" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-6l-2 3h-4l-2-3H2"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/></symbol>
+        <symbol id="i-search" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></symbol>
+        <symbol id="i-chat" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></symbol>
+        <symbol id="i-graph" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="m8.59 13.51 6.83 3.98M15.41 6.51l-6.82 3.98"/></symbol>
+        <symbol id="i-doc" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M16 13H8M16 17H8M10 9H8"/></symbol>
+        <symbol id="i-people" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></symbol>
+        <symbol id="i-folder" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></symbol>
+        <symbol id="i-globe" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M2 12h20"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></symbol>
+        <symbol id="i-shield" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></symbol>
+        <symbol id="i-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></symbol>
+        <symbol id="i-clock" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></symbol>
+        <symbol id="i-up-right" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17 17 7M7 7h10v10"/></symbol>
+        <symbol id="i-x" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18M6 6l12 12"/></symbol>
+        <symbol id="i-mail" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="m22 6-10 7L2 6"/></symbol>
+        <symbol id="i-image" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="m21 15-5-5L5 21"/></symbol>
+        <symbol id="i-link" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></symbol>
+        <symbol id="i-file" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5z"/><path d="M14 2v6h6"/></symbol>
+      </defs>
+    </svg>
+
+    <div class="shell">
+      <!-- ============ Navigation ============ -->
+      <nav class="nav" aria-label="Atlas">
+        <div class="brand">
+          <span class="dot red"></span>
+          <span class="brand-name">Atlas</span>
+        </div>
+
+        <div class="nav-cap caps">Work</div>
+        <button class="nav-item active" data-nav="today"><svg class="i"><use href="#i-today"/></svg>Today</button>
+        <button class="nav-item" data-nav="inbox"><svg class="i"><use href="#i-inbox"/></svg>Inbox<span class="nav-count">6</span></button>
+        <button class="nav-item" data-nav="search"><svg class="i"><use href="#i-search"/></svg>Search</button>
+        <button class="nav-item" data-nav="chat"><svg class="i"><use href="#i-chat"/></svg>Chat</button>
+        <button class="nav-item" data-nav="graph"><svg class="i"><use href="#i-graph"/></svg>Graph</button>
+
+        <div class="nav-cap caps">Library</div>
+        <button class="nav-item" data-nav="documents"><svg class="i"><use href="#i-doc"/></svg>Documents</button>
+        <button class="nav-item" data-nav="people"><svg class="i"><use href="#i-people"/></svg>People</button>
+        <button class="nav-item" data-nav="projects"><svg class="i"><use href="#i-folder"/></svg>Projects</button>
+
+        <div class="nav-cap caps">Spaces</div>
+        <button class="nav-item" data-nav="shared"><svg class="i"><use href="#i-globe"/></svg>Shared spaces</button>
+        <button class="nav-item" data-nav="privacy"><svg class="i"><use href="#i-shield"/></svg>Privacy</button>
+      </nav>
+
+      <main class="main">
+        <!-- ============ TODAY - command center, fits 100vh ============ -->
+        <section class="screen active" data-screen="today">
+          <header class="topline">
+            <h1>Today</h1>
+            <div class="topline-actions">
+              <button class="btn btn-ghost btn-sm" data-toggle-inspector>Evidence</button>
+              <button class="btn btn-outline btn-sm">Capture</button>
+            </div>
+          </header>
+
+          <div class="body has-inspector" data-inspector-body>
+            <div class="center">
+              <div class="content fit">
+                <!-- Timeline: hero and lead in one plane -->
+                <section class="tl" aria-label="This week">
+                  <span class="tl-cx a"></span><span class="tl-cx b"></span>
+                  <span class="tl-cx c"></span><span class="tl-cx d"></span>
+
+                  <div class="tl-head">
+                    <span class="caps">This week</span>
+                    <span class="meta tnum">Jun 29 - Jul 5</span>
+                  </div>
+
+                  <div class="tl-track">
+                    <div class="tl-now" style="left: 38.5%"></div>
+                    <div class="tl-ruler"></div>
+                    <div class="tl-days">
+                      <div class="tl-day">Mon 29</div>
+                      <div class="tl-day">Tue 30</div>
+                      <div class="tl-day today">Wed 1</div>
+                      <div class="tl-day">Thu 2</div>
+                      <div class="tl-day">Fri 3</div>
+                      <div class="tl-day">Sat 4</div>
+                      <div class="tl-day">Sun 5</div>
+                    </div>
+                    <div class="tl-cards">
+                      <button class="tl-card gc1">
+                        <span class="ic"><svg class="i i-check"><use href="#i-check"/></svg></span>
+                        <span class="lb">Proposal linked to project</span>
+                      </button>
+                      <button class="tl-card active gc3" data-open-inspector aria-current="true">
+                        <span class="ic"><span class="i-spin"></span></span>
+                        <span class="lb">Advisor draft needs review</span>
+                      </button>
+                      <button class="tl-card gc4">
+                        <span class="ic"><svg class="i"><use href="#i-up-right"/></svg></span>
+                        <span class="lb">Submit proposal package</span>
+                      </button>
+                      <button class="tl-card gc5s2">
+                        <span class="ic"><svg class="i"><use href="#i-clock"/></svg></span>
+                        <span class="lb">Advisor feedback</span>
+                      </button>
+                    </div>
+                  </div>
+                </section>
+
+                <div class="fit-spacer"></div>
+
+                <!-- Ledger: two balanced columns -->
+                <div class="ledger-cols">
+                  <div class="ledger-col">
+                    <div class="group-label caps">Needs review</div>
+                    <button class="list-item">
+                      <span class="item-main">
+                        <span class="item-title">Low-confidence relation on Atlas senior project</span>
+                        <span class="item-sub">Evidence is mixed across four cited chunks.</span>
+                      </span>
+                      <span class="item-state attn">Review</span>
+                    </button>
+
+                    <div class="group-label caps">Waiting on</div>
+                    <button class="list-item">
+                      <span class="item-main">
+                        <span class="item-title">Advisor feedback on proposal structure</span>
+                        <span class="item-sub">Private email endpoint stays out of shared previews.</span>
+                      </span>
+                      <span class="item-state">Private</span>
+                    </button>
+                    <button class="list-item">
+                      <span class="item-main">
+                        <span class="item-title">Invoice confirmation before Friday</span>
+                        <span class="item-sub">Account withheld from the model: <span class="mask">[BANK_ACCOUNT]</span></span>
+                      </span>
+                      <span class="item-state">Needs source</span>
+                    </button>
+                  </div>
+
+                  <div class="ledger-col">
+                    <div class="group-label caps">Due soon</div>
+                    <button class="list-item">
+                      <span class="item-main">
+                        <span class="item-title">Submit the CTIS411 proposal package</span>
+                        <span class="item-sub">From calendar import and document metadata.</span>
+                      </span>
+                      <span class="item-state attn">Tomorrow</span>
+                    </button>
+
+                    <div class="group-label caps">Memory changes</div>
+                    <button class="list-item">
+                      <span class="item-main">
+                        <span class="item-title">Proposal linked to Atlas senior project</span>
+                        <span class="item-sub">Four cited chunks, one correctable relation.</span>
+                      </span>
+                      <span class="item-state good">Grounded</span>
+                    </button>
+                    <button class="list-item">
+                      <span class="item-main">
+                        <span class="item-title">Shared preview hides advisor thread</span>
+                        <span class="item-sub">Visible only where both endpoints are authorized.</span>
+                      </span>
+                      <span class="item-state">Redacted</span>
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              <div class="composer">
+                <div class="composer-row">
+                  <input class="input" placeholder="Ask or capture anything" aria-label="Ask Atlas" />
+                  <button class="btn btn-primary">Ask</button>
+                </div>
+              </div>
+            </div>
+
+            <!-- Inspector: evidence for the selected timeline card -->
+            <aside class="inspector" aria-label="Evidence">
+              <div class="inspector-inner">
+                <div class="insp-head">
+                  <span class="caps">Evidence</span>
+                  <button class="btn-icon" data-close-inspector aria-label="Close evidence">
+                    <svg class="i"><use href="#i-x"/></svg>
+                  </button>
+                </div>
+                <h2 class="insp-title">Advisor follow-up draft</h2>
+
+                <div class="insp-sec">
+                  <div class="alert">
+                    <svg class="i"><use href="#i-shield"/></svg>
+                    <div>
+                      <div class="alert-title">Approval required</div>
+                      <div class="alert-desc">Level 2 draft. Atlas cannot send email or disclose private memory without your explicit approval.</div>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="insp-sec">
+                  <h3 class="caps">Object</h3>
+                  <div class="fields">
+                    <div class="field"><span class="field-k">Type</span><span class="field-v">Draft external action</span></div>
+                    <div class="field"><span class="field-k">Visibility</span><span class="field-v">Private</span></div>
+                    <div class="field"><span class="field-k">Confidence</span><span class="field-v">High on sources, medium on timing</span></div>
+                    <div class="field"><span class="field-k">Risk</span><span class="field-v attn">Level 2 &middot; draft only</span></div>
+                    <div class="field"><span class="field-k">Approval</span><span class="field-v">Not approved yet</span></div>
+                    <div class="field"><span class="field-k">Rollback</span><span class="field-v">Discard the draft. Nothing external has changed.</span></div>
+                  </div>
+                </div>
+
+                <div class="insp-sec">
+                  <h3 class="caps">Sources</h3>
+                  <div class="src">
+                    <div class="src-name">CTIS411_Senior_Project_Proposal_Atlas_Living_Second_Brain_Updated_Final_Advisor_Review_Copy.pdf</div>
+                    <div class="src-meta">Document &middot; 4 cited chunks</div>
+                  </div>
+                  <div class="src">
+                    <div class="src-name">Reminder: ask for feedback after proposal review</div>
+                    <div class="src-meta">Calendar &middot; private</div>
+                  </div>
+                  <div class="src">
+                    <div class="src-name">Prior advisor thread</div>
+                    <div class="src-meta">Email &middot; private &middot; hidden from shared previews</div>
+                  </div>
+                </div>
+
+                <div class="insp-sec">
+                  <h3 class="caps">Before send</h3>
+                  <div class="fields">
+                    <div class="field"><span class="field-k">Recipient</span><span class="field-v"><span class="mask">[ADVISOR_EMAIL]</span></span></div>
+                    <div class="field"><span class="field-k">Discloses</span><span class="field-v">Exact recipient and body appear here at approval time, not before.</span></div>
+                  </div>
+                  <div class="insp-actions">
+                    <button class="btn btn-primary">Approve send</button>
+                    <button class="btn btn-outline">Discard</button>
+                  </div>
+                </div>
+              </div>
+            </aside>
+          </div>
+        </section>
+
+        <!-- ============ INBOX ============ -->
+        <section class="screen" data-screen="inbox">
+          <header class="topline">
+            <h1>Inbox</h1>
+            <div class="topline-actions">
+              <button class="btn btn-primary btn-sm">Capture</button>
+            </div>
+          </header>
+          <div class="body">
+            <div class="center">
+              <div class="content">
+                <div class="content-mid">
+                  <div class="sec-head">
+                    <h2 class="sec-title">Captured</h2>
+                    <span class="sec-note">6 items waiting for review</span>
+                  </div>
+                  <button class="list-item">
+                    <span class="item-main">
+                      <span class="item-title">CTIS411_Senior_Project_Proposal_Atlas_Living_Second_Brain_Updated_Final_Advisor_Review_Copy.pdf</span>
+                      <span class="item-sub">PDF &middot; uploaded 2h ago &middot; suggested project: Atlas senior project</span>
+                    </span>
+                    <span class="item-state attn">Review</span>
+                  </button>
+                  <button class="list-item">
+                    <span class="item-main">
+                      <span class="item-title">Screenshot 2026-07-01 invoice.png</span>
+                      <span class="item-sub">Image &middot; OCR extracted &middot; account withheld: <span class="mask">[BANK_ACCOUNT]</span></span>
+                    </span>
+                    <span class="item-state attn">Low confidence</span>
+                  </button>
+                  <button class="list-item">
+                    <span class="item-main">
+                      <span class="item-title">Advisor thread</span>
+                      <span class="item-sub">Email import &middot; 4 messages &middot; endpoint kept out of shared previews</span>
+                    </span>
+                    <span class="item-state">Private</span>
+                  </button>
+                  <button class="list-item">
+                    <span class="item-main">
+                      <span class="item-title">Senior project rubric</span>
+                      <span class="item-sub">Link &middot; fetched &middot; connected to CTIS411 coursework</span>
+                    </span>
+                    <span class="item-state good">Grounded</span>
+                  </button>
+                  <button class="list-item">
+                    <span class="item-main">
+                      <span class="item-title">Voice note: email advisor after review</span>
+                      <span class="item-sub">Audio &middot; transcribed &middot; suggests a waiting-on relation</span>
+                    </span>
+                    <span class="item-state">New</span>
+                  </button>
+                  <button class="list-item">
+                    <span class="item-main">
+                      <span class="item-title">Proposal submission</span>
+                      <span class="item-sub">Calendar event &middot; imported &middot; due tomorrow</span>
+                    </span>
+                    <span class="item-state good">Linked</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- ============ SEARCH ============ -->
+        <section class="screen" data-screen="search">
+          <header class="topline">
+            <h1>Search</h1>
+          </header>
+          <div class="body">
+            <div class="center">
+              <div class="content">
+                <div class="content-narrow">
+                  <div class="composer-row">
+                    <input class="input" value="what am I waiting on for the proposal?" aria-label="Search memory" />
+                    <button class="btn btn-primary">Search</button>
+                  </div>
+
+                  <div class="sec">
+                    <div class="answer-head">
+                      <span class="caps">Answer</span>
+                      <span class="sec-note">Grounded in 3 sources</span>
+                    </div>
+                    <p class="answer-body">
+                      You are waiting on your advisor's feedback on the proposal structure<sup>1</sup>.
+                      The related email endpoint is private and stays out of shared previews<sup>2</sup>.
+                      The submission itself is due tomorrow<sup>3</sup>.
+                    </p>
+                    <div class="answer-srcs">
+                      <div class="answer-src"><b>1</b><span>CTIS411_Senior_Project_Proposal_..._Advisor_Review_Copy.pdf &middot; 4 cited chunks</span></div>
+                      <div class="answer-src"><b>2</b><span>Prior advisor thread &middot; private email</span></div>
+                      <div class="answer-src"><b>3</b><span>Proposal submission &middot; calendar</span></div>
+                    </div>
+                  </div>
+
+                  <div class="sec">
+                    <div class="sec-head">
+                      <h2 class="sec-title">Objects</h2>
+                      <span class="sec-note">Visibility shown per result</span>
+                    </div>
+                    <button class="list-item">
+                      <span class="item-main">
+                        <span class="item-title">Advisor feedback on proposal structure</span>
+                        <span class="item-sub">Waiting-on relation &middot; person: Advisor</span>
+                      </span>
+                      <span class="item-state">Private</span>
+                    </button>
+                    <button class="list-item">
+                      <span class="item-main">
+                        <span class="item-title">Atlas senior project</span>
+                        <span class="item-sub">Project &middot; 12 linked objects</span>
+                      </span>
+                      <span class="item-state good">Grounded</span>
+                    </button>
+                    <button class="list-item">
+                      <span class="item-main">
+                        <span class="item-title">Invoice account</span>
+                        <span class="item-sub">Stored as <span class="mask">[BANK_ACCOUNT]</span> &middot; never disclosed to the model or shared spaces</span>
+                      </span>
+                      <span class="item-state attn">Restricted</span>
+                    </button>
+                    <p class="meta footnote">When Atlas lacks evidence, it says it does not know instead of guessing.</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- ============ CHAT ============ -->
+        <section class="screen" data-screen="chat">
+          <header class="topline">
+            <h1>Chat</h1>
+          </header>
+          <div class="body">
+            <div class="center">
+              <div class="content">
+                <div class="thread">
+                  <div class="msg">
+                    <div class="msg-who caps">You</div>
+                    <div class="msg-text">Draft a follow-up to my advisor about the proposal.</div>
+                  </div>
+                  <div class="msg">
+                    <div class="msg-who caps">Atlas</div>
+                    <div class="msg-text">
+                      I drafted a follow-up from your proposal<sup>1</sup> and the prior advisor
+                      thread<sup>2</sup>. It is a Level 2 action, so it stays a draft. Nothing is sent
+                      until you approve the exact recipient and body.
+                    </div>
+                    <div class="msg-srcs">
+                      <span><b>1</b> proposal.pdf &middot; 4 cited chunks</span>
+                      <span><b>2</b> advisor thread &middot; private</span>
+                    </div>
+                    <div class="msg-actions">
+                      <button class="btn btn-outline btn-sm" data-nav="today">Open draft in Today</button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <div class="composer">
+                <div class="composer-row">
+                  <input class="input" placeholder="Ask, capture, search, or draft from your sources" aria-label="Ask Atlas" />
+                  <button class="btn btn-primary">Ask</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- ============ GRAPH ============ -->
+        <section class="screen" data-screen="graph">
+          <header class="topline">
+            <h1>Graph</h1>
+          </header>
+          <div class="body">
+            <div class="center">
+              <div class="content">
+                <div class="graph-controls">
+                  <button class="btn btn-outline btn-sm">All</button>
+                  <button class="btn btn-ghost btn-sm">Projects</button>
+                  <button class="btn btn-ghost btn-sm">People</button>
+                  <button class="btn btn-ghost btn-sm">Documents</button>
+                  <button class="btn btn-ghost btn-sm">Waiting-on</button>
+                  <button class="btn btn-ghost btn-sm">Redacted</button>
+                </div>
+                <div class="graph-canvas">
+                  <svg class="edges" viewBox="0 0 100 100" preserveAspectRatio="none">
+                    <line x1="50" y1="50" x2="50" y2="16" stroke="#c7c7c7" vector-effect="non-scaling-stroke" />
+                    <line x1="50" y1="50" x2="27" y2="31" stroke="#c7c7c7" vector-effect="non-scaling-stroke" />
+                    <line x1="50" y1="50" x2="75" y2="27" stroke="#c7c7c7" vector-effect="non-scaling-stroke" />
+                    <line x1="50" y1="50" x2="24" y2="73" stroke="#c7c7c7" vector-effect="non-scaling-stroke" />
+                    <line x1="50" y1="50" x2="73" y2="72" stroke="#c7c7c7" vector-effect="non-scaling-stroke" />
+                    <line x1="24" y1="73" x2="75" y2="27" stroke="#ff260d" stroke-dasharray="4 4" vector-effect="non-scaling-stroke" />
+                  </svg>
+                  <div class="node now project" style="left: 50%; top: 50%"><span class="node-dot"></span><span class="node-lbl">Atlas senior project</span></div>
+                  <div class="node project" style="left: 50%; top: 16%"><span class="node-dot"></span><span class="node-lbl">CTIS411 coursework</span></div>
+                  <div class="node doc" style="left: 27%; top: 31%"><span class="node-dot"></span><span class="node-lbl">proposal.pdf</span></div>
+                  <div class="node redacted" style="left: 75%; top: 27%"><span class="node-dot"></span><span class="node-lbl">Advisor &middot; redacted</span></div>
+                  <div class="node" style="left: 24%; top: 73%"><span class="node-dot"></span><span class="node-lbl">You</span></div>
+                  <div class="node doc" style="left: 73%; top: 72%"><span class="node-dot"></span><span class="node-lbl">invoice.png</span></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- ============ DOCUMENTS ============ -->
+        <section class="screen" data-screen="documents">
+          <header class="topline">
+            <h1>Documents</h1>
+            <div class="topline-actions">
+              <button class="btn btn-outline btn-sm">Upload</button>
+            </div>
+          </header>
+          <div class="body">
+            <div class="center">
+              <div class="content">
+                <div class="grid grid-3">
+                  <button class="card">
+                    <span class="card-cap"><svg class="i"><use href="#i-doc"/></svg><span class="caps">PDF</span></span>
+                    <span class="card-title">CTIS411_Senior_Project_Proposal_Atlas_Living_Second_Brain_Updated_Final_Advisor_Review_Copy.pdf</span>
+                    <span class="card-sub">4 cited chunks &middot; linked to Atlas senior project</span>
+                    <span class="card-foot">
+                      <span class="meta-dot"><span class="dot"></span>Private</span>
+                      <span class="meta-dot"><span class="dot green"></span>Grounded</span>
+                    </span>
+                  </button>
+                  <button class="card">
+                    <span class="card-cap"><svg class="i"><use href="#i-image"/></svg><span class="caps">Image</span></span>
+                    <span class="card-title">Screenshot 2026-07-01 invoice.png</span>
+                    <span class="card-sub">OCR extracted &middot; account withheld from the model</span>
+                    <span class="card-foot">
+                      <span class="meta-dot"><span class="dot"></span>Private</span>
+                      <span class="meta-dot"><span class="dot red"></span>Redacted</span>
+                    </span>
+                  </button>
+                  <button class="card">
+                    <span class="card-cap"><svg class="i"><use href="#i-link"/></svg><span class="caps">Link</span></span>
+                    <span class="card-title">Senior project rubric</span>
+                    <span class="card-sub">Fetched &middot; CTIS411 coursework</span>
+                    <span class="card-foot">
+                      <span class="meta-dot"><span class="dot blue"></span>Shared</span>
+                    </span>
+                  </button>
+                  <button class="card">
+                    <span class="card-cap"><svg class="i"><use href="#i-mail"/></svg><span class="caps">Email</span></span>
+                    <span class="card-title">Prior advisor thread</span>
+                    <span class="card-sub">4 messages &middot; endpoint hidden from shared previews</span>
+                    <span class="card-foot">
+                      <span class="meta-dot"><span class="dot"></span>Private</span>
+                      <span class="meta-dot"><span class="dot red"></span>Redacted</span>
+                    </span>
+                  </button>
+                  <button class="card">
+                    <span class="card-cap"><svg class="i"><use href="#i-today"/></svg><span class="caps">Calendar</span></span>
+                    <span class="card-title">Proposal submission</span>
+                    <span class="card-sub">Imported &middot; due tomorrow</span>
+                    <span class="card-foot">
+                      <span class="meta-dot"><span class="dot"></span>Private</span>
+                    </span>
+                  </button>
+                  <button class="card">
+                    <span class="card-cap"><svg class="i"><use href="#i-file"/></svg><span class="caps">Note</span></span>
+                    <span class="card-title">Advisor meeting takeaways</span>
+                    <span class="card-sub">Draft &middot; not yet linked</span>
+                    <span class="card-foot">
+                      <span class="meta-dot"><span class="dot"></span>Private</span>
+                    </span>
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- ============ PEOPLE ============ -->
+        <section class="screen" data-screen="people">
+          <header class="topline">
+            <h1>People</h1>
+          </header>
+          <div class="body">
+            <div class="center">
+              <div class="content">
+                <div class="content-mid">
+                  <table class="table">
+                    <thead>
+                      <tr>
+                        <th class="col-m">Person</th>
+                        <th>Memory</th>
+                        <th class="col-s ta-r">Sources</th>
+                        <th class="col-s">Visibility</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr>
+                        <td>
+                          <div class="person"><span class="avatar">AD</span><span class="td-strong">Advisor</span></div>
+                        </td>
+                        <td class="td-muted">Waiting-on relation &middot; email stored as <span class="mask">[ADVISOR_EMAIL]</span></td>
+                        <td class="td-muted tnum ta-r">3</td>
+                        <td class="td-muted">Private</td>
+                      </tr>
+                      <tr>
+                        <td>
+                          <div class="person"><span class="avatar">CC</span><span class="td-strong">Course coordinator</span></div>
+                        </td>
+                        <td class="td-muted">Linked to CTIS411 coursework &middot; grounded in the rubric</td>
+                        <td class="td-muted tnum ta-r">1</td>
+                        <td class="td-muted">Shared</td>
+                      </tr>
+                      <tr>
+                        <td>
+                          <div class="person"><span class="avatar">EB</span><span class="td-strong">You</span></div>
+                        </td>
+                        <td class="td-muted">Owner &middot; full visibility across private memory</td>
+                        <td class="td-muted tnum ta-r">12</td>
+                        <td class="td-muted">Owner</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- ============ PROJECTS ============ -->
+        <section class="screen" data-screen="projects">
+          <header class="topline">
+            <h1>Projects</h1>
+            <div class="topline-actions">
+              <button class="btn btn-outline btn-sm">New project</button>
+            </div>
+          </header>
+          <div class="body">
+            <div class="center">
+              <div class="content">
+                <div class="grid grid-2">
+                  <button class="card">
+                    <span class="card-cap"><svg class="i"><use href="#i-folder"/></svg><span class="caps">Active</span></span>
+                    <span class="card-title">Atlas senior project</span>
+                    <span class="card-sub">12 linked objects &middot; proposal, advisor thread, invoice, calendar</span>
+                    <span class="card-foot">
+                      <span class="meta-dot"><span class="dot red"></span>Due tomorrow</span>
+                      <span class="meta-dot"><span class="dot green"></span>Grounded</span>
+                    </span>
+                  </button>
+                  <button class="card">
+                    <span class="card-cap"><svg class="i"><use href="#i-folder"/></svg><span class="caps">Course</span></span>
+                    <span class="card-title">CTIS411 coursework</span>
+                    <span class="card-sub">Rubric, proposal, coordinator &middot; one link under review</span>
+                    <span class="card-foot">
+                      <span class="meta-dot"><span class="dot blue"></span>Shared</span>
+                    </span>
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- ============ SHARED SPACES ============ -->
+        <section class="screen" data-screen="shared">
+          <header class="topline">
+            <h1>Shared spaces</h1>
+          </header>
+          <div class="body">
+            <div class="center">
+              <div class="content">
+                <div class="content-mid">
+                  <div class="page-intro">
+                    <h2>Senior project &middot; advisor review</h2>
+                    <p>
+                      This is exactly what members can see. Private sources degrade to derived facts,
+                      and private endpoints cannot be inferred from shared relations.
+                    </p>
+                  </div>
+
+                  <table class="table">
+                    <thead>
+                      <tr>
+                        <th class="col-m">Object</th>
+                        <th>What members see</th>
+                        <th class="col-s">Disclosure</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr>
+                        <td class="td-strong">Proposal</td>
+                        <td class="td-muted">Derived summary only, no raw document body</td>
+                        <td><span class="mono">D2</span></td>
+                      </tr>
+                      <tr>
+                        <td class="td-strong">Submission date</td>
+                        <td class="td-muted">Tomorrow, normalized from calendar</td>
+                        <td><span class="mono">D2</span></td>
+                      </tr>
+                      <tr>
+                        <td class="td-strong">Project</td>
+                        <td class="td-muted">Stable pseudonym <span class="mask">project_91c2</span></td>
+                        <td><span class="mono">D3</span></td>
+                      </tr>
+                      <tr>
+                        <td class="td-strong">Advisor email</td>
+                        <td class="td-muted">Not visible, cannot be inferred from relations</td>
+                        <td><span class="mono">D1</span></td>
+                      </tr>
+                      <tr>
+                        <td class="td-strong">Invoice account</td>
+                        <td class="td-muted">Never leaves Atlas</td>
+                        <td><span class="mono">D0</span></td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- ============ PRIVACY ============ -->
+        <section class="screen" data-screen="privacy">
+          <header class="topline">
+            <h1>Privacy</h1>
+          </header>
+          <div class="body">
+            <div class="center">
+              <div class="content">
+                <div class="content-mid">
+                  <div class="sec">
+                    <div class="sec-head">
+                      <h2 class="sec-title">Disclosure levels</h2>
+                      <span class="sec-note">Applied to every outbound representation</span>
+                    </div>
+                    <table class="table">
+                      <thead>
+                        <tr>
+                          <th class="col-s">Level</th>
+                          <th class="col-m">Name</th>
+                          <th>Meaning</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        <tr>
+                          <td><span class="mono">D0</span></td>
+                          <td class="td-strong">No disclosure</td>
+                          <td class="td-muted">Never leaves Atlas. Tokens, passwords, card and account numbers.</td>
+                        </tr>
+                        <tr>
+                          <td><span class="mono">D1</span></td>
+                          <td class="td-strong">Type marker</td>
+                          <td class="td-muted">Value replaced by a typed marker such as <span class="mask">[BANK_ACCOUNT]</span></td>
+                        </tr>
+                        <tr>
+                          <td><span class="mono">D2</span></td>
+                          <td class="td-strong">Derived value</td>
+                          <td class="td-muted">Normalized fact only: due date, amount bucket, status.</td>
+                        </tr>
+                        <tr>
+                          <td><span class="mono">D3</span></td>
+                          <td class="td-strong">Pseudonym</td>
+                          <td class="td-muted">Rehydratable handle such as <span class="mask">person_7f3a</span></td>
+                        </tr>
+                        <tr>
+                          <td><span class="mono">D4</span></td>
+                          <td class="td-strong">Exact value</td>
+                          <td class="td-muted">Shown to you, the owner, when the purpose requires it.</td>
+                        </tr>
+                        <tr>
+                          <td><span class="mono">D5</span></td>
+                          <td class="td-strong">Approved disclosure</td>
+                          <td class="td-muted">Exact outbound content is shown for approval before any Level 2 or 3 action.</td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+
+                  <div class="sec">
+                    <div class="sec-head">
+                      <h2 class="sec-title">Your data</h2>
+                    </div>
+                    <div class="setting">
+                      <div class="setting-main">
+                        <div class="setting-title">Export memory</div>
+                        <div class="setting-desc">The exact bundle contents are shown before the export is created.</div>
+                      </div>
+                      <button class="btn btn-outline">Export</button>
+                    </div>
+                    <div class="setting">
+                      <div class="setting-main">
+                        <div class="setting-title">Delete objects or sources</div>
+                        <div class="setting-desc">Requires explicit confirmation and removes derived facts with the source.</div>
+                      </div>
+                      <button class="btn btn-danger">Delete&hellip;</button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <script>
+      // ponytail: prototype-only navigation and inspector toggling.
+      const screens = document.querySelectorAll(".screen");
+      const navItems = document.querySelectorAll("[data-nav]");
+      function show(name) {
+        screens.forEach((s) => s.classList.toggle("active", s.dataset.screen === name));
+        navItems.forEach((n) => n.classList.toggle("active", n.dataset.nav === name));
+      }
+      navItems.forEach((n) => n.addEventListener("click", () => show(n.dataset.nav)));
+
+      const inspBody = document.querySelector("[data-inspector-body]");
+      document.querySelectorAll("[data-open-inspector]").forEach((el) =>
+        el.addEventListener("click", () => inspBody.classList.remove("inspector-closed"))
+      );
+      document.querySelectorAll("[data-close-inspector]").forEach((el) =>
+        el.addEventListener("click", () => inspBody.classList.add("inspector-closed"))
+      );
+      document.querySelectorAll("[data-toggle-inspector]").forEach((el) =>
+        el.addEventListener("click", () => inspBody.classList.toggle("inspector-closed"))
+      );
+    </script>
+  </body>
+</html>

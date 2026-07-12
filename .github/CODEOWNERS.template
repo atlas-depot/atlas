@@ -1,0 +1,29 @@
+# Rename this file to .github/CODEOWNERS after replacing placeholders.
+# Owners must have write access to the repository.
+
+# Default owners
+* @replace-with-team-lead-1 @replace-with-team-lead-2
+
+# UI and frontend
+/apps/web/ @replace-with-frontend-owner
+/packages/ui/ @replace-with-frontend-owner
+
+# Backend and API
+/packages/api/ @replace-with-backend-owner
+/packages/domain/ @replace-with-backend-owner
+/apps/worker/ @replace-with-backend-owner
+
+# Database and migrations
+/packages/db/ @replace-with-db-owner
+**/*migration* @replace-with-db-owner
+**/*.sql @replace-with-db-owner
+
+# AI, ingestion, and evals
+/packages/ai/ @replace-with-ai-owner
+/packages/ingestion/ @replace-with-ai-owner
+/packages/evals/ @replace-with-ai-owner
+
+# Auth, security, CI, deployment
+/packages/auth/ @replace-with-security-owner
+/.github/ @replace-with-maintainer
+/docs/architecture/ @replace-with-maintainer

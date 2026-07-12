@@ -1,0 +1,23 @@
+---
+description: Backend rules for Atlas services, APIs, repositories, permissions, and integrations.
+globs:
+  - apps/worker/**/*
+  - packages/api/**/*
+  - packages/domain/**/*
+  - packages/auth/**/*
+  - packages/ingestion/**/*
+alwaysApply: false
+---
+
+# Atlas Backend Rules
+
+- Use modular monolith boundaries.
+- API handlers validate inputs and delegate to services.
+- Domain services own business rules.
+- Repositories centralize DB access and permission filters.
+- External providers go through ports/adapters.
+- Fake/local provider adapters must exist for ordinary local development unless explicitly deferred by an issue.
+- Long-running workflows must be idempotent.
+- Writes must be attributable to user, AI, system, or integration.
+- External actions must use risk levels and approvals.
+- Do not leak raw provider errors to users.

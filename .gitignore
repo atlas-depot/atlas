@@ -1,0 +1,44 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Environment
+.env
+.env.*
+!.env.example
+
+# Build output
+.next/
+out/
+dist/
+build/
+coverage/
+*.tsbuildinfo
+
+# Local tools and caches
+.turbo/
+.vercel/
+.cache/
+.vite/
+.eslintcache
+__pycache__/
+*.py[cod]
+
+# Logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# OS/editor noise
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+
+# Local databases and artifacts
+*.sqlite
+*.sqlite3
+tmp/
+artifacts/

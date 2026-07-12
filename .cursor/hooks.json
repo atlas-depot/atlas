@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "hooks": {
+    "beforeSubmitPrompt": [
+      {
+        "command": ".cursor/hooks/atlas-skill-suggest.py",
+        "timeout": 5,
+        "failClosed": false
+      }
+    ]
+  }
+}

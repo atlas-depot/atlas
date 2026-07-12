@@ -1,0 +1,74 @@
+name: Feature
+description: Propose a user-facing or system-facing Atlas feature.
+title: "feat: "
+labels: ["feature", "triage"]
+body:
+  - type: textarea
+    id: goal
+    attributes:
+      label: Goal
+      description: What should be true after this feature is complete?
+    validations:
+      required: true
+  - type: textarea
+    id: value
+    attributes:
+      label: User or system value
+      description: Why does this matter for Atlas?
+    validations:
+      required: true
+  - type: textarea
+    id: scope
+    attributes:
+      label: Scope
+      description: What is included?
+    validations:
+      required: true
+  - type: textarea
+    id: out-of-scope
+    attributes:
+      label: Out of scope
+      description: What is explicitly not included?
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: Use checkboxes.
+      value: |
+        - [ ] 
+    validations:
+      required: true
+  - type: textarea
+    id: architecture
+    attributes:
+      label: Architecture impact
+      description: UI, frontend, backend, DB, AI, permissions, integrations, deployment.
+    validations:
+      required: true
+  - type: textarea
+    id: provider-env
+    attributes:
+      label: Provider/env impact
+      description: Does this need real provider credentials, new env vars, fake/local adapters, preview env, or an Efe-owned decision?
+      value: |
+        - Local fake path:
+        - New env vars:
+        - Efe-owned gate:
+    validations:
+      required: true
+  - type: textarea
+    id: tests
+    attributes:
+      label: Test requirements
+      description: Unit, integration, e2e, eval, privacy leakage tests.
+    validations:
+      required: true
+  - type: textarea
+    id: senior-project
+    attributes:
+      label: Senior project explanation target
+      description: What should the assignee be able to explain?
+    validations:
+      required: true

@@ -1,0 +1,23 @@
+---
+description: AI rules for Atlas ingestion, extraction, RAG, citations, memory writes, and evals.
+globs:
+  - packages/ai/**/*
+  - packages/ingestion/**/*
+  - packages/evals/**/*
+alwaysApply: false
+---
+
+# Atlas AI Rules
+
+- Permission-filter before retrieval.
+- Ground memory answers in source items and chunks.
+- Say “I do not know based on your Atlas memory” when evidence is insufficient.
+- Use structured outputs and validate them before writes.
+- Store AI run metadata and prompt/model versions.
+- Make memory writes auditable.
+- Low-confidence extraction goes to review.
+- External actions require risk classification.
+- AI behavior changes require eval or smoke test updates.
+- Apply `docs/architecture/privacy-redaction-policy.md` before sending retrieved chunks, prompts, screenshots, fixtures, or raw source excerpts to external providers.
+- Do not let a model decide what is unnecessary or safe to disclose.
+- Prefer structured facts, source IDs, derived values, and stable pseudonyms before exact raw text when the task permits it.

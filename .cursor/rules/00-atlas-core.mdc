@@ -1,0 +1,29 @@
+---
+description: Always-on Atlas project invariants for all AI work.
+alwaysApply: true
+---
+
+# Atlas Core Rules
+
+Atlas is a living second brain for capturing, organizing, retrieving, acting on, and selectively sharing memory.
+
+Always protect these invariants:
+
+- TypeScript full-stack, pnpm monorepo.
+- Modular monolith, not microservices.
+- Postgres canonical DB with pgvector for MVP retrieval.
+- OKF is export/import format, not primary storage.
+- Responsive web + PWA first, not native mobile MVP.
+- Source-grounded AI answers over memory.
+- Async ingestion pipeline.
+- Backend-enforced private/shared permissions.
+- Explicit approval for risky external actions.
+- Every PR must explain what, why, how, tests, risks, and learning.
+- Local development must work with fake/local providers before requiring real provider credentials.
+- Provider accounts, production env vars, and secrets are Efe-owned unless delegated.
+- Prefer quality, simplicity, robustness, scalability, security, and long-term maintainability over development cost.
+- Never use the em dash character in repo text.
+- Never add an agent co-author to commit messages.
+- Never manually edit generated files or CHANGELOG.md.
+
+Do not optimize architecture for implementation speed or development cost. Cut feature scope instead.
