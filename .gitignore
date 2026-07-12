@@ -42,3 +42,6 @@ Thumbs.db
 *.sqlite3
 tmp/
 artifacts/
+
+# Personal Claude Code overrides (per-teammate)
+.claude/settings.local.json
