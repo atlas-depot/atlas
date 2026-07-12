@@ -127,16 +127,7 @@ Use available tools appropriately:
 - Playwright or browser tooling for responsive checks.
 - Image generation or image search only when a real visual asset is needed and the source/licensing path is acceptable.
 
-Agent-browser screenshot baseline:
-
-```bash
-command -v agent-browser || npm install -g agent-browser@0.31.1
-agent-browser open http://localhost:3000
-agent-browser wait --load networkidle
-agent-browser screenshot --full
-agent-browser screenshot --annotate
-agent-browser snapshot -i
-```
+UI evidence: capture per /atlas-test's evidence rules (agent-browser screenshots + snapshot).
 
 Use annotated screenshots when reviewing interaction density, command palette, right panel affordances, graph controls, forms, or action approval surfaces.
 

@@ -21,19 +21,16 @@ This file explains what every committed file in the current Atlas project knowle
 | --- | --- | --- |
 | `.claude/skills/atlas-ai/SKILL.md` | AI, ingestion, RAG, citations, actions, and eval workflow. | AI behavior, eval, or ingestion policy changes. |
 | `.claude/skills/atlas-backend/SKILL.md` | Backend/API/domain/service review and implementation workflow. | Backend boundaries or service/API standards change. |
-| `.claude/skills/atlas-babysit/SKILL.md` | PR babysitting loop: comments, CI, previews, external reviews, and readiness. | PR automation or review-tool policy changes. |
 | `.claude/skills/atlas-bootstrap/SKILL.md` | Phase 0 runnable app scaffold workflow: pnpm, mise, Docker Compose, env, seeds, CI, first shells, auth/billing/AI/OCR boundaries. | Bootstrap contract, local infra, seed, env, or scaffold requirements change. |
 | `.claude/skills/atlas-create-skills/SKILL.md` | Creates or updates Atlas skills while preserving source-of-truth alignment. | Skill authoring policy changes. |
 | `.claude/skills/atlas-db/SKILL.md` | Database, migration, pgvector, full-text, permissions, and data-integrity workflow. | Schema/migration/retrieval storage policy changes. |
 | `.claude/skills/atlas-deploy/SKILL.md` | Deployment readiness, previews, env, migrations, rollback, and Vercel Services checks. | Deployment environments or release gates change. |
-| `.claude/skills/atlas-eval/SKILL.md` | AI/retrieval/extraction/privacy eval design and review workflow. | Eval dataset, metric, or threshold policy changes. |
 | `.claude/skills/atlas-frontend/SKILL.md` | Next.js/frontend implementation and review workflow. | Web/PWA/frontend architecture changes. |
-| `.claude/skills/atlas-grill-me/SKILL.md` | Requirement interrogation before planning/implementation. | Product/architecture question framework changes. |
 | `.claude/skills/atlas-implement/SKILL.md` | Implementation workflow after an issue/plan exists. | Coding workflow, verification, or scope rules change. |
 | `.claude/skills/atlas-issue/SKILL.md` | Turns requests into scoped GitHub issues. | Issue template or acceptance bar changes. |
 | `.claude/skills/atlas-owner-onboarding/SKILL.md` | Role-specific onboarding for owners and agents. | Ownership model or first-task guidance changes. |
-| `.claude/skills/atlas-plan/SKILL.md` | Source-grounded implementation planning. | Planning shape or architecture decision gates change. |
-| `.claude/skills/atlas-pr/SKILL.md` | Opens or updates reviewable PRs with preview, screenshots, tests, risks, rollback, and senior-project evidence. | PR flow, template, or senior-project evidence requirements change. |
+| `.claude/skills/atlas-plan/SKILL.md` | Source-grounded implementation planning, with Phase 0 requirement grilling. | Planning shape, grill framework, or architecture decision gates change. |
+| `.claude/skills/atlas-pr/SKILL.md` | Mode A opens/updates reviewable PRs with preview, screenshots, tests, risks, rollback, and senior-project evidence. Mode B babysits a PR to merge-ready: comments, CI, previews, external reviews, and readiness. | PR flow, template, babysit loop, review-tool policy, or senior-project evidence requirements change. |
 | `.claude/skills/atlas-review/SKILL.md` | Extensive PR/diff review workflow. | Review gates, external review tools, or severity model changes. |
 | `.claude/skills/atlas-security/SKILL.md` | Security/privacy/OAuth/permission/audit/export review workflow. | Threat model or security requirements change. |
 | `.claude/skills/atlas-design/SKILL.md` | Product design, design-system, tokens, visual references, UI states, and screenshot/design QA workflow. | UI system, visual/product principles, tokens, or reference direction change. |

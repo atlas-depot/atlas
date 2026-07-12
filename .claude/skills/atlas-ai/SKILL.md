@@ -1,6 +1,6 @@
 ---
 name: atlas-ai
-description: Design, implement, or review Atlas AI workflows for ingestion, extraction, RAG, citations, memory writes, suggestions, action risk levels, prompt versioning, provider abstraction, and evals.
+description: Design, implement, or review Atlas AI workflows and evals: ingestion, extraction, RAG, citations, memory writes, suggestions, action risk levels, prompt versioning, and provider abstraction. Use when building or reviewing AI pipelines, designing or reviewing retrieval/extraction/privacy/action-safety evals, or setting eval datasets and pass gates.
 ---
 
 # Atlas AI Skill
@@ -19,7 +19,6 @@ Read:
 - `docs/architecture/db.md`
 - `docs/architecture/atlas-production-spec-and-plan.md`
 - `docs/process/provider-and-env-setup.md`
-- `.claude/skills/atlas-eval/SKILL.md`
 
 If the work changes external providers, verify current official docs before implementation.
 If the work needs real model/OCR/crawler credentials, use the provider request protocol in `docs/process/provider-and-env-setup.md` instead of assuming local secrets exist.
@@ -39,9 +38,7 @@ If the work needs real model/OCR/crawler credentials, use the provider request p
 - Fake model/OCR/crawler adapters must exist for local tests and ordinary development.
 - OCR is a day-one ingestion capability behind `OCRPort`.
 - Choose the production OCR provider only after a fixture bakeoff covering Turkish, English, screenshots, PDFs, invoices, and noisy images.
-- Apply deterministic disclosure policy before sending chunks, prompts, screenshots, fixtures, or raw source excerpts to external providers.
-- Do not let a model decide what is unnecessary or safe to disclose.
-- Prefer structured facts, source IDs, derived values, and stable pseudonyms before exact raw text when the task permits it.
+- Disclosure and redaction before external provider calls: see /atlas-security.
 
 ## Ingestion pipeline
 
@@ -69,14 +66,50 @@ Capture, parse, OCR, normalize, chunk, embed, extract entities, extract relation
 
 Never let model output execute an external action directly.
 
-## Eval requirements
+## Evals
 
-- Golden retrieval questions.
-- Extraction examples.
-- Relation examples.
-- “What should I do today?” scenarios.
-- Private/shared adversarial tests.
-- “I do not know” tests.
+Design or review evals whenever AI behavior changes. Read `docs/architecture/ai.md` and `docs/architecture/security.md` for eval context.
+
+Eval categories:
+
+- Retrieval top-3 accuracy.
+- Entity extraction usefulness.
+- Relation extraction usefulness.
+- Task/date/decision detection.
+- Dashboard suggestion usefulness.
+- Action risk classification.
+- Citation coverage.
+- “I do not know” behavior.
+- Private/shared leakage.
+
+Required dataset minimums:
+
+- 100 mixed items.
+- 50 retrieval questions.
+- 30 extraction examples.
+- 20 relation examples.
+- 20 today-dashboard scenarios.
+- 10 privacy adversarial cases.
+- 10 insufficient-evidence cases.
+
+Eval workflow:
+
+1. State the behavior under test.
+2. Define fixture input and expected output.
+3. Include permission context.
+4. Include source/citation expectations.
+5. Define metric and pass threshold.
+6. Add deterministic smoke test when possible.
+7. Store failures as regression cases.
+
+Gates:
+
+- Memory-based answers require 100% citation coverage.
+- Private/shared leakage tests must be zero known leakage.
+- Retrieval MVP target is at least 85% top-3 on labeled questions.
+- Extraction target is at least 80% useful entity/relation extraction on test items.
+
+Eval output: dataset shape, metrics, pass/fail thresholds, test command, regression strategy, known blind spots.
 
 ## Output
 

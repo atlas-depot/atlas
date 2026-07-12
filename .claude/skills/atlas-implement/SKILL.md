@@ -40,8 +40,7 @@ Read:
 - Do not invent new product scope.
 - Do not create an architecture decision while implementing; pause and route back to `/atlas-plan` if one appears.
 - Prefer quality, simplicity, robustness, scalability, security, and long-term maintainability over development cost.
-- Use plain hyphens, not the em dash character.
-- Do not manually edit generated files or `CHANGELOG.md`.
+- Standards: see AGENTS.md.
 - Use strict TypeScript.
 - Validate API inputs with schemas.
 - Keep domain logic out of UI components.

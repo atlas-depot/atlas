@@ -1,6 +1,6 @@
 ---
 name: atlas-plan
-description: Produce a read-only Atlas implementation plan grounded in project docs, source-of-truth decisions, and current repo state. Use for features, refactors, architecture changes, issue breakdowns, ADR/RFC direction, or when deciding what to build next. Do not use for coding.
+description: Produce a read-only Atlas plan, and grill vague or risky requirements first. Use for features, refactors, architecture changes, issue breakdowns, ADR/RFC direction, deciding what to build next, or when the user says grill me, stress-test these requirements, or the requirements are vague. Do not use for coding.
 ---
 
 # Atlas Plan Skill
@@ -16,6 +16,7 @@ Always read:
 - `AGENTS.md`
 - `docs/process/agent-alignment.md`
 - `docs/architecture/atlas-production-spec-and-plan.md`
+- `docs/architecture/product-invariants.md`
 - `docs/architecture/technical-decisions.md`
 - `docs/architecture/repository-structure.md`
 - `docs/process/engineering-standards.md`
@@ -25,6 +26,64 @@ Always read:
 - `docs/process/skill-taxonomy.md`
 
 Then read domain docs for the requested area.
+
+## Phase 0: Grill
+
+When requirements are vague, risky, or architecture-affecting, grill before planning. Force clarity without creating busywork.
+
+Method:
+
+1. Summarize the request in one paragraph.
+2. Identify the risky unknowns.
+3. Answer what can be answered from docs/code yourself.
+4. Ask only the remaining blocking questions.
+5. Provide your recommended answer for each question.
+6. Mark non-negotiable assumptions that should not change without evidence.
+7. End with a compact answer format the user can fill in.
+
+Required question groups:
+
+- Product scope
+- User and workflow
+- UI and UX
+- Frontend architecture
+- Backend architecture
+- Database and data model
+- AI architecture
+- Security and privacy
+- Integrations
+- Deployment
+- Testing and evals
+- Senior project demo and explanation
+
+Grill output:
+
+```text
+I need answers to these before implementation:
+
+1. ...
+2. ...
+
+My current non-negotiable assumptions:
+- ...
+
+Suggested answer format:
+...
+```
+
+If no blocking questions remain, say so and continue to the plan.
+
+## Non-negotiable Atlas defaults
+
+- Web + PWA before native mobile.
+- Modular monolith.
+- Postgres canonical database.
+- Source-grounded AI answers.
+- Async ingestion.
+- Private/shared enforcement server-side.
+- Safe approvals for external actions.
+- Evidence over agreement.
+- Quality, simplicity, robustness, scalability, security, and long-term maintainability over development cost.
 
 ## Planning Workflow
 

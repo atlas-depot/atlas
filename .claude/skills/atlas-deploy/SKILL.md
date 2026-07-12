@@ -31,8 +31,7 @@ Read:
 - Database migrations are reviewed.
 - Migration rollback plan exists.
 - External provider credentials are scoped.
-- Personal provider accounts are treated as Efe-owned bootstrap resources; do not require or share Efe passwords, 2FA, or broad dashboard access.
-- Shared dev vault access is allowed for active teammates; production vault access stays restricted and must not be required for normal local verification.
+- Owner gates: see docs/process/agent-alignment.md, section Efe-Owned Gates.
 - Error monitoring is active.
 - Logs do not expose sensitive data.
 - Feature flags are configured for risky features.
@@ -57,15 +56,7 @@ vercel ls
 
 For previews, inspect the PR checks/comments for Vercel deployment URLs. For production, do not deploy without explicit approval.
 
-Preview smoke should use `agent-browser` when available:
-
-```bash
-command -v agent-browser || npm install -g agent-browser@0.31.1
-agent-browser open <preview-url>
-agent-browser wait --load networkidle
-agent-browser screenshot --full
-agent-browser snapshot -i
-```
+UI evidence: capture per /atlas-test's evidence rules (agent-browser screenshots + snapshot).
 
 For UI-affecting previews, capture route-specific screenshots and note any responsive/state gaps.
 

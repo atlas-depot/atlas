@@ -39,19 +39,17 @@ For any non-trivial task:
 Use skills as executable playbooks:
 
 - `/atlas-owner-onboarding`: role-specific first steps.
-- `/atlas-plan`: read-only source-grounded plan before coding.
-- `/atlas-grill-me`: interrogate vague/risky requirements.
+- `/atlas-plan`: read-only source-grounded plan before coding, and Phase 0 grilling of vague/risky requirements.
 - `/atlas-implement`: execute an approved issue/plan with tests.
 - `/atlas-review`: extensive PR/diff review.
-- `/atlas-babysit`: keep a PR green, reviewed, deployed, and ready.
 - `/atlas-create-skills`: create or improve Atlas skills.
 - `/atlas-bootstrap`: create the Phase 0 runnable app scaffold and first reproducible local environment.
 - `/atlas-deploy`: deployment readiness.
-- `/atlas-pr`: open or update reviewable PRs.
+- `/atlas-pr`: open or update reviewable PRs (Mode A) and babysit them green, reviewed, and ready (Mode B).
 - `/atlas-test`: lint, typecheck, tests, e2e, evals, screenshots, preview smoke, and CI evidence.
 - `/atlas-handoff`: fresh-agent or teammate handoff.
 - `/atlas-issue`: issue drafting.
-- Domain skills: `/atlas-design`, `/atlas-frontend`, `/atlas-backend`, `/atlas-db`, `/atlas-ai`, `/atlas-security`, `/atlas-eval`.
+- Domain skills: `/atlas-design`, `/atlas-frontend`, `/atlas-backend`, `/atlas-db`, `/atlas-ai`, `/atlas-security`. `/atlas-ai` also owns retrieval/extraction/privacy/action-safety evals.
 
 See `docs/process/skill-taxonomy.md` for the canonical skill boundary map and deletion rule.
 

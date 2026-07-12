@@ -220,8 +220,7 @@ Read:
 
 - `docs/architecture/ai.md`
 - `docs/architecture/security.md`
-- `.claude/skills/atlas-ai/SKILL.md`
-- `.claude/skills/atlas-eval/SKILL.md`
+- `.claude/skills/atlas-ai/SKILL.md` (includes the Evals section)
 - `.cursor/rules/40-ai.mdc`
 
 First useful tasks:

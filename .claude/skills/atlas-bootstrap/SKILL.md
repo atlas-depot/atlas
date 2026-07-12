@@ -55,12 +55,12 @@ Must include:
 
 - Do not use a shared `dev1` server as the primary dev path.
 - Do not require production secrets for local development.
+- Owner gates: see docs/process/agent-alignment.md, section Efe-Owned Gates.
 - Do not store raw card data or payment credentials in Postgres.
 - Do not bypass backend/database permission enforcement.
 - Do not make Clerk, Stripe, Basis Theory, Polar, or any provider a hard dependency without an ADR or spike result.
 - Do not optimize for setup speed over correctness.
-- Do not manually edit generated files.
-- Do not use the em dash character.
+- Standards: see AGENTS.md.
 - Do not treat static Figma/Pencil/paper/HTML explorations as source of truth until translated into Storybook stories and route mockups.
 - Do not send secrets or raw sensitive values to external providers while testing the scaffold.
 

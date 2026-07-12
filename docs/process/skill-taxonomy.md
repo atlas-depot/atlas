@@ -27,7 +27,6 @@ These are the main verbs.
 | `/atlas-plan` | read-only | Produce a source-grounded plan, issue split, or ADR/RFC direction. | No, unless the user asks to write planning docs. |
 | `/atlas-implement` | write | Execute an already approved issue/plan with tests. | Yes |
 | `/atlas-review` | read-mostly | Review a diff/PR with CI, preview, review threads, external reviewers, and Atlas invariants. | No by default |
-| `/atlas-babysit` | loop/write | Keep a PR moving until checks, previews, comments, and external reviews are resolved or blocked. | Yes, within PR scope |
 | `/atlas-deploy` | release gate | Check preview/staging/production readiness, provider/env setup, secrets, previews, and rollback. | No by default |
 | `/atlas-bootstrap` | scaffold gate | Create or repair the Phase 0 runnable app scaffold, local infra, env, seeds, CI, and first shells. | Yes |
 | `/atlas-create-skills` | meta | Create or improve project skills and hooks. | Yes |
@@ -39,7 +38,7 @@ These create or improve project artifacts.
 | Skill | Purpose |
 | --- | --- |
 | `/atlas-issue` | Turn vague work into a scoped issue with acceptance criteria and tests. |
-| `/atlas-pr` | Open/update reviewable PRs with preview, screenshots, tests, risk, rollback, and senior project evidence. |
+| `/atlas-pr` | Mode A opens/updates reviewable PRs with preview, screenshots, tests, risk, rollback, and senior project evidence. Mode B babysits a PR until checks, previews, comments, and external reviews are resolved or blocked. |
 | `/atlas-test` | Produce verification evidence: lint, typecheck, tests, e2e, evals, screenshots, preview smoke, CI. |
 | `/atlas-handoff` | Transfer exact state, commands, blockers, and first 30 minutes to another teammate or agent. |
 | `/atlas-weekly-report` | Produce artifact-backed senior project progress reports. |
@@ -54,9 +53,8 @@ These should usually be loaded by lifecycle skills, not used as the whole workfl
 | `/atlas-frontend` | Next.js/web/PWA implementation boundaries. |
 | `/atlas-backend` | API, services, ports/adapters, workflows, audit. |
 | `/atlas-db` | Postgres, migrations, pgvector, relation visibility, indexes. |
-| `/atlas-ai` | Ingestion, extraction, RAG, citations, prompt/model metadata, action risk. |
+| `/atlas-ai` | Ingestion, extraction, RAG, citations, prompt/model metadata, action risk, and retrieval/extraction/privacy/action-safety evals. |
 | `/atlas-security` | OAuth, tokens, permissions, privacy, sharing, export/delete, audit. |
-| `/atlas-eval` | Retrieval/extraction/privacy/action-safety evals. |
 
 Keep `/atlas-frontend` and `/atlas-backend`. They are not lifecycle skills; they are implementation lenses with different source docs and failure modes. `/atlas-design` owns product/visual/design-system decisions. `/atlas-frontend` owns Next.js implementation boundaries. `/atlas-backend` owns services/API/workflows/adapters.
 
@@ -65,6 +63,14 @@ Screenshot and visual verification should flow through `/atlas-test` and use `ag
 Backend verification also flows through `/atlas-test`: request/response snapshots, DB/query snapshots, audit/event snapshots, workflow/job state, schema/contract diffs, and redacted logs/traces. These are the backend equivalent of screenshots.
 
 Provider/env verification flows through `/atlas-deploy` and `/atlas-test`. New provider requirements must update `.env.example`, `docs/process/provider-and-env-setup.md`, fake/local provider behavior, and doctor/env checks before they are considered done.
+
+## Merged Skills
+
+The set is now 18 skills. Three former skills were merged into existing ones under the Deletion Rule because they shared mode, source docs, and safety behavior with their target:
+
+- `/atlas-babysit` merged into `/atlas-pr` as Mode B (babysit to merge-ready). Opening a PR and shepherding it to green are one lifecycle.
+- `/atlas-grill-me` merged into `/atlas-plan` as Phase 0 (grill). Grilling vague requirements is the read-only front of planning, not a separate mode.
+- `/atlas-eval` merged into `/atlas-ai` as the Evals section. Eval design changes AI behavior and shares the same source docs.
 
 ## Plan vs Implement Boundary
 

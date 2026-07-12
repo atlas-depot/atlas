@@ -64,19 +64,17 @@ Efe Baran Durmaz is the bootstrap lead and product owner. This is not a rigid pe
 Use repo-level instructions for always-on constraints.
 Use skills for repeatable workflows:
 
-- `/atlas-plan` for read-only planning before implementation.
+- `/atlas-plan` for read-only planning before implementation, including grilling vague requirements first.
 - `/atlas-owner-onboarding` when a teammate says "I own frontend/backend/AI/etc.; what should I do?"
-- `/atlas-grill-me` when requirements are vague.
 - `/atlas-implement` only when coding from an approved issue or plan.
 - `/atlas-review` for extensive PR/diff review.
-- `/atlas-babysit` to keep a PR moving until CI, preview, reviews, and readiness gates are green or concretely blocked.
 - `/atlas-create-skills` when creating or improving Atlas skills/hooks.
 - `/atlas-bootstrap` when creating or repairing the Phase 0 runnable app scaffold.
-- `/atlas-pr` when opening or updating reviewable PRs with screenshots, preview, tests, risks, and rollback.
+- `/atlas-pr` when opening or updating reviewable PRs (Mode A), or babysitting a PR until CI, preview, reviews, and readiness gates are green or concretely blocked (Mode B).
 - `/atlas-issue` when creating issues.
 - `/atlas-test` when running lint/typecheck/tests/e2e/evals/screenshots or proving a PR works.
 - `/atlas-handoff` when transferring work to another teammate or agent.
-- `/atlas-db`, `/atlas-backend`, `/atlas-frontend`, `/atlas-design`, `/atlas-ai`, `/atlas-security`, `/atlas-eval` for domain-specific work.
+- `/atlas-db`, `/atlas-backend`, `/atlas-frontend`, `/atlas-design`, `/atlas-ai`, `/atlas-security` for domain-specific work. `/atlas-ai` also owns AI eval design and review.
 - `/atlas-deploy` for preview/staging/production readiness.
 - `/atlas-weekly-report` for senior project progress reporting.
 

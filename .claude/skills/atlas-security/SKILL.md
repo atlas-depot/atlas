@@ -38,9 +38,8 @@ Read:
 - External actions have risk level, explicit approval when required, rollback path, and audit logs.
 - Shared spaces cannot infer private relation endpoints.
 - Secrets do not appear in fixtures, screenshots, CI logs, or PR bodies.
-- Provider secrets are scoped, Efe-owned gates are respected, and personal account passwords/2FA are never requested.
+- Owner gates: see docs/process/agent-alignment.md, section Efe-Owned Gates.
 - Local development can use fake/local providers without production secrets.
-- Shared dev vault access is allowed; production vault access is restricted and not part of ordinary local onboarding.
 - Production behavior can be tested through normal user/test-user sessions, not production DB/storage/OAuth/provider admin secrets on local machines.
 - Payment credentials and raw card data are never stored in Atlas Postgres.
 - Live payment enablement requires PCI-boundary review, webhook verification, audit logs, rollback, and Efe approval.

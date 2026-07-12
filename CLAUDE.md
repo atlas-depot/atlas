@@ -4,19 +4,17 @@ Follow `AGENTS.md` as the project-wide source of truth.
 
 Use Atlas skills in `.claude/skills/` when the task matches a repeatable workflow:
 
-- `/atlas-plan` for read-only planning.
+- `/atlas-plan` for read-only planning, including grilling vague or risky requirements before the plan.
 - `/atlas-owner-onboarding` when a teammate or agent needs role-specific first steps.
-- `/atlas-grill-me` for requirement grilling.
 - `/atlas-implement` for executing an approved issue or plan.
 - `/atlas-review` for extensive PR/diff review.
-- `/atlas-babysit` for PR babysitting until CI, preview, and reviews are ready.
+- `/atlas-pr` for opening/updating reviewable PRs and babysitting them until CI, preview, and reviews are ready.
 - `/atlas-create-skills` for skill/hook creation and improvement.
 - `/atlas-bootstrap` for the Phase 0 runnable app scaffold.
-- `/atlas-pr` for opening/updating reviewable PRs.
 - `/atlas-issue` for issue drafting.
 - `/atlas-test` for lint/typecheck/tests/e2e/evals/screenshots and evidence.
 - `/atlas-handoff` for transferring work to another teammate or agent.
-- `/atlas-db`, `/atlas-backend`, `/atlas-frontend`, `/atlas-design`, `/atlas-ai`, `/atlas-security`, `/atlas-eval` for domain-specific implementation.
+- `/atlas-db`, `/atlas-backend`, `/atlas-frontend`, `/atlas-design`, `/atlas-ai`, `/atlas-security` for domain-specific implementation. `/atlas-ai` also owns retrieval/extraction/privacy/action-safety eval design and review.
 - `/atlas-deploy` for deployment checks.
 - `/atlas-weekly-report` for senior project summaries.
 

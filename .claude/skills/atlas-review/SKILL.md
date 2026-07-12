@@ -23,7 +23,7 @@ Read first:
 If the PR touches deployment or previews, also read `docs/process/deployment-policy.md`.
 If the PR touches provider config, env vars, external accounts, or local services, also read `docs/process/provider-and-env-setup.md`.
 If it touches auth/security/privacy, also read `.claude/skills/atlas-security/SKILL.md`.
-If it touches AI/retrieval, also read `.claude/skills/atlas-ai/SKILL.md` and `.claude/skills/atlas-eval/SKILL.md`.
+If it touches AI/retrieval, also read `.claude/skills/atlas-ai/SKILL.md`, including its Evals section.
 If it touches UI/frontend, also read `.claude/skills/atlas-design/SKILL.md` and `.claude/skills/atlas-test/SKILL.md`.
 If it touches backend/API/worker/DB behavior, also read `docs/process/evidence-bundles.md` and `.claude/skills/atlas-backend/SKILL.md`.
 
@@ -59,29 +59,9 @@ pnpm eval:smoke
 
 Do not run all commands blindly if the repo does not have scripts yet; report missing commands as verification gaps.
 
-For UI changes, review screenshots or capture them when tooling exists. Prefer `agent-browser`:
+For UI changes, capture UI evidence per /atlas-test's evidence rules (agent-browser screenshots + snapshot). Check desktop and mobile when practical. If `agent-browser` installation fails, list screenshot/E2E as blocked, not verified.
 
-```bash
-command -v agent-browser || npm install -g agent-browser@0.31.1
-agent-browser open <local-or-preview-url>
-agent-browser wait --load networkidle
-agent-browser screenshot --full
-agent-browser screenshot --annotate
-agent-browser snapshot -i
-```
-
-Check desktop and mobile when practical. If `agent-browser` installation fails, list screenshot/E2E as blocked, not verified.
-
-For backend changes, require behavior evidence:
-
-- Request/response snapshot.
-- DB/query snapshot.
-- Audit/event snapshot.
-- Job/workflow state snapshot.
-- Schema/contract diff.
-- Redacted trace/log excerpt.
-
-If none exists, list backend evidence as an unverified risk or blocker depending on blast radius.
+For backend changes, require behavior evidence per /atlas-backend and /atlas-test's snapshot rules. If none exists, list backend evidence as an unverified risk or blocker depending on blast radius.
 
 Check external review signals only if present:
 
@@ -108,7 +88,7 @@ Review:
 9. Tests and CI.
 10. Deployment, env, rollback, and observability.
 11. Senior project explainability.
-12. Engineering standards: generated files, commit authorship, em dash usage, bug reproduction, UI quality, and unresolved test failures.
+12. Engineering standards per AGENTS.md: generated files, commit authorship, em dash usage, bug reproduction, UI quality, and unresolved test failures.
 
 ## Severity Levels
 

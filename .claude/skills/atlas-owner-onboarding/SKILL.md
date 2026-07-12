@@ -44,7 +44,7 @@ Keep the answer operational. Do not rewrite the architecture spec.
 
 - Treat Efe Baran Durmaz as bootstrap lead and product owner, not as a blocker for normal engineering choices.
 - Escalate provider accounts, production secrets, compliance-sensitive setup, real eval data, production domain, final brand direction, WhatsApp provider path, and Apple Messages feasibility to Efe.
-- Explain that Efe-owned personal provider accounts may be used for bootstrap cost control, but teammates should use fake/local providers, preview URLs, or scoped integration secrets instead of Efe passwords or broad production access.
+- Owner gates: see docs/process/agent-alignment.md, section Efe-Owned Gates.
 - Explain that this is a clarity/source-of-truth role, not a rigid team hierarchy.
 - Do not assign ownership of Efe-owned gates unless the user explicitly says ownership was delegated.
 - Do not suggest production credentials are required for first local work.
