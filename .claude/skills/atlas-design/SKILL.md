@@ -37,9 +37,8 @@ Read:
 
 ## Quality Gate
 
-The current static prototype is rejected.
-Do not treat `docs/prototypes/atlas-ui-system/index.html` as accepted visual direction.
-Use it only for lessons learned, layout constraints, and overflow failure modes.
+The earlier static prototypes were rejected and removed from the repo (archived locally).
+The constraints, layout measurements, and overflow failure modes they proved are captured in `docs/architecture/ui-system.md`; do not resurrect old prototypes as visual direction.
 
 If a generated UI does not feel publishable by a top-tier product company, stop.
 Do not keep patching colors and margins.

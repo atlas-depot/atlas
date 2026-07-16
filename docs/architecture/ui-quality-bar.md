@@ -80,8 +80,8 @@ Do not jump straight into another full HTML screen.
 5. Produce a small high-fidelity slice.
    Build only Today plus right inspector plus composer first.
    Do not build Inbox, Graph, Search, or Shared Spaces until Today passes review.
-   Rejected artifact: `docs/prototypes/atlas-today-slice/index.html`.
-   Do not continue patching that artifact.
+   Rejected artifact: the `atlas-today-slice` prototype (removed from the repo, archived locally).
+   Do not resurrect that artifact.
    The next slice must be redesigned from scratch.
 
 6. Verify in browser.

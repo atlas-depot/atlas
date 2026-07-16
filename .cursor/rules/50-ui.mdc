@@ -12,8 +12,8 @@ alwaysApply: false
 Design direction: dark-first, high-taste, consumer-grade SaaS.
 Atlas UI must feel like a quiet editorial operating desk, not a card dashboard.
 
-The current static prototype is rejected.
-Do not use `docs/prototypes/atlas-ui-system/index.html` as accepted visual direction.
+The earlier static prototypes were rejected and removed from the repo (archived locally).
+The locked design lives in `docs/design/atlas-design-tokens.md`; do not resurrect old prototypes as visual direction.
 Use `docs/architecture/ui-quality-bar.md` before any new high-fidelity UI work.
 Read `docs/design/atlas-ui-reference-audit.md` and `docs/design/atlas-ui-directions.md` before implementing UI.
 

@@ -7,9 +7,8 @@ The product should combine Linear and Vercel's operational clarity with Notion a
 
 Do not copy any one product.
 
-Current status: the static prototype in `docs/prototypes/atlas-ui-system/index.html` is rejected as an accepted visual direction.
-It can be used only as a record of constraints and failure modes until a new design direction is approved.
-Do not treat its palette, typography, spacing, or screen composition as production guidance.
+Current status: the earlier static prototypes were rejected and have been removed from the repo (archived locally). The constraints, overflow checks, and failure modes they proved are captured in the Layout and Overflow contracts below.
+Do not resurrect their palette, typography, spacing, or screen composition as production guidance.
 
 ## Approved direction (2026-07-16)
 
@@ -140,8 +139,7 @@ Storybook must cover:
 - Mock screens for Today, Inbox, Object Inspector, Search, Graph, and Shared Spaces.
 - Loading, empty, error, unauthorized, offline, low-confidence, and action-approval states.
 
-Before the real app scaffold exists, do not use the rejected static prototype as visual source of truth.
-Use it only for lessons learned and layout-contract reminders.
+The locked visual direction lives in `docs/design/atlas-design-tokens.md` (warm minimalism); the earlier rejected prototypes have been removed (archived locally), and the layout-contract reminders they informed are captured above.
 The next accepted design artifact must pass `docs/architecture/ui-quality-bar.md`.
 Current reset artifacts are `docs/design/atlas-ui-reference-audit.md` and `docs/design/atlas-ui-directions.md`.
 After Phase 0, migrate it into `packages/ui` tokens, Storybook stories, typed fixtures, and route mock screens.

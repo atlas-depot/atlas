@@ -106,15 +106,6 @@ This file explains what every committed file in the current Atlas project knowle
 | `docs/process/skill-taxonomy.md` | Canonical map of lifecycle, artifact, and domain skills, including plan vs implement boundary and deletion rule. | Skills are added, merged, deleted, or re-scoped. |
 | `docs/process/solo-to-team-workflow.md` | Solo bootstrap to 5-person team workflow. | Team size/stage or PR/issue rules change. |
 
-## Prototypes
-
-| File | Purpose | Modify when |
-| --- | --- | --- |
-| `docs/prototypes/atlas-today-slice/index.html` | Rejected Direction A static slice for Today plus inspector plus composer. Kept only as a failed execution record, not visual source of truth. | Only update to document failure modes or replace after a new approved design exists. |
-| `docs/prototypes/atlas-today-slice/README.md` | Explains the rejected Today slice status, open command, design basis, and screenshot targets. | Prototype status or verification requirements change. |
-| `docs/prototypes/atlas-ui-system/index.html` | Rejected static UI exploration kept as a record of constraints and failure modes, not accepted visual direction. | Only update to document failure modes or replace after a new approved design direction exists. |
-| `docs/prototypes/atlas-ui-system/README.md` | Explains rejected prototype status and points to the UI quality bar. | Prototype status or design reset process changes. |
-
 ## Design
 
 | File | Purpose | Modify when |

@@ -11,8 +11,8 @@ The slice is Today plus right inspector plus persistent composer.
 It is not the full app.
 
 Efe initially approved Direction A, Quiet Ledger Desk, as a working hypothesis.
-The first execution at `docs/prototypes/atlas-today-slice/index.html` was rejected.
-Do not patch that artifact.
+The first execution (the `atlas-today-slice` prototype, since removed and archived locally) was rejected.
+Do not resurrect that artifact.
 The next visual design should start from the principles and reference audit, not from the failed HTML.
 
 ## Shared constraints
