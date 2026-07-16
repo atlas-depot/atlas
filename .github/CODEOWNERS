@@ -1,0 +1,29 @@
+# Code owners for Atlas. During solo bootstrap, @EfeDurmaz16 owns everything.
+# Reassign area owners as the team grows (see docs/process/owner-onboarding.md).
+
+# Default owners
+* @EfeDurmaz16
+
+# UI and frontend
+/apps/web/ @EfeDurmaz16
+/packages/ui/ @EfeDurmaz16
+
+# Backend and API
+/packages/api/ @EfeDurmaz16
+/packages/domain/ @EfeDurmaz16
+/apps/worker/ @EfeDurmaz16
+
+# Database and migrations
+/packages/db/ @EfeDurmaz16
+**/*migration* @EfeDurmaz16
+**/*.sql @EfeDurmaz16
+
+# AI, ingestion, and evals
+/packages/ai/ @EfeDurmaz16
+/packages/ingestion/ @EfeDurmaz16
+/packages/evals/ @EfeDurmaz16
+
+# Auth, security, CI, deployment
+/packages/auth/ @EfeDurmaz16
+/.github/ @EfeDurmaz16
+/docs/architecture/ @EfeDurmaz16
