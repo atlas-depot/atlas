@@ -11,11 +11,15 @@ Current status: the static prototype in `docs/prototypes/atlas-ui-system/index.h
 It can be used only as a record of constraints and failure modes until a new design direction is approved.
 Do not treat its palette, typography, spacing, or screen composition as production guidance.
 
+## Approved direction (2026-07-16)
+
+A new visual direction, **warm minimalism**, was visually validated and approved on 2026-07-16 and is now the production design system. Its locked tokens (palette light + dark, typography, spacing, dither data-viz, Tailwind theme) live in `docs/design/atlas-design-tokens.md`, with full rationale in `docs/design/ui-rulebook.md`. Where it conflicts with the older constraints below, this approved direction wins; the specific supersessions are recorded inline (floating shell, 252px nav, 344px inspector, soft status pills).
+
 The interface must be dense enough for daily knowledge work, but it must not feel like a dashboard made of cards.
 Rows, dividers, alignment, and field lists are preferred before boxes.
 Cards are allowed for repeated object previews, modals, and genuinely framed tools only.
 Nested cards are forbidden.
-Pills are forbidden as default status decoration.
+Soft status tint-pills are permitted per the approved warm direction (2026-07-16); avoid loud solid-block pills as default decoration.
 Use status text, row state, selected object fields, or a single approval banner instead.
 
 ## Main layout
@@ -33,11 +37,11 @@ Change them only through a design-system decision.
 
 | Area | Desktop contract | Tablet contract | Mobile contract |
 | --- | --- | --- | --- |
-| Product shell | `100vh` minimum height, no floating page card, no centered dashboard island. | Same. | Same. |
+| Product shell | Floating rounded card (radius `22`) on a warm ground; approved 2026-07-16 (was: no floating card). See `docs/design/atlas-design-tokens.md`. | Same. | Same. |
 | Prototype or app chrome left rail | `232px` in the static prototype. | Keep visible if there is space. | Collapse into top or sheet navigation. |
-| In-app left navigation | `216px` desktop. | `190px` until the inspector disappears. | Full-width top section or sheet. |
+| In-app left navigation | `252px` desktop (approved 2026-07-16, was `216px`). | `190px` until the inspector disappears. | Full-width top section or sheet. |
 | Main content | `minmax(0, 1fr)` and always `min-width: 0`. | Same. | Same. |
-| Right inspector | `326px` desktop. | Hide below `1160px`, then expose as route-addressable sheet or drawer in the real app. | Sheet or full route only. |
+| Right inspector | `344px` desktop (approved 2026-07-16, was `326px`). | Hide below `1160px`, then expose as route-addressable sheet or drawer in the real app. | Sheet or full route only. |
 | Topline | `72px` minimum height. | `72px` minimum height. | Content can wrap, but padding stays `16px`. |
 | Composer | `42px` minimum input height inside a `14px 24px` footer. | Same. | `42px` input height with `16px` horizontal padding. |
 | Page padding | `26px` around prototype shell. | `20px` allowed if cramped. | `16px`. |
