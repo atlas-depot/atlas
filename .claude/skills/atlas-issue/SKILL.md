@@ -1,6 +1,6 @@
 ---
 name: atlas-issue
-description: Create a well-scoped Atlas GitHub issue with goal, scope, architecture impact, acceptance criteria, tests, owner routing, and senior project evidence.
+description: Create a well-scoped Atlas GitHub issue with goal, scope, architecture impact, acceptance criteria, tests, owner routing, and senior project evidence. Use when the user asks to file, scope, or sharpen an issue, or turns a loose request into tracked work.
 ---
 
 # Atlas Issue Skill

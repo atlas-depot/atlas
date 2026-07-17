@@ -1,6 +1,6 @@
 ---
 name: atlas-backend
-description: Implement or review Atlas backend services, typed APIs, domain modules, permissions, integrations, workflow orchestration, audit logs, and provider adapters.
+description: Implement or review Atlas backend services, typed APIs, domain modules, permissions, integrations, workflow orchestration, audit logs, and provider adapters. Use when adding or changing a service, domain module, provider adapter, background workflow, or audit path, or when reviewing backend module boundaries.
 ---
 
 # Atlas Backend Skill

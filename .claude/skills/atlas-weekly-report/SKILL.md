@@ -1,6 +1,6 @@
 ---
 name: atlas-weekly-report
-description: Summarize Atlas senior project progress with artifact-backed evidence so each teammate can explain what they did, why it matters, how it works, how it was tested, and what they can demo.
+description: Summarize Atlas senior project progress with artifact-backed evidence so each teammate can explain what they did, why it matters, how it works, how it was tested, and what they can demo. Use when the user asks for a weekly update, a progress summary, or a senior project report.
 ---
 
 # Atlas Weekly Report Skill

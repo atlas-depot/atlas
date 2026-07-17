@@ -1,6 +1,6 @@
 ---
 name: atlas-db
-description: Design, implement, or review Atlas Postgres schema, migrations, pgvector retrieval tables, full-text search, permissions, relation visibility, indexes, and data integrity.
+description: Design, implement, or review Atlas Postgres schema, migrations, pgvector retrieval tables, full-text search, permissions, relation visibility, indexes, and data integrity. Use when adding or changing a table, migration, index, embedding or search storage, or a relation-visibility rule.
 ---
 
 # Atlas DB Skill

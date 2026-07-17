@@ -1,6 +1,6 @@
 ---
 name: atlas-frontend
-description: Implement or review Atlas frontend features using Next.js App Router, React, TypeScript, typed APIs, PWA capture, domain-oriented feature folders, and source-grounded UI states.
+description: Implement or review Atlas frontend features using Next.js App Router, React, TypeScript, typed APIs, PWA capture, domain-oriented feature folders, and source-grounded UI states. Use when building or reviewing a screen, route, component, or capture flow in the web app.
 ---
 
 # Atlas Frontend Skill

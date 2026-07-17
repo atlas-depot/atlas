@@ -1,6 +1,6 @@
 ---
 name: atlas-bootstrap
-description: Create or review the Phase 0 Atlas runnable app scaffold, including pnpm monorepo, mise, Docker Compose local infra, env fake/decrypt/check, deterministic seeds, CI, first web shell, worker shell, billing/auth boundaries, and preview readiness.
+description: Create or review the Phase 0 Atlas runnable app scaffold, including pnpm monorepo, mise, Docker Compose local infra, env fake/decrypt/check, deterministic seeds, CI, first web shell, worker shell, billing/auth boundaries, and preview readiness. Use when standing up the app scaffold for the first time, or when the monorepo, local infra, env, seeds, or CI setup needs review or repair.
 ---
 
 # Atlas Bootstrap Skill

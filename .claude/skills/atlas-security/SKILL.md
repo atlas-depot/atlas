@@ -1,6 +1,6 @@
 ---
 name: atlas-security
-description: Review Atlas auth, OAuth, token handling, permissions, privacy, encryption, redaction, audit logs, sharing, external actions, and data export/delete behavior.
+description: Review Atlas auth, OAuth, token handling, permissions, privacy, encryption, redaction, audit logs, sharing, external actions, and data export/delete behavior. Use when a change touches auth, tokens, permissions, sharing, redaction, external actions, or export and delete paths, and before any release that changes them.
 ---
 
 # Atlas Security Skill
