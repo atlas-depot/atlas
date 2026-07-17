@@ -49,12 +49,5 @@ apps/web/src/features/settings
 
 ## Design prototyping path
 
-Start with a code-backed design foundation, not a static design-only artifact as the source of truth.
-Phase 0 should include Storybook for `packages/ui`, a minimal Atlas token set, and mock screens for Today, Inbox, Object Inspector, Search, Graph, and Shared Spaces using typed fixtures.
-
-Paper, Pencil, Figma, or a plain HTML exploration can be used during the first design pass.
-Those artifacts are references only.
-They must not become the authoritative implementation contract unless they are translated into Storybook stories, UI tokens, component states, route-level mock screens, and screenshot acceptance criteria.
-
-The reason is drift control.
-Atlas needs the design language to be inspectable by agents, testable in CI, and connected to the real component API.
+`docs/architecture/ui-system.md` owns this rule: Storybook and code-backed mock surfaces are the design source of truth, and Paper, Pencil, Figma, or standalone HTML stay references until translated into tokens, components, stories, route mockups, and screenshot acceptance criteria.
+The reason is drift control. Atlas needs the design language inspectable by agents, testable in CI, and connected to the real component API.

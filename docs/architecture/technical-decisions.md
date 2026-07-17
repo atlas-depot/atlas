@@ -94,7 +94,8 @@ Rationale: Atlas needs a consistent dev environment for a solo-to-5-person team 
 Decision: keep the initial stack narrow and add libraries only when a concrete requirement appears.
 
 Rationale: Start with Next.js, TypeScript, pnpm, Turborepo, Zod, TanStack Query for client server-state, Tailwind, Radix/shadcn-style components, Vercel AI SDK, Postgres, pgvector, and the selected SQL layer.
-Do not add GraphQL, tRPC, Zustand, Framer Motion, a separate vector database, or Convex primary storage by default.
+Do not add GraphQL, tRPC, a separate vector database, or Convex primary storage by default.
+`docs/architecture/frontend.md` owns the frontend half of this guardrail: no Zustand, Framer Motion, or other client-state/motion library by default, add one only when a concrete feature proves the current options create real complexity.
 Minimal means fewer concepts to operate, not cheaper or weaker architecture.
 
 ## Frontend Server State
@@ -105,9 +106,8 @@ Rationale: Atlas has dense interactive surfaces such as inbox review, object ins
 Introducing TanStack Query later would force a second data-fetching migration after these workflows exist.
 Using it from the start gives a consistent cache, invalidation, optimistic update, retry, and loading/error-state model.
 
-Guardrail: TanStack Query is for server state.
-Do not use Zustand or a global client store for server state.
-Do not push business permissions into frontend caches.
+Guardrail: TanStack Query is for server state, never a permission source of truth.
+`docs/architecture/frontend.md` owns the rest: no Zustand or global client store for server state, and no business permissions pushed into frontend caches.
 
 ## Design Foundation
 
@@ -124,9 +124,7 @@ The source of truth is the app shell, `packages/ui`, Storybook stories, typed fi
 
 Decision: use deterministic purpose-bound disclosure instead of blanket redaction or unconditional cloud disclosure.
 
-Rationale: Atlas cannot be useful if it destroys or hides the facts needed for memory, planning, reminders, sharing, and actions.
-Atlas also cannot be trustworthy if every raw source, secret, identifier, and private message is sent to third-party providers by default.
-The correct architecture keeps full authorized memory in Postgres, then computes the minimum sufficient outbound representation for each task.
+Rationale: `docs/architecture/privacy-redaction-policy.md` owns it. The invariant is minimum sufficient disclosure, not maximum deletion: keep full authorized memory in Postgres, then compute the smallest outbound representation each task needs.
 
 Guardrail: no LLM decides what is unnecessary.
 The domain/security layer owns `DataDisclosurePolicy`.

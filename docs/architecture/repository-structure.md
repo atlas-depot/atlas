@@ -3,6 +3,9 @@
 Status: Phase 0 target contract  
 Audience: Efe, future teammates, and AI coding agents
 
+This is a target structure. The Atlas application is NOT yet scaffolded.
+No path below exists yet. Read them as the contract the first scaffold must satisfy, not as a map of the current repository.
+
 This document defines the target Atlas application repository. The current folder is the Atlas project knowledge pack / agent operating system. The future app scaffold should implement this structure without weakening the architecture.
 
 ## Root

@@ -4,6 +4,11 @@ Status: v0.1 architecture baseline
 Date: 2026-07-01 Europe/Istanbul  
 Owner: principal architecture draft
 
+This is a target spec. The Atlas application is NOT yet scaffolded.
+Everything below describes what the app should become, not what exists today.
+The current repository is the Atlas project knowledge pack: architecture, process, skills, rules, and templates.
+This file is not the canonical owner of decisions, invariants, or policy. It points at the files that are.
+
 ## 0. Evidence Check
 
 This spec was checked against the current project docs in `docs/architecture/*` and the external docs/specs below. The current repository folder is an Atlas agent operating system / project knowledge pack: it contains architecture, process, skills, rules, templates, and GitHub scaffolding before the application codebase is generated.
@@ -71,35 +76,33 @@ Rejected ideas:
 
 ## 2. Architecture Decision Record
 
-Platform: responsive web + PWA first, desktop-friendly web primary. Native clients later through REST/OpenAPI.
+`docs/architecture/technical-decisions.md` owns every ADR decision and its full rationale. It already carries these, one-line gist each:
 
-Frontend: Next.js App Router, React, TypeScript, Tailwind, Radix primitives, shadcn-style components, React Hook Form, Zod, URL state, React state, TanStack Query for client-side server state, and typed API clients. Server Components are preferred for data-heavy read screens; Client Components own interaction-heavy surfaces. Do not add Zustand or Framer Motion by default; add them only after a concrete state or interaction requirement appears.
+- Platform and mobile: responsive web + PWA first, native clients later through REST/OpenAPI.
+- Architecture and language: TypeScript modular monolith, because Atlas's memory/permission/action invariants are too coupled to split early.
+- Database: Postgres canonical with pgvector, one transactional system for relations, permissions, audit, and vectors.
+- AI: async multi-stage ingestion pipeline, no single-shot "upload then summarize".
+- Realtime: adapter-based transport, durable state stays outside socket processes.
+- Vercel Services: deployment packaging for `apps/web` and `apps/bot` only, never a reason to split domain ownership.
+- External chat surfaces: Chat SDK for `apps/bot`, Vercel AI SDK for the internal web composer, bot surfaces are clients of Atlas.
+- Developer onboarding: `mise` for exact runtime pins plus a `doctor` check.
+- Billing and payments: `BillingPort`/`PaymentPort` from day one, live payments feature-flagged, no PSP in domain logic and no raw card data in Postgres.
+- OKF: export/import and agent-readable bundle format only, never canonical permissioned storage.
 
-Backend: TypeScript modular monolith. Domain modules define entities, policies, invariants, and ports. Application services orchestrate use cases. Repositories isolate database access. Adapters isolate LLMs, OCR, OAuth providers, object storage, realtime, queues, and crawlers.
+Frontend stack and its dependency guardrail live in `docs/architecture/frontend.md`: Next.js App Router, React, TypeScript, Tailwind, Radix, shadcn-style components, Zod, TanStack Query for client-side server state, and no Zustand or Framer Motion by default.
+Backend module and port layout lives in `docs/architecture/backend.md`: domain modules, application services, repositories, and adapters for every external provider.
+Security posture lives in `docs/architecture/security.md`: privacy is an architecture invariant, not a feature toggle.
 
-Database: PostgreSQL is canonical. Default to Drizzle ORM for schema-first TypeScript migrations and typed queries, but gate it with an early database spike covering pgvector, full-text search, typed relation edges, permission-filtered retrieval, and migration ergonomics. If Drizzle creates friction on these invariants, switch early to Kysely. Do not use Prisma for Atlas core unless a later ADR proves it can preserve the required SQL/vector/permission control.
+Decisions this spec still owns, because `technical-decisions.md` does not yet carry them. Promote them there when they are settled:
 
-AI: multi-stage async pipeline with prompt versioning, structured outputs, provenance, confidence, review states, and eval traces. No single-shot "upload then summarize" architecture.
-
-Realtime: transport adapter. Prefer SSE for one-way progress where sufficient; WebSockets only for bidirectional features such as presence, shared workspace updates, live graph changes, and ingestion progress subscriptions. Durable state stays in Postgres/Redis/Temporal.
-
-Queue/workflow: Temporal is the default for durable ingestion and action workflows. BullMQ/Redis may be used behind `WorkflowPort` for local/dev or simpler deployments, but must not leak into domain code.
-
-Deployment: Vercel for web, optional Vercel Services for `apps/web` and `apps/bot` under one project, Neon for Postgres, S3/R2 adapter for object storage, managed Redis, Temporal Cloud or separately hosted workers, GitHub Actions CI, Vercel previews, staging, production. Vercel Services is a beta deployment packaging option and must not weaken the modular monolith or canonical Postgres model.
-
-Security: privacy is an architecture invariant. Enforce permission checks in services and repositories; consider RLS for high-risk public API/data access paths after the repository layer is stable. Encrypt OAuth tokens/secrets at application level with envelope encryption. Payment credentials and raw card data must not be stored in Atlas Postgres.
-
-Convex: optional prototype/realtime experiment only. It must not own durable memory, permissions, graph, audit, migrations, OAuth state, or canonical data.
-
-OKF: use GoogleCloudPlatform OKF v0.1 Draft as the export/import baseline. Atlas maps memory objects to OKF concepts, selected relation edges to markdown links plus Atlas relation metadata, citations to `# Citations`, and object/version history to `log.md`. OKF remains non-canonical and must not enforce permissions, search, OAuth/import state, or transactional graph integrity.
-
-Mobile: PWA first. Native apps are out of MVP.
-
-External chat surfaces: Vercel Chat SDK may be used in `apps/bot` for Slack and WhatsApp-compatible demos. The bot service must call Atlas application services through the same permission, retrieval, audit, and action approval boundaries as the web app. It must not bypass source grounding, private/shared visibility, or action confirmation.
-
-Developer onboarding: use `mise` for exact runtime/tool pins and repo tasks. Phase 0 must add `.mise.toml`, `packageManager: pnpm@11.9.0`, Node `24.18.0` LTS, a `doctor` command, `.env.example`, and `docs/process/onboarding.md`. Missing optional tools must be reported as optional, not block local development.
-
-Billing and payments: Atlas should be payment-architecture-ready through `BillingPort` and `PaymentPort`, but live payments stay feature-flagged and out of the core memory MVP. Provider-specific PSPs such as Stripe, Polar, Lemon Squeezy, Adyen, Basis Theory, BNPL, and regional providers must not leak into domain logic. Basis Theory is a research candidate for multi-PSP vaulting, not an automatic dependency.
+- SQL layer: default to Drizzle ORM for schema-first TypeScript migrations and typed queries, gated by an early spike covering pgvector, full-text search, typed relation edges, permission-filtered retrieval, and migration ergonomics. Switch early to Kysely if Drizzle creates friction on those invariants. Do not use Prisma for Atlas core unless a later ADR proves it can preserve the required SQL/vector/permission control.
+- Queue/workflow: Temporal is the default for durable ingestion and action workflows. BullMQ/Redis may be used behind `WorkflowPort` for local/dev or simpler deployments, but must not leak into domain code.
+- Realtime transport choice: prefer SSE for one-way progress where sufficient. Use WebSockets only for bidirectional features such as presence, shared workspace updates, live graph changes, and ingestion progress subscriptions.
+- Deployment: Vercel for web, optional Vercel Services for `apps/web` and `apps/bot` under one project, Neon for Postgres, S3/R2 adapter for object storage, managed Redis, Temporal Cloud or separately hosted workers, GitHub Actions CI, Vercel previews, staging, production.
+- Permission enforcement placement: enforce checks in services and repositories. Consider RLS for high-risk public API/data access paths after the repository layer is stable. Encrypt OAuth tokens/secrets at application level with envelope encryption.
+- Frontend form and rendering split: React Hook Form for forms. Server Components are preferred for data-heavy read screens. Client Components own interaction-heavy surfaces.
+- Convex: optional prototype/realtime experiment only. It must not own durable memory, permissions, graph, audit, migrations, OAuth state, or canonical data.
+- OKF mapping: memory objects map to OKF concepts, selected relation edges to markdown links plus Atlas relation metadata, citations to `# Citations`, and object/version history to `log.md`.
 
 ## 3. System Architecture
 
@@ -142,10 +145,11 @@ Chat lifecycle:
 1. User asks from composer with workspace and optional object context.
 2. API validates auth, workspace membership, visibility scope, and request schema.
 3. Retrieval service applies permission filter first, then structured filters, full-text search, vector search, optional rerank, and citation selection.
-4. If evidence is insufficient, answer with "I do not know based on your Atlas memory."
-5. Disclosure policy converts retrieved evidence into the minimum sufficient exact values, derived values, pseudonyms, or markers for the model/provider route.
-6. AI orchestration streams answer with citation references and stores `ai_runs`, retrieval trace, prompt version, model, sources, token/cost metadata, disclosure policy version, and redacted logs.
-7. UI renders answer, source memory objects, chunks, confidence, and follow-up actions separately.
+4. Disclosure policy converts retrieved evidence into the minimum sufficient exact values, derived values, pseudonyms, or markers for the model/provider route.
+5. AI orchestration streams answer with citation references and stores `ai_runs`, retrieval trace, prompt version, model, sources, token/cost metadata, disclosure policy version, and redacted logs.
+6. UI renders answer, source memory objects, chunks, confidence, and follow-up actions separately.
+
+Insufficient-evidence answers follow the citation rules in section 7.
 
 Ingestion lifecycle:
 
@@ -300,10 +304,8 @@ Indexes:
 
 Permission model:
 
-- Repository APIs accept an explicit `AccessScope` derived from user, workspace membership, role, shared space, and item visibility.
-- Queries must filter objects, chunks, embeddings, relations, suggestions, chat sources, exports, graph nodes, and shared space items through the same scope.
-- Relation visibility requires both endpoints visible to the viewer.
-- Shared-space summaries cannot derive from hidden objects.
+- `docs/architecture/security.md` owns the permission invariants: private objects stay owner-only unless shared, relations need both endpoints visible, and every read surface uses one permission layer. `docs/architecture/db.md` owns the repository-level rules.
+- Schema-specific contract: repository APIs accept an explicit `AccessScope` derived from user, workspace membership, role, shared space, and item visibility. Every query listed above filters through that one scope.
 
 Audit model:
 
@@ -421,19 +423,13 @@ Extraction pipeline:
 
 RAG pipeline:
 
-- Permission filter first.
-- Structured filters.
-- Full-text search.
-- Vector similarity.
-- Optional rerank.
-- Citation selection.
-- Answer generation constrained to evidence.
-- Store retrieval trace.
+- `docs/architecture/ai.md` owns the RAG rules: permission-filter before retrieval, hybrid search across filters/full-text/vectors/rerank, cite the source objects and chunks, apply disclosure policy before sending chunks to a model, and store retrieval traces.
+- Atlas order of operations: permission filter, structured filters, full-text, vector similarity, optional rerank, citation selection, answer generation constrained to evidence.
 
 Citation rules:
 
 - Every memory-grounded claim needs at least one source object/chunk.
-- If evidence is absent or weak, answer exactly: "I do not know based on your Atlas memory."
+- If evidence is absent or weak, answer exactly: "I do not know based on your Atlas memory." This is the Atlas wording of the insufficient-evidence rule owned by `docs/architecture/ai.md`.
 - UI must render citations next to claims or in a visible source panel.
 
 Memory write rules:
@@ -445,11 +441,7 @@ Memory write rules:
 
 Action risk rules:
 
-- Level 0: read-only retrieval.
-- Level 1: internal safe write.
-- Level 2: external draft.
-- Level 3: external write requiring explicit confirmation.
-- Level 4: destructive or irreversible external action, forbidden in MVP.
+- `docs/architecture/ai.md` owns the risk levels 0-4: read-only, internal safe write, external draft, external write needing explicit confirmation, and destructive/irreversible which is forbidden in MVP. The Action lifecycle in section 3 shows how they are enforced.
 
 Evaluation strategy:
 
@@ -474,10 +466,8 @@ Threat model:
 
 Permission invariants:
 
-- Private objects visible only to owner unless explicitly shared.
-- Shared spaces expose only selected objects and visible endpoint relations.
-- Search, chat, graph, suggestions, exports, notifications, and realtime payloads use the same access scope.
-- Admin/dev-only visibility must not exist in production data paths.
+- `docs/architecture/security.md` owns them in full: private objects stay owner-only unless explicitly shared, shared spaces expose only selected objects, relations need both endpoints visible, private summaries cannot surface in shared spaces, and every read surface uses one permission layer. `docs/architecture/product-invariants.md` carries the product-level trust rule.
+- Spec addition: realtime payloads use the same access scope, and admin/dev-only visibility must not exist in production data paths.
 
 OAuth token handling:
 
@@ -490,12 +480,7 @@ OAuth token handling:
 
 Redaction and disclosure:
 
-- Follow `docs/architecture/privacy-redaction-policy.md`.
-- Keep full authorized memory in canonical Postgres records.
-- Apply deterministic purpose-bound disclosure before cloud LLM, OCR, crawler, bot, log, screenshot, fixture, PR, export, or shared-space artifacts.
-- No model decides what is unnecessary or safe to disclose.
-- Redact or withhold secrets, tokens, credentials, financial account numbers, raw card data, CVV, and session material before logs and cloud LLM calls.
-- Prefer derived values and stable pseudonyms when exact values are not required.
+- `docs/architecture/privacy-redaction-policy.md` owns this policy in full: keep full authorized memory in Postgres, then let the deterministic backend `DataDisclosurePolicy` compute the minimum sufficient outbound representation per actor, purpose, destination, and data class. No model decides what is safe to disclose. Secrets, tokens, credentials, raw card data, and session material never reach LLMs.
 - Private mode disables or minimizes cloud AI for selected objects.
 
 Encryption:

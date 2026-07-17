@@ -19,23 +19,15 @@ Privacy is an architecture invariant, not a feature toggle.
 
 ## Redaction and disclosure
 
-Read `docs/architecture/privacy-redaction-policy.md` before changing AI, OCR, crawler, fixture, screenshot, export, bot, or provider disclosure behavior.
+`docs/architecture/privacy-redaction-policy.md` owns this policy in full.
+The short version: Atlas keeps full authorized memory in Postgres and never redacts it out of existence, then the deterministic backend `DataDisclosurePolicy` decides the minimum sufficient outbound representation per actor, purpose, destination, and data class. No model decides what is unnecessary, secrets and session material never reach LLMs, and every disclosure is audited without storing the withheld values.
 
-Atlas does not redact canonical memory out of existence.
-Atlas stores the full authorized memory in Postgres, then applies deterministic disclosure policy when data leaves the trusted boundary or appears in artifacts.
-
-No model decides what is unnecessary.
-The backend `DataDisclosurePolicy` decides based on actor, purpose, destination, data class, provider retention, user consent, and required capability.
-
-The default rule is:
-
-- Store full memory canonically when the user is authorized and the data belongs in Atlas.
-- Never disclose secrets, OAuth tokens, refresh tokens, passwords, private keys, raw card data, CVV, or session material to LLMs.
-- Prefer derived values or stable pseudonyms when exact values are not required.
-- Rehydrate exact values only in authorized UI, approved external-action drafts, export flows, or provider calls where exact data is required.
-- Audit the disclosure decision without storing withheld sensitive values.
+Read it before changing AI, OCR, crawler, fixture, screenshot, export, bot, or provider disclosure behavior.
 
 ## Permission invariants
+
+`docs/architecture/product-invariants.md` states the product-level trust rule: private memory is never exposed through shared spaces, relation edges, summaries, search, or chat retrieval.
+This file owns the enforceable detail behind it.
 
 - Private objects are visible only to the owner unless explicitly shared.
 - Shared spaces expose only selected objects.
