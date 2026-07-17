@@ -54,38 +54,26 @@ Do not store secrets, OAuth tokens, raw private user data, or unredacted sensiti
 
 ## Backend Snapshot Examples
 
+The shape matters, not the exact command. Run the smallest reproducible command and redirect its output into `artifacts/backend/`.
+
 HTTP:
 
 ```bash
-curl -sS -X POST http://localhost:3000/api/v1/captures \
+curl -sS -X POST "$APP_URL/<api-route>" \
   -H 'content-type: application/json' \
-  --data @fixtures/capture-note.json \
-  | jq '.' > artifacts/backend/capture-create-after.json
+  --data @fixtures/<case>.json \
+  | jq '.' > artifacts/backend/<feature>-response-after.json
 ```
 
-Database:
+Database, audit log, event, or workflow state:
 
 ```bash
 psql "$DATABASE_URL" \
-  -c "select stable_id,type,visibility,status from memory_objects order by created_at desc limit 5;" \
-  > artifacts/backend/memory-objects-after.txt
+  -c "select <columns> from <table> order by created_at desc limit 5;" \
+  > artifacts/backend/<feature>-db-after.txt
 ```
 
-Audit log:
-
-```bash
-psql "$DATABASE_URL" \
-  -c "select action,actor_user_id,resource_type,created_at from audit_logs order by created_at desc limit 10;" \
-  > artifacts/backend/audit-log-after.txt
-```
-
-Workflow/job:
-
-```bash
-pnpm worker:jobs:list --json > artifacts/backend/jobs-after.json
-```
-
-Use actual repo commands once the app scaffold defines them.
+The routes, tables, and worker commands do not exist yet. Use actual repo commands once the app scaffold defines them.
 
 ## Suggested Layout
 

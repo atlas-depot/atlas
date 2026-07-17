@@ -78,55 +78,16 @@ Rules:
 - At least one review is required unless Efe explicitly labels the PR as solo-maintainer fast path.
 - CODEOWNERS should be configured when ownership is stable.
 
-## Branch Rules
+## Branch And Commit Rules
 
-Preferred branch format:
+`docs/process/git-workflow.md` owns these. It defines the `type/issue-number-short-slug` branch format, Conventional Commits, atomic commits as one coherent idea, and the do-not-mix rules for formatting/behavior, refactor/feature, UI/migration, and unrelated tests.
 
-```text
-type/issue-number-short-slug
-```
-
-Examples:
-
-```text
-feat/12-capture-inbox
-fix/33-relation-visibility
-spike/41-drizzle-kysely
-chore/52-mise-doctor
-```
-
-Before GitHub issues exist, use:
-
-```text
-type/short-slug
-```
-
-Examples:
+Phase-specific addition: before GitHub issues exist, use `type/short-slug`.
 
 ```text
 chore/bootstrap-monorepo
 docs/process/owner-onboarding
 ```
-
-## Commit Rules
-
-Use Conventional Commits:
-
-```text
-feat(capture): add upload staging model
-fix(permissions): hide private relation edges in shared graph
-test(search): add top-three retrieval fixtures
-docs(process): define solo-to-team workflow
-```
-
-Atomic means one coherent idea, not one file.
-
-Do not mix:
-
-- Formatting and behavior.
-- Refactor and feature work.
-- UI changes and database migrations.
-- Tests for unrelated modules.
 
 ## Pull Request Rules
 
@@ -208,15 +169,11 @@ Required:
 - Local fake providers exist for LLM, OCR, object storage, and webhooks where practical.
 - `docs/process/provider-and-env-setup.md` defines env modes, provider ownership, fake provider behavior, and secret handoff.
 
-Preferred local service strategy:
+Preferred local service strategy: use the Provider Matrix and Local Services sections in `docs/process/provider-and-env-setup.md`.
 
-- Postgres with pgvector through Docker Compose by default, managed Neon dev branch only when needed.
-- Redis through Docker Compose by default.
-- Object storage through MinIO for local integration, with filesystem/in-memory fake adapter only for unit tests.
-- Temporal through `WorkflowPort` fake adapter early, Docker/local Temporal when ingestion workflow testing starts.
-- Deterministic seed data through `mise run db:seed`.
+They set the local default per area: Docker/local Postgres with pgvector or a Neon dev branch, local Redis or a fake cache adapter, local file adapter or MinIO for object storage, a Temporal local dev server or the `WorkflowPort` fake adapter, and a `pnpm dev` that falls back to fake providers when real credentials are missing.
 
-The default `pnpm dev` path should run with fake providers when real credentials are missing. Full integration mode can require provider credentials.
+Deterministic seed data comes from `mise run db:seed`. Full integration mode can require provider credentials.
 
 Do not use a shared Hetzner `dev1` server as the primary development path.
 Use Vercel previews and local Docker first.
@@ -235,27 +192,9 @@ Move to team/org accounts when production users, recurring teammate access, comp
 
 ## Efe-Owned Decision Gates
 
-When a task reaches one of these, tag/message Efe before continuing:
+`docs/process/owner-onboarding.md` owns this list in its Default Owner Gates section: provider and deployment account setup, OAuth scopes and verification, billing/payment provider choice, object storage, OCR, WhatsApp and Apple Messages paths, production domain, production env vars and secrets, real eval dataset, privacy policy, and final brand/logo. It also carries the "Decision needed" message template to use.
 
-- Production account setup.
-- Provider selection with cost, compliance, or vendor lock-in.
-- OAuth scopes or app verification.
-- Secrets, encryption keys, KMS, or production env vars.
-- Production domain and deployment settings.
-- Privacy policy or real user data handling.
-- Final brand/logo/visual identity.
-- WhatsApp or Apple Messages provider path.
-- Real eval dataset source.
-
-Use this message shape:
-
-```text
-Decision needed:
-Recommended option:
-Alternatives:
-Risk:
-Deadline / blocking work:
-```
+When a task reaches one of those gates, stop broad implementation and tag/message Efe before continuing.
 
 ## Senior Project Evidence
 

@@ -65,18 +65,7 @@ If a hook fails, agent work should fail open. A broken suggestion hook must not 
 
 ## Efe-Owned Gates
 
-Message Efe before making or pretending to make decisions about:
-
-- Production accounts, domains, env vars, secrets, KMS, or deployment approval.
-- Vercel/Neon/Redis/Temporal provider setup.
-- Google OAuth app, Gmail/Calendar scopes, verification, or compliance.
-- Billing/payment provider selection, PCI scope, payment vault, PSP routing, or live payment enablement.
-- Object storage provider.
-- OCR/document intelligence provider.
-- WhatsApp provider.
-- Apple Messages for Business or iMessage feasibility.
-- Real eval dataset and privacy policy.
-- Final UI brand, logo, and visual identity.
+Message Efe before making or pretending to make decisions about an Efe-owned gate. `docs/process/owner-onboarding.md` owns the list in its Default Owner Gates section: Vercel/Neon/Redis/Temporal and deployment account setup, Google OAuth app and Gmail/Calendar scopes, billing/payment provider and PCI scope, object storage, OCR, WhatsApp, Apple Messages, production domain, production env vars and secrets, real eval dataset, privacy policy, and final UI brand/logo.
 
 Provider/env setup must follow `docs/process/provider-and-env-setup.md`. During bootstrap, personal provider accounts may be Efe-owned to control cost, but agents and teammates must not request or use Efe's personal passwords, 2FA, broad dashboard access, or production secrets. Prefer fake/local providers, preview URLs, and scoped integration secrets.
 
@@ -87,16 +76,7 @@ Do not use the em dash character.
 Do not add agent co-authors to commit messages.
 Do not manually edit generated files or `CHANGELOG.md`.
 
-Use:
-
-```text
-Decision needed:
-Context:
-Options:
-Recommendation:
-Risk if deferred:
-Link to issue/PR:
-```
+When you hit a gate, use the "Decision needed" template in `docs/process/owner-onboarding.md`: context, options, recommendation, risk if deferred, and a link to the issue/PR.
 
 ## External Review Tools
 

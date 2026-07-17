@@ -139,11 +139,9 @@ Use `docs/process/provider-and-env-setup.md` as the source of truth for provider
 
 Default local development must work in `local-fake` mode without paid provider credentials. Integration work may use `local-integration` mode only when Efe has approved the exact provider secret or scoped access.
 
-Every teammate must be able to run `pnpm dev` with a generated fake/local `.env.local`. Once more than one teammate is regularly working, enable the shared-dev-secret path for dev/integration secrets so local integration work does not depend on Efe's machine. Prefer SOPS/age before paid vault tooling during the senior-project phase.
+Vault and shared-secret rules are owned by the Secret Vault Policy and Vault Access Model sections of `docs/process/provider-and-env-setup.md`. They define the SOPS/age shared dev bundle preferred for the senior-project phase, the per-scope access table, and what teammates must never hold locally.
 
-Vault access can be active for everyone only at the `dev` scope. Production secrets are not part of teammate local onboarding. Teammates may test production as normal users or approved test users, but they should not receive production DB, storage, OAuth, webhook, provider admin, or runtime deployment secrets by default.
-
-Do not commit `.env.vault` or an encrypted env bundle unless Atlas has explicitly enabled the SOPS/age shared-dev-secret path or chosen another vault workflow. If the team needs recurring shared secret access, evaluate 1Password, Infisical, Doppler, or SOPS/age and record the decision first.
+Onboarding baseline: every teammate runs `pnpm dev` from a generated fake/local `.env.local`, gets the `dev` scope only, and receives no production DB, storage, OAuth, webhook, provider admin, or runtime deployment secrets. Do not commit `.env.vault` or an encrypted env bundle before that shared path is explicitly enabled.
 
 Efe owns provider account setup and real secret distribution unless delegated. Teammates and agents should request provider access with:
 
@@ -162,21 +160,9 @@ Risk if denied:
 
 ## Local Service Modes
 
-Phase 0 must support two local tracks:
-
-- Minimal local: app plus fake/local providers.
-- Full local: app plus Postgres, Redis, Temporal, and object storage emulator or managed dev equivalents.
+Local tracks and per-provider defaults live in the Local Services and Provider Matrix sections of `docs/process/provider-and-env-setup.md`. They define minimal local (app plus fake providers), full local (app plus Postgres, Redis, Temporal, object storage emulator), and shared dev integration, plus the local default for each area: Docker/local Postgres or a Neon dev branch, local Redis or a fake cache adapter, a Temporal local dev server or the `WorkflowPort` fake adapter, local file adapter or MinIO, and fake AI/OCR/crawler/webhook providers.
 
 `pnpm dev` should default to minimal local unless the developer opts into full local or integration mode.
-
-Provider defaults:
-
-- Postgres/pgvector: Docker/local Postgres or Neon dev branch.
-- Redis: local Redis or fake cache adapter.
-- Temporal: `WorkflowPort` fake adapter early, Docker/local Temporal when ingestion workflows start.
-- Object storage: MinIO for local integration, filesystem/in-memory fake adapter only for unit tests.
-- AI/OCR/crawler/webhooks: deterministic fake providers and fixtures for tests and CI, real dev providers only through shared dev secrets.
-- Vercel/preview/prod env: owned by Efe unless delegated.
 
 Seed defaults:
 
