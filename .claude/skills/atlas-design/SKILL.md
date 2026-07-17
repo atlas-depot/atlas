@@ -15,8 +15,8 @@ Read:
 - `docs/process/agent-alignment.md`
 - `docs/architecture/ui-system.md`
 - `docs/architecture/ui-quality-bar.md`
-- `docs/design/atlas-ui-reference-audit.md`
-- `docs/design/atlas-ui-directions.md`
+- `docs/design/atlas-design-tokens.md`
+- `docs/design/ui-rulebook.md`
 - `docs/architecture/frontend.md`
 - `docs/architecture/privacy-redaction-policy.md`
 - `docs/architecture/product-invariants.md`
@@ -53,7 +53,7 @@ Before making another high-fidelity UI artifact:
 - Build only Today plus right inspector plus composer first.
 - Screenshot-test the accepted slice before expanding to other screens.
 
-Current reset artifacts:
+Historical exploration from the 2026-07-01 reset pass, superseded by the 2026-07-16 warm-minimalism lock. Read for background only; the locked tokens win on any conflict:
 
 - `docs/design/atlas-ui-reference-audit.md`
 - `docs/design/atlas-ui-directions.md`
@@ -89,21 +89,7 @@ Required layout details:
 - What happens when the graph, source preview, command palette, or document preview overflows.
 - Which viewport sizes must be screenshot-tested.
 
-Default Atlas measurements until changed by a design-system decision:
-
-- Product shell: `100vh` minimum height.
-- Prototype shell rail: `232px`.
-- App left navigation: `216px` desktop and `190px` tablet.
-- Right inspector: `326px` desktop, hidden below `1160px`.
-- Topline: `72px` minimum height.
-- Content padding: `24px` desktop and `16px` mobile.
-- Page padding: `26px` desktop and `16px` mobile.
-- Inspector padding: `22px 18px`.
-- Button height: `36px` minimum.
-- Navigation row height: `32px` minimum.
-- Data row height: `54px` minimum.
-- Composer input height: `42px` minimum.
-- Graph canvas height: `600px` minimum desktop.
+Default Atlas measurements live in one place, not here. `docs/architecture/ui-system.md` owns the layout contract (nav, inspector, topline, paddings, row heights, graph stage) and `docs/design/atlas-design-tokens.md` owns palette, type, spacing, and radii. Read the numbers there. Do not restate them in this skill: a copy drifts, and it already did.
 
 Overflow rules:
 

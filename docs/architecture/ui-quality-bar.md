@@ -63,7 +63,7 @@ Do not jump straight into another full HTML screen.
 1. Build a reference audit.
    Collect 20 to 30 concrete screenshots or source links from the reference category.
    Annotate why each one works or fails for Atlas.
-   Current artifact: `docs/design/atlas-ui-reference-audit.md`.
+   Worked example from the 2026-07-01 pass (historical): `docs/design/atlas-ui-reference-audit.md`.
 
 2. Extract principles.
    For each reference, identify typography, density, margins, hierarchy, navigation, inspector behavior, action states, and empty/error states.
@@ -71,11 +71,12 @@ Do not jump straight into another full HTML screen.
 3. Propose three directions.
    Each direction must include palette, typography, spacing rhythm, component density, and a Today screen composition.
    Do not make three slight color variants.
-   Current artifact: `docs/design/atlas-ui-directions.md`.
+   Worked example from the 2026-07-01 pass (historical): `docs/design/atlas-ui-directions.md`.
 
 4. Select one direction with Efe.
    Efe is the product owner and final gate for visual direction until ownership is delegated.
-   Current decision: Direction A, Quiet Ledger Desk, approved on 2026-07-01.
+   Current decision: warm minimalism, approved on 2026-07-16. It supersedes Direction A, Quiet Ledger Desk (2026-07-01).
+   Locked tokens: `docs/design/atlas-design-tokens.md`. Rationale: `docs/design/ui-rulebook.md`.
 
 5. Produce a small high-fidelity slice.
    Build only Today plus right inspector plus composer first.

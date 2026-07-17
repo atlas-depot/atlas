@@ -141,5 +141,5 @@ Storybook must cover:
 
 The locked visual direction lives in `docs/design/atlas-design-tokens.md` (warm minimalism); the earlier rejected prototypes have been removed (archived locally), and the layout-contract reminders they informed are captured above.
 The next accepted design artifact must pass `docs/architecture/ui-quality-bar.md`.
-Current reset artifacts are `docs/design/atlas-ui-reference-audit.md` and `docs/design/atlas-ui-directions.md`.
+`docs/design/atlas-ui-reference-audit.md` and `docs/design/atlas-ui-directions.md` are historical exploration from the 2026-07-01 reset pass, superseded by the lock above.
 After Phase 0, migrate it into `packages/ui` tokens, Storybook stories, typed fixtures, and route mock screens.
