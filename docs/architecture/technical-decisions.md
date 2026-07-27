@@ -30,11 +30,31 @@ Decision: OKF is an export/import and agent-readable bundle format.
 
 Rationale: OKF is useful for portability and human-readable memory snapshots, but it is not a transactional permissioned database.
 
+## Product posture
+
+Decision: acting-first second brain. See `docs/architecture/adr-001-acting-first-eve.md`.
+
+Rationale: Atlas is Notion + Obsidian + a proactive cloud agent. Users adopt outcomes (today plan, drafts, follow-ups done), not proof theater (receipts, policy hashes, JSONL audit UIs).
+
+Guardrail: MVP is single-user. Shared spaces are post-MVP. Soft citations are allowed; hard ungrounded gates and approval fatigue are not the product.
+
 ## AI
 
-Decision: async multi-stage ingestion pipeline.
+Decision: Eve is the acting brain; async multi-stage ingestion remains a deterministic Workflow SDK pipeline.
 
-Rationale: OCR, parsing, chunking, embedding, extraction, relation linking, and suggestions are long-running, retryable workflows.
+Rationale: OCR, parsing, chunking, embedding, extraction, relation linking, and suggestions are long-running, retryable workflows. Conversational and proactive acting need durable agent sessions, tools, schedules, and channels. Eve fits that acting layer. Ingestion should not be a free-form agent loop.
+
+## Agent runtime
+
+Decision: use Eve (`apps/agent`) with web via `useEveAgent`, Workflow SDK durability, P1 tool approvals, S0 no sandbox in MVP.
+
+Rationale: Eve is filesystem-first, TypeScript, Next-friendly, multi-channel, and built on AI SDK + Workflow SDK. Year-1 deploy on Vercel (D3) with Spend Management; documented Hetzner + `@workflow/world-postgres` exit (D2a).
+
+## Durability
+
+Decision: Workflow SDK is the default durability substrate. Temporal is not.
+
+Rationale: Eve and ingestion can share one durability model. Production year-1 uses Vercel Workflow. Local/self-host uses `@workflow/world-postgres`. BullMQ may still back simple queues behind ports if needed, but must not leak into domain code.
 
 ## Auth
 
@@ -67,15 +87,17 @@ Rationale: chat streaming, ingestion progress, shared workspace updates, and pre
 
 ## Vercel Services
 
-Decision: evaluate Vercel Services as a deployment packaging layer for `apps/web` and `apps/bot`.
+Decision: evaluate Vercel Services as a deployment packaging layer for `apps/web` and `apps/agent`.
 
-Rationale: Atlas remains a TypeScript modular monolith with one domain model, one canonical Postgres database, one permission layer, and one audit model. Vercel Services may let the web app and external chat webhook surface deploy under one Vercel project and domain, but it must not create independent memory services. Use the current `services` configuration shape, not the older `experimentalServices` shape.
+Rationale: Atlas remains a TypeScript modular monolith with one domain model, one canonical Postgres database, and one action authority. Vercel Services may let the web app and Eve agent surface deploy under one Vercel project and domain, but must not create independent memory services. Use the current `services` configuration shape, not the older `experimentalServices` shape.
 
 ## External Chat Surfaces
 
-Decision: use Vercel Chat SDK for an early `apps/bot` proof surface, not for the internal web composer.
+Decision: Eve owns channels. Prefer Eve first-class channels; use Eve’s Chat SDK channel bridge when Eve has no first-class adapter (for example WhatsApp). Web ships first; expand later.
 
-Rationale: Atlas's web composer should use Vercel AI SDK Core/UI. Chat SDK is valuable for Slack, WhatsApp-compatible providers, Teams, Discord, Google Chat, Telegram, GitHub, and Linear style surfaces. These surfaces are clients of Atlas. They must call the same backend services and obey the same permissions, citations, action approvals, and audit logs. Do not promise normal iMessage support; Apple Messages requires Apple Messages for Business or a validated provider path.
+Rationale: Chat SDK answers “how do I talk to this platform?” Eve answers “how do I run the durable agent loop?” Official Vercel guidance: first-class Eve channels by default; Chat SDK channel deliberately. Do not promise normal iMessage support; Apple Messages requires Apple Messages for Business or a validated provider path.
+
+Guardrail: channel adapters must call Atlas domain tools/services. No second memory store. `apps/bot` as a standalone Chat-SDK-only app is superseded by `apps/agent` channels.
 
 ## Developer Onboarding
 
@@ -93,8 +115,8 @@ Rationale: Atlas needs a consistent dev environment for a solo-to-5-person team 
 
 Decision: keep the initial stack narrow and add libraries only when a concrete requirement appears.
 
-Rationale: Start with Next.js, TypeScript, pnpm, Turborepo, Zod, TanStack Query for client server-state, Tailwind, Radix/shadcn-style components, Vercel AI SDK, Postgres, pgvector, and the selected SQL layer.
-Do not add GraphQL, tRPC, Zustand, Framer Motion, a separate vector database, or Convex primary storage by default.
+Rationale: Start with Next.js, TypeScript, pnpm, Turborepo, Zod, TanStack Query for client server-state, Tailwind, Radix/shadcn-style components, Eve + Vercel AI SDK, Workflow SDK, Postgres, pgvector, and the selected SQL layer.
+Do not add GraphQL, tRPC, Zustand, Framer Motion, a separate vector database, Convex primary storage, or Temporal by default.
 Minimal means fewer concepts to operate, not cheaper or weaker architecture.
 
 ## Frontend Server State
@@ -147,7 +169,7 @@ The app scaffold should include OCR contracts, fixtures, eval metrics, and provi
 Decision: use `mise` for tool versions and tasks, Docker Compose for local infrastructure, deterministic seeds for local/demo/eval data, and no shared `dev1` server as the primary development path.
 
 Rationale: `mise` standardizes Node, pnpm, and repo commands.
-Docker Compose standardizes Postgres with pgvector, Redis, MinIO, and Temporal when needed.
+Docker Compose standardizes Postgres with pgvector, Redis, MinIO, and local Workflow/Eve needs when required.
 Deterministic seeds keep onboarding, demos, leakage tests, and eval fixtures reproducible.
 A shared Hetzner `dev1` primary environment would create state drift and team-wide breakage.
 If Vercel previews and local Docker are insufficient later, `dev1` may be introduced only as staging, demo, worker, or integration sandbox.

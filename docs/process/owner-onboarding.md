@@ -15,7 +15,7 @@ Atlas may start on Efe-owned personal provider accounts to control cost. This is
 
 Efe Baran Durmaz is the default owner for these decisions unless ownership is explicitly delegated later:
 
-- Vercel, Neon, Redis, Temporal, and deployment account setup.
+- Vercel, Neon, Redis, Workflow/Eve hosting, and deployment account setup.
 - Google OAuth app setup, Gmail/Calendar scopes, verification, and compliance.
 - Billing/payment provider selection, PCI scope, payment vault, PSP routing, and live payment enablement.
 - Object storage provider selection.
@@ -262,7 +262,7 @@ First useful tasks:
 
 - Define `AccessScope` review checklist.
 - Define OAuth token encryption contract.
-- Add private/shared adversarial test cases.
+- Add unauthorized-access adversarial test cases; shared-space cases when sharing ships.
 - Add audit event matrix.
 
 Acceptance bar:
@@ -307,34 +307,37 @@ Acceptance bar:
 - Optional tools are reported separately from required tools.
 - Local development works without paid provider credentials.
 - Missing Efe-owned provider secrets are reported with the exact owner/request protocol.
-- Preview URL or documented local evidence exists for every UI/API/bot PR.
+- Preview URL or documented local evidence exists for every UI/API/agent PR.
 - `agent-browser` is available for UI/frontend/preview evidence and checked by `doctor`.
 
-## Bot/Integrations Owner
+## Agent Channels / Integrations Owner
 
 Owns:
 
-- `apps/bot`.
-- Chat SDK adapter boundaries.
-- Slack proof flow.
+- `apps/agent` Eve channels and tool wiring to Atlas services.
+- Eve first-class channels and Chat SDK channel bridge when needed.
+- Slack expand after web-first.
 - WhatsApp and Apple Messages pathway research.
 
 Does not own:
 
 - Platform account/compliance setup without Efe.
-- Independent memory or permission systems.
+- Independent memory systems outside Atlas Postgres/domain.
 
 Read:
 
+- `docs/architecture/adr-001-acting-first-eve.md`
 - `docs/architecture/atlas-production-spec-and-plan.md`
+- `docs/architecture/ai.md`
 - `docs/process/onboarding.md`
+- `.claude/skills/atlas-ai/SKILL.md`
 - `.claude/skills/atlas-backend/SKILL.md`
 
 First useful tasks:
 
-- Add Chat SDK service shell.
-- Add signed webhook fixture tests.
-- Add Slack capture/ask demo.
+- Add `apps/agent` Eve shell with fake model.
+- Wire web `useEveAgent` rewrite/proxy.
+- Add signed webhook fixture tests when a channel ships.
 - Write WhatsApp and Apple Messages feasibility note.
 
 Acceptance bar:

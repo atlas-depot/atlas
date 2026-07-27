@@ -185,7 +185,7 @@ Only read the minimum comment body/location needed to act.
 
 ### Preview Gate
 
-If the PR touches `apps/web`, `apps/bot`, API routes, deployment config, or user-visible behavior:
+If the PR touches `apps/web`, `apps/agent`, API routes, deployment config, or user-visible behavior:
 
 - Find the Vercel preview URL from checks, PR comments, or deployment metadata.
 - Smoke-test the changed route or webhook surface.

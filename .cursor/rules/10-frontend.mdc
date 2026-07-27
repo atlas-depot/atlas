@@ -14,10 +14,10 @@ alwaysApply: false
 - Use TanStack Query for client-side server state.
 - Use URL state for navigation/filtering and React state for local ephemeral state.
 - Handle loading, empty, error, unauthorized, and offline states.
-- Show visibility and provenance on memory objects.
-- Show source citations for AI memory answers.
-- Show risk level and approval state for actions.
+- Show soft source links on AI answers/actions when useful (G1).
+- Show short confirm UI only for real external writes / destructive actions (P1).
+- Web AI composer uses Eve (`useEveAgent`); do not build a second chat brain in the browser.
 - Do not call LLMs or external integrations directly from browser code.
-- Do not rely on frontend permission checks as the source of truth.
-- Do not use TanStack Query or any client cache as the permission source of truth.
+- Do not rely on frontend checks as the source of truth for actions or memory writes.
+- Do not use TanStack Query or any client cache as an authorization source of truth.
 - Do not store server state in Zustand or another global client store.

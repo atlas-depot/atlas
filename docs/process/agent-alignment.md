@@ -39,7 +39,7 @@ For any non-trivial task:
 Use skills as executable playbooks:
 
 - `/atlas-owner-onboarding`: role-specific first steps.
-- `/atlas-plan`: read-only source-grounded plan before coding, and Phase 0 grilling of vague/risky requirements.
+- `/atlas-plan`: read-only planning and Phase 0 grilling of vague/risky requirements (ADR-aligned).
 - `/atlas-implement`: execute an approved issue/plan with tests.
 - `/atlas-review`: extensive PR/diff review.
 - `/atlas-create-skills`: create or improve Atlas skills.
@@ -68,7 +68,7 @@ If a hook fails, agent work should fail open. A broken suggestion hook must not 
 Message Efe before making or pretending to make decisions about:
 
 - Production accounts, domains, env vars, secrets, KMS, or deployment approval.
-- Vercel/Neon/Redis/Temporal provider setup.
+- Vercel/Neon/Redis/Workflow/Eve provider setup.
 - Google OAuth app, Gmail/Calendar scopes, verification, or compliance.
 - Billing/payment provider selection, PCI scope, payment vault, PSP routing, or live payment enablement.
 - Object storage provider.

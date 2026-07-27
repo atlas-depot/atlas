@@ -35,18 +35,18 @@ Must include:
 - `.mise.toml` with pinned Node and pnpm.
 - Root commands: `dev`, `lint`, `typecheck`, `test`, `build`, `storybook`, `db:generate`, `db:migrate`, `db:studio`, `eval:smoke`.
 - `mise` tasks: `setup`, `doctor`, `dev`, `ci`, `storybook`, `env:fake`, `env:decrypt`, `env:check`, `db:seed`, `eval:smoke`.
-- Docker Compose for local Postgres with pgvector, Redis, MinIO, and Temporal when enabled.
+- Docker Compose for local Postgres with pgvector, Redis, MinIO, and Workflow/Eve local world when enabled.
 - `.env.example` and generated fake/local `.env.local` path.
 - Optional SOPS/age shared dev secret path, with no production secrets.
-- Deterministic seed data for local, demo, leakage, and eval fixtures.
+- Deterministic seed data for local, demo, and eval fixtures.
 - `apps/web` shell.
-- `apps/worker` shell.
-- `apps/bot` shell or spike only.
+- `apps/agent` Eve shell (tools calling domain stubs; sandbox off).
+- `apps/worker` shell for Workflow SDK ingestion stubs.
 - `packages/domain`, `packages/db`, `packages/api`, `packages/auth`, `packages/billing`, `packages/ai`, `packages/ingestion`, `packages/ui`, `packages/config`, `packages/evals`, `packages/okf`.
 - Better Auth candidate boundary, not final unreviewed auth lock-in.
 - TanStack Query setup for client-side server state.
 - Storybook setup for `packages/ui`, component states, design tokens, and typed mock screens.
-- Vercel AI SDK provider wrapper plus deterministic fake provider for tests and CI.
+- Eve + Vercel AI SDK provider wrapper plus deterministic fake provider for tests and CI.
 - OCR port and fixture bakeoff scaffold.
 - BillingPort and PaymentPort scaffold with no live payments by default.
 - CI workflow for install, lint, typecheck, test, build, migration check, env check, and eval smoke.

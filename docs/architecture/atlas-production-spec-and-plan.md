@@ -1,8 +1,9 @@
 # Atlas Production Specification and Implementation Plan
 
-Status: v0.1 architecture baseline  
-Date: 2026-07-01 Europe/Istanbul  
-Owner: principal architecture draft
+Status: v0.2 architecture baseline (acting-first + Eve)  
+Date: 2026-07-27 Europe/Istanbul  
+Owner: principal architecture draft  
+Canonical ADR: `docs/architecture/adr-001-acting-first-eve.md`
 
 ## 0. Evidence Check
 
@@ -12,90 +13,98 @@ Official docs checked:
 
 - Next.js App Router: https://nextjs.org/docs/app
 - Vercel AI SDK: https://ai-sdk.dev/docs/introduction
+- Eve: https://eve.dev/ and https://vercel.com/docs/eve
+- Eve + Chat SDK: https://vercel.com/kb/guide/chat-sdk-and-eve
+- Workflow SDK / Vercel Workflows: https://workflow-sdk.dev/ and https://vercel.com/docs/workflows
 - Vercel WebSockets: https://vercel.com/docs/functions/websockets
 - Vercel Services: https://vercel.com/docs/services
-- Vercel Chat SDK: https://vercel.com/chat
 - Neon pgvector: https://neon.com/docs/extensions/pgvector
 - Google OAuth 2.0: https://developers.google.com/identity/protocols/oauth2
-- Temporal: https://docs.temporal.io/temporal
 - OKF v0.1 Draft: https://github.com/GoogleCloudPlatform/knowledge-catalog/blob/main/okf/SPEC.md
 
 Evidence-driven adjustments:
 
 - Next.js App Router remains the right web framework because the official docs position it around React Server Components, Suspense, Server Functions, layouts, and route handlers.
-- AI SDK is still appropriate, but implementation must follow the current major version docs. The docs now surface AI SDK 7, provider abstraction, Core, UI, structured object generation, tool calling, streaming, and tool approval primitives.
+- Eve is the acting-agent runtime. AI SDK remains underneath Eve for model I/O. Web composer uses `useEveAgent`, not a separate Chat SDK or AI SDK UI stack as the brain.
+- Chat SDK is a transport/card layer and an optional Eve channel bridge for surfaces without first-class Eve channels (for example WhatsApp). It is not Atlas’s memory backend or primary web composer.
 - Vercel Functions now document WebSocket support, but Next.js still requires an `experimental_upgradeWebSocket()` workaround for upgrade handling. Atlas must keep realtime behind a transport adapter and be ready to use Ably, Liveblocks, PartyKit, Pusher, Supabase Realtime, or a small dedicated WebSocket service.
-- Vercel WebSocket docs explicitly warn that reconnects may land on different function instances and state must be reloaded. This confirms the invariant: WebSockets are transport only; durable state lives in Postgres/Redis/workflows.
-- Vercel Services is now documented as beta and uses the `services` field in `vercel.json`, not the older `experimentalServices` shape. It is useful for deploying multiple surfaces in one Vercel project, but it is a deployment packaging feature, not a reason to split Atlas domain ownership into microservices.
-- Vercel Chat SDK is useful for an early omnichannel proof surface across supported chat platforms. Treat it as an adapter layer for external chat clients, not as Atlas's internal web composer or memory backend. Slack and WhatsApp are viable demo targets; Apple Messages/iMessage must not be promised until the Apple Messages for Business path or a supported provider adapter is validated.
+- Vercel WebSocket docs explicitly warn that reconnects may land on different function instances and state must be reloaded. This confirms the invariant: WebSockets are transport only; durable state lives in Postgres/Redis/Workflow SDK.
+- Vercel Services is beta and uses the `services` field in `vercel.json`. Useful for packaging `apps/web` and `apps/agent`, not for splitting domain ownership into microservices.
 - Neon pgvector docs support pgvector in Neon Postgres and document HNSW/IVFFlat choices. Use pgvector for MVP; introduce a separate vector DB only after measured retrieval or scale failure.
 - Google OAuth docs emphasize scopes, granted-scope comparison, refreshing tokens when needed, and incremental authorization. OAuth must be treated as a lifecycle subsystem, not a login checkbox.
-- Temporal docs explicitly frame durable execution as resumable/recoverable workflow execution backed by event history. Temporal is the correct default for ingestion and action workflows when available.
-- OKF v0.1 Draft was verified in GoogleCloudPlatform/knowledge-catalog. It defines a minimal markdown + YAML frontmatter knowledge bundle format, with concepts as markdown documents, bundle-relative links, optional `index.md` and `log.md`, and citation sections. Its stated non-goals include prescribing storage, serving, or query infrastructure, which strengthens the Atlas decision to use OKF only for export/import and agent-readable bundles, not canonical transactional storage.
+- Workflow SDK (Vercel Workflow in prod; `@workflow/world-postgres` local/self-host) is the durability default for Eve sessions and deterministic ingestion. Temporal is not the default.
+- OKF v0.1 Draft remains export/import only, not canonical storage.
+- Product posture is acting-first: outcomes over proof theater. Soft citations (G1). P1 approvals. M1 auto memory writes. R0 single-user MVP. S0 no sandbox default. D3 year-1 Vercel with Hetzner exit.
 
 ## 1. Product and Scope Clarification
 
-Atlas is a living second brain for messy digital context. It ingests files, links, notes, screenshots, emails, calendar items, reminders, messages, and documents; turns them into typed memory objects and typed relations; retrieves them with citations; surfaces proactive next actions; and allows safe, audited action drafts and selective sharing.
+Atlas is an acting second brain for messy digital context. It ingests files, links, notes, screenshots, emails, calendar items, reminders, messages, and documents; turns them into typed memory objects and typed relations; retrieves them with soft citations when useful; surfaces proactive next actions; and executes useful work through Eve tools on that memory.
 
 MVP scope:
 
 - Responsive web app and PWA.
-- Auth, workspaces, memberships, personal/private/shared visibility.
-- Capture inbox for files, PDFs, images, screenshots, links, notes, tasks, reminders, Gmail import, and Calendar import.
-- Async ingestion pipeline with parsing, OCR fallback, chunking, embeddings, extraction, relation linking, summaries, review cards, and suggestions.
-- Object-based memory, typed relation graph, object inspector, document library, search, chat with citations, Today dashboard, and shared spaces.
-- Safe internal actions and external drafts only: reminders, tasks, email drafts, calendar event drafts, follow-up drafts.
-- Early omnichannel proof surface through `apps/bot` using Vercel Chat SDK for capture, ask, retrieve, and draft flows in Slack plus one WhatsApp-compatible path if provider setup is available.
+- Auth and single-user workspace (sharing post-MVP).
+- Capture for files, PDFs, images, screenshots, links, notes, tasks, reminders, Gmail import, and Calendar import.
+- Async Workflow SDK ingestion pipeline with parsing, OCR fallback, chunking, embeddings, extraction, relation linking, summaries, rare low-confidence review, and suggestions.
+- Object-based memory, typed relation graph, object inspector, document library, search, Eve-powered chat with soft citations, and Today dashboard.
+- Acting agent in `apps/agent` (Eve): internal tasks/reminders and external drafts auto; real external writes confirm once (P1).
+- Web-first Eve client; channel expand later via Eve first-class channels and Chat SDK bridge when needed.
 - OKF export/import as a portable snapshot format.
-- Golden eval dataset and leakage tests.
+- Golden eval dataset focused on useful acting, tool correctness, and secret non-leakage.
 
 Post-MVP:
 
+- Shared spaces and selective sharing.
 - Native iOS/Android clients through public REST/OpenAPI.
 - Full local-first sync or CRDT memory.
-- Browser extension, desktop wrapper, richer team workflows, public links, write-capable Gmail/Calendar automation, local/private model mode, specialized OCR/document intelligence, graph analytics, agent APIs.
-- Broader external chat adapters such as Teams, Discord, Google Chat, Telegram, GitHub, Linear, and Apple Messages for Business if the provider path is validated.
+- Browser extension, desktop wrapper, richer team workflows, public links, write-capable Gmail/Calendar automation at higher autonomy, local/private model mode, specialized OCR/document intelligence, graph analytics.
+- Broader external chat adapters and optional P2 classifier-style auto-review.
+- Optional S1 code-mode / sandbox.
 
 Rejected ideas:
 
-- Chat-only product: rejected because it hides the durable memory model and prevents inspection, correction, sharing, and source provenance.
-- Convex as primary database: rejected because Postgres must own transactions, graph integrity, pgvector, permissions, audit logs, migrations, and exportability.
-- Separate vector database in MVP: rejected until pgvector fails measured recall, latency, or operational targets.
-- GraphQL-first: rejected because the internal app can use typed TypeScript APIs and the external surface needs REST/OpenAPI stability.
-- Native mobile in MVP: rejected because the domain, permissions, ingestion, and action safety model must stabilize first.
-- Full local-first CRDT sync in MVP: rejected because it is a separate distributed systems project. Build offline capture and local cache only.
-- Automatic destructive external actions: rejected because Atlas's trust invariant is explicit confirmation, auditability, and reversibility where possible.
-- OKF as canonical storage: rejected because markdown files cannot enforce permissions, transactional graph updates, OAuth lifecycle, indexes, and audit trails.
-- Separate memory systems per chat platform: rejected because Slack, WhatsApp, Teams, and similar surfaces are clients of Atlas, not independent sources of truth.
-- Consumer iMessage bot promise: rejected until Apple Messages for Business or a supported messaging provider path is validated. Do not market normal iMessage support from Chat SDK alone.
+- Proof/receipt/policy-hash product surfaces: rejected; users verify outcomes in the real world (mailbox, calendar), not JSONL.
+- Chat-only product with no durable memory model: rejected.
+- Convex as primary database: rejected.
+- Separate vector database in MVP: rejected until pgvector fails measured targets.
+- GraphQL-first: rejected.
+- Native mobile in MVP: rejected.
+- Full local-first CRDT sync in MVP: rejected.
+- Automatic destructive external actions: rejected.
+- OKF as canonical storage: rejected.
+- Separate memory systems per chat platform: rejected.
+- Temporal as default durability: superseded by Workflow SDK / Eve (ADR-001).
+- Standalone `apps/bot` Chat-SDK-only brain: superseded by `apps/agent` Eve channels.
+- Consumer iMessage bot promise: rejected until Apple Messages for Business/provider path is validated.
+- Cloudflare Workers as Eve host: rejected; Eve self-host is Node/Nitro/container (for example Hetzner).
 
 ## 2. Architecture Decision Record
 
 Platform: responsive web + PWA first, desktop-friendly web primary. Native clients later through REST/OpenAPI.
 
-Frontend: Next.js App Router, React, TypeScript, Tailwind, Radix primitives, shadcn-style components, React Hook Form, Zod, URL state, React state, TanStack Query for client-side server state, and typed API clients. Server Components are preferred for data-heavy read screens; Client Components own interaction-heavy surfaces. Do not add Zustand or Framer Motion by default; add them only after a concrete state or interaction requirement appears.
+Frontend: Next.js App Router, React, TypeScript, Tailwind, Radix primitives, shadcn-style components, React Hook Form, Zod, URL state, React state, TanStack Query for client-side server state, and typed API clients. Web AI composer uses Eve (`useEveAgent`) against `apps/agent`. Server Components are preferred for data-heavy read screens; Client Components own interaction-heavy surfaces. Do not add Zustand or Framer Motion by default.
 
-Backend: TypeScript modular monolith. Domain modules define entities, policies, invariants, and ports. Application services orchestrate use cases. Repositories isolate database access. Adapters isolate LLMs, OCR, OAuth providers, object storage, realtime, queues, and crawlers.
+Backend: TypeScript modular monolith. Domain modules define entities, policies, invariants, and ports. Application services orchestrate use cases. Repositories isolate database access. Eve tools are adapters into those services. Other adapters isolate LLMs, OCR, OAuth providers, object storage, realtime, and crawlers.
 
-Database: PostgreSQL is canonical. Default to Drizzle ORM for schema-first TypeScript migrations and typed queries, but gate it with an early database spike covering pgvector, full-text search, typed relation edges, permission-filtered retrieval, and migration ergonomics. If Drizzle creates friction on these invariants, switch early to Kysely. Do not use Prisma for Atlas core unless a later ADR proves it can preserve the required SQL/vector/permission control.
+Database: PostgreSQL is canonical. Default to Drizzle ORM for schema-first TypeScript migrations and typed queries, but gate it with an early database spike covering pgvector, full-text search, typed relation edges, and migration ergonomics. If Drizzle creates friction, switch early to Kysely. Do not use Prisma for Atlas core unless a later ADR proves it.
 
-AI: multi-stage async pipeline with prompt versioning, structured outputs, provenance, confidence, review states, and eval traces. No single-shot "upload then summarize" architecture.
+AI / agent: Eve is the acting brain. Ingestion is a multi-stage deterministic Workflow SDK pipeline with prompt versioning, structured outputs, soft provenance, confidence, rare review states, and eval traces. No single-shot "upload then summarize" architecture. No free-form agent loop for ingestion.
 
-Realtime: transport adapter. Prefer SSE for one-way progress where sufficient; WebSockets only for bidirectional features such as presence, shared workspace updates, live graph changes, and ingestion progress subscriptions. Durable state stays in Postgres/Redis/Temporal.
+Realtime: transport adapter. Prefer SSE for one-way progress where sufficient; WebSockets only for bidirectional features. Durable state stays in Postgres/Redis/Workflow SDK.
 
-Queue/workflow: Temporal is the default for durable ingestion and action workflows. BullMQ/Redis may be used behind `WorkflowPort` for local/dev or simpler deployments, but must not leak into domain code.
+Queue/workflow: Workflow SDK is the default for durable Eve sessions and ingestion. Production year-1: Vercel Workflow. Local/self-host: `@workflow/world-postgres`. BullMQ/Redis may back simple queues behind ports if needed, but must not leak into domain code. Temporal is not the default.
 
-Deployment: Vercel for web, optional Vercel Services for `apps/web` and `apps/bot` under one project, Neon for Postgres, S3/R2 adapter for object storage, managed Redis, Temporal Cloud or separately hosted workers, GitHub Actions CI, Vercel previews, staging, production. Vercel Services is a beta deployment packaging option and must not weaken the modular monolith or canonical Postgres model.
+Deployment: Vercel for `apps/web` and year-1 `apps/agent` (D3) with Spend Management; Neon for Postgres; S3/R2 for object storage; managed Redis when needed; GitHub Actions CI; Vercel previews; documented Hetzner/VPS exit for agent (D2a). Optional Vercel Services packaging must not weaken the modular monolith or canonical Postgres model.
 
-Security: privacy is an architecture invariant. Enforce permission checks in services and repositories; consider RLS for high-risk public API/data access paths after the repository layer is stable. Encrypt OAuth tokens/secrets at application level with envelope encryption. Payment credentials and raw card data must not be stored in Atlas Postgres.
+Security: connector secrets and OAuth tokens never go to models or logs. Encrypt tokens at application level with envelope encryption. Payment credentials and raw card data must not be stored in Atlas Postgres. MVP does not ship shared spaces; when sharing returns, enforce visibility in services/repositories.
 
-Convex: optional prototype/realtime experiment only. It must not own durable memory, permissions, graph, audit, migrations, OAuth state, or canonical data.
+Convex: optional prototype/realtime experiment only. It must not own durable memory, graph, audit, migrations, OAuth state, or canonical data.
 
-OKF: use GoogleCloudPlatform OKF v0.1 Draft as the export/import baseline. Atlas maps memory objects to OKF concepts, selected relation edges to markdown links plus Atlas relation metadata, citations to `# Citations`, and object/version history to `log.md`. OKF remains non-canonical and must not enforce permissions, search, OAuth/import state, or transactional graph integrity.
+OKF: export/import baseline only.
 
 Mobile: PWA first. Native apps are out of MVP.
 
-External chat surfaces: Vercel Chat SDK may be used in `apps/bot` for Slack and WhatsApp-compatible demos. The bot service must call Atlas application services through the same permission, retrieval, audit, and action approval boundaries as the web app. It must not bypass source grounding, private/shared visibility, or action confirmation.
+External chat surfaces: Eve channels in `apps/agent`. Prefer first-class Eve channels; use Chat SDK channel bridge when needed. Expand after web.
 
 Developer onboarding: use `mise` for exact runtime/tool pins and repo tasks. Phase 0 must add `.mise.toml`, `packageManager: pnpm@11.9.0`, Node `24.18.0` LTS, a `doctor` command, `.env.example`, and `docs/process/onboarding.md`. Missing optional tools must be reported as optional, not block local development.
 
@@ -105,23 +114,27 @@ Billing and payments: Atlas should be payment-architecture-ready through `Billin
 
 ```text
 Browser/PWA
-  -> Next.js App Router web app
-  -> Internal typed API/Zod route handlers
-  -> Application services in modular monolith
-  -> Domain modules and policies
-  -> Repositories and permission scopes
+  -> Next.js apps/web (useEveAgent + product UI)
+  -> rewrite/proxy to apps/agent Eve routes
+  -> Eve tools -> Atlas application services
+  -> Domain modules
+  -> Repositories
   -> Postgres/pgvector + object storage + Redis
 
-External chat clients
-  -> Slack / WhatsApp-compatible provider / later Teams, Discord, Google Chat, Telegram, GitHub, Linear
-  -> apps/bot via Vercel Chat SDK
-  -> Same Atlas application services, permissions, retrieval, actions, audit logs
+External chat clients (post web-first expand)
+  -> Eve first-class channels and/or Chat SDK channel bridge in apps/agent
+  -> Same Eve tools -> Atlas application services
 
-Worker app
-  -> Temporal/BullMQ workflow adapter
-  -> Ingestion, OCR, embeddings, extraction, linking, suggestions
+apps/agent (Eve)
+  -> Durable sessions (Vercel Workflow year-1; @workflow/world-postgres local/exit)
+  -> Tools, skills, schedules
+  -> Soft citations + P1 approvals
+
+apps/worker
+  -> Workflow SDK deterministic ingestion pipeline
+  -> OCR, embeddings, extraction, linking, suggestion materialization
   -> AI/OCR/crawler/storage/provider adapters
-  -> Postgres + object storage + audit logs
+  -> Postgres + object storage
 
 Realtime adapter
   -> SSE/WebSocket/provider transport
@@ -139,39 +152,34 @@ External systems
 
 Chat lifecycle:
 
-1. User asks from composer with workspace and optional object context.
-2. API validates auth, workspace membership, visibility scope, and request schema.
-3. Retrieval service applies permission filter first, then structured filters, full-text search, vector search, optional rerank, and citation selection.
-4. If evidence is insufficient, answer with "I do not know based on your Atlas memory."
-5. Disclosure policy converts retrieved evidence into the minimum sufficient exact values, derived values, pseudonyms, or markers for the model/provider route.
-6. AI orchestration streams answer with citation references and stores `ai_runs`, retrieval trace, prompt version, model, sources, token/cost metadata, disclosure policy version, and redacted logs.
-7. UI renders answer, source memory objects, chunks, confidence, and follow-up actions separately.
+1. User asks from Eve-powered composer with workspace and optional object context.
+2. Eve session turns run durably; tools call Atlas application services.
+3. Retrieval/search tools return memory candidates; UI may show soft source links (G1).
+4. Disclosure policy still minimizes what leaves Atlas toward model providers.
+5. Eve streams the answer; operator traces may store tool/model metadata for evals (not a user-facing proof product).
+6. Follow-up actions run as typed tools under P1 approval rules.
 
 Ingestion lifecycle:
 
-1. Capture API stores source, file metadata, raw object storage reference, idempotency key, and audit event.
-2. Workflow starts or resumes by capture id.
-3. Parser extracts text and metadata; OCR runs on images/screenshots/PDFs when text is missing or low quality.
-4. Normalizer creates canonical text, chunks, embeddings, entity candidates, relation candidates, object candidates, summaries, tasks, dates, decisions, waiting items, and follow-ups.
-5. Linker matches people/projects/objects with confidence and creates review alternatives when ambiguous.
-6. Memory writer persists objects, versions, chunks, embeddings, relation edges, review cards, suggestions, and audit logs transactionally.
-7. Realtime emits progress; clients reload final state from APIs.
+1. Capture API stores source, file metadata, raw object storage reference, idempotency key.
+2. Workflow SDK pipeline starts or resumes by capture id.
+3. Parser extracts text and metadata; OCR runs when needed.
+4. Normalizer creates canonical text, chunks, embeddings, entity/relation/object candidates, summaries, tasks, dates, decisions, waiting items, and follow-ups.
+5. Linker matches people/projects/objects with confidence; only low-confidence or conflicts create Inbox review items (M1).
+6. Memory writer persists objects, versions, chunks, embeddings, relation edges, and suggestions.
+7. Realtime emits progress; clients reload final state from APIs. Proactive Eve schedules may refresh Today.
 
 Action lifecycle:
 
-1. AI or user proposes action with source basis, risk level, target integration, rollback path, and required approval.
-2. Action service validates permission, classifies risk, creates `actions` and `approvals` records.
-3. Level 0 runs read-only. Level 1 can create internal tasks/reminders with audit. Level 2 creates external drafts only. Level 3 requires explicit confirmation. Level 4 is forbidden in MVP.
-4. External provider adapter executes only after approval when allowed.
-5. `action_runs` and `audit_logs` record every state transition and provider response metadata without secrets.
+1. Eve tool or user proposes an action with source basis and risk level.
+2. Atlas action service classifies risk.
+3. Level 0–2 auto-run (read, internal write, external draft). Level 3 parks for short confirm. Level 4 forbidden.
+4. External provider adapter executes only through typed tools after P1 rules pass.
+5. Operator-facing run metadata may be stored for debugging/evals; do not productize receipts.
 
 Sharing lifecycle:
 
-1. User creates shared space and selects explicit objects.
-2. Sharing service computes visible object set and relation set.
-3. Relations are visible only when both endpoints are visible to the viewer.
-4. Derived summaries cannot include private context unless the private source is explicitly shared.
-5. Shared viewers use the same repository permission scopes as private users.
+MVP: single-user only (R0). Post-MVP sharing returns with server-side visibility enforcement.
 
 Realtime lifecycle:
 
@@ -182,13 +190,11 @@ Realtime lifecycle:
 
 External chat lifecycle:
 
-1. Platform webhook reaches `apps/bot` through Vercel Services or a regular route.
-2. Chat SDK verifies the adapter-specific request, deduplicates webhook retries, and normalizes the platform message/thread.
-3. Bot service maps the platform identity to an Atlas user/workspace connection.
-4. Bot command is classified as capture, ask, retrieve, draft, or approval response.
-5. Application services enforce the same permission, source-grounding, action-risk, and audit invariants as the web app.
-6. Response is rendered back through Chat SDK cards/text using platform-native formatting.
-7. Bot state is stored in Redis/Postgres where needed; memory state remains in Postgres.
+1. Platform webhook reaches `apps/agent` Eve channel (first-class or Chat SDK bridge).
+2. Channel normalizes the message into an Eve session turn.
+3. Identity maps to the Atlas user/workspace connection.
+4. Same Eve tools and Atlas services as web.
+5. Reply renders through the channel’s native UI (including P1 confirm controls when needed).
 
 ## 4. UI Specification
 
@@ -433,7 +439,7 @@ RAG pipeline:
 Citation rules:
 
 - Every memory-grounded claim needs at least one source object/chunk.
-- If evidence is absent or weak, answer exactly: "I do not know based on your Atlas memory."
+- Soft citations (G1): prefer tappable source links. If nothing relevant was retrieved, say so plainly; do not invent private memory facts.
 - UI must render citations next to claims or in a visible source panel.
 
 Memory write rules:
@@ -523,10 +529,10 @@ Phase 2: capture and file storage
 Acceptance: note/link/file capture, S3/R2 adapter, file metadata, idempotency, upload flow, audit events, local offline capture queue.
 
 Phase 2.5: external chat proof surface  
-Acceptance: `apps/bot` service shell, Vercel Services deployment config using `services`, Chat SDK adapter boundary, Slack capture/ask demo, one WhatsApp-compatible provider evaluation, webhook signature validation, platform identity mapping, audit logs, no permission bypass. Apple Messages/iMessage remains research-only until Apple Messages for Business/provider access is validated.
+Acceptance: `apps/agent` Eve shell, web `useEveAgent` client, optional Vercel Services packaging for web+agent, first-class or Chat SDK bridge channel path documented for later Slack/WhatsApp expand, webhook signature validation when channels ship, identity mapping, P1 tool approvals. Apple Messages/iMessage remains research-only.
 
 Phase 3: ingestion pipeline  
-Acceptance: Temporal/BullMQ adapter, parse/OCR/chunk/embed/extract/link workflow, resumable jobs, retry policy, progress events, review cards.
+Acceptance: Workflow SDK adapter, parse/OCR/chunk/embed/extract/link pipeline, resumable jobs, retry policy, progress events, M1 rare review.
 
 Phase 4: memory objects and graph  
 Acceptance: object CRUD, versioning, relation CRUD, graph query, relation visibility tests, inspector data contract.
@@ -544,12 +550,12 @@ Phase 8: shared spaces
 Acceptance: create shared space, add selected objects, role-based view, redacted relation handling, second-user private-source leakage E2E.
 
 Phase 9: evals, hardening, deployment  
-Acceptance: golden dataset, eval smoke command, security tests, migration checks, Vercel preview, Vercel Services prototype if `apps/bot` remains in scope, staging config, observability, incident/debug docs.
+Acceptance: golden dataset, eval smoke command, security tests, migration checks, Vercel preview, optional Vercel Services prototype for web+agent, staging config, observability, Spend Management notes, incident/debug docs.
 
 ## 10. First 26 GitHub Issues
 
 1. `chore(repo): initialize pnpm monorepo and Turborepo`  
-Goal: create executable repo baseline. Files: `package.json`, `pnpm-workspace.yaml`, `turbo.json`, `apps/web`, `apps/worker`, `apps/bot`, `packages/*`. Acceptance: listed commands exist. Tests: `pnpm lint`, `pnpm typecheck`, `pnpm test`, `pnpm build` run against minimal compilable package skeletons.
+Goal: create executable repo baseline. Files: `package.json`, `pnpm-workspace.yaml`, `turbo.json`, `apps/web`, `apps/agent`, `apps/worker`, `packages/*`. Acceptance: listed commands exist. Tests: `pnpm lint`, `pnpm typecheck`, `pnpm test`, `pnpm build` run against minimal compilable package skeletons.
 
 2. `chore(dx): add mise tool pins and onboarding doctor`  
 Goal: make team onboarding one-command and version-stable. Files: `.mise.toml`, `package.json`, `.env.example`, `scripts/doctor.ts`, `docs/process/onboarding.md`. Acceptance: Node `24.18.0`, pnpm `11.9.0`, `mise run setup`, `mise run doctor`, `mise run dev`, and `mise run ci` are defined; required and optional missing tools are reported separately. Tests: run `mise run doctor` on a clean machine profile or mocked shell environment.
@@ -581,19 +587,19 @@ Goal: S3/R2-compatible file blob storage. Files: `packages/ingestion/storage`, `
 11. `feat(capture): create capture API and inbox model`  
 Goal: note/link/file captures with idempotency. Files: `packages/api/capture`, `packages/domain/capture`, `apps/web/src/features/capture`. Acceptance: create/list/review captures. Tests: duplicate idempotency and validation tests.
 
-12. `chore(deploy): prototype Vercel Services for web and bot`  
-Goal: validate `apps/web` and `apps/bot` under one Vercel project without changing domain boundaries. Files: `vercel.json`, `apps/web`, `apps/bot`, `docs/process/deployment-policy.md`. Acceptance: uses current `services` configuration, web route `/`, bot route `/bot`, local dev path documented, no memory state outside Postgres/Redis. Tests: `vercel dev` smoke or documented fallback if Services beta access blocks local validation.
+12. `chore(deploy): prototype Vercel Services for web and agent`  
+Goal: validate `apps/web` and `apps/agent` under one Vercel project without changing domain boundaries. Files: `vercel.json`, `apps/web`, `apps/agent`, `docs/process/deployment-policy.md`. Acceptance: uses current `services` configuration when useful, web UI + Eve routes, local rewrite/proxy documented, Spend Management noted, no memory state outside Postgres/Redis. Tests: `vercel dev` smoke or documented fallback.
 
-13. `feat(bot): add Chat SDK service shell`  
-Goal: create external chat adapter surface without product logic duplication. Files: `apps/bot`, `packages/api/bot`, `packages/domain/integrations`. Acceptance: Chat SDK initialized lazily, Redis state adapter or dev memory adapter behind config, webhook routes validate secrets, bot calls application services only. Tests: fake adapter webhook tests and duplicate delivery tests.
+13. `feat(agent): add Eve acting shell`
+Goal: create Eve agent app with tools calling Atlas services. Files: `apps/agent`, Eve `agent/` tree, `packages/domain` tool ports. Acceptance: local Eve session works with fake model, web can attach via rewrite/proxy, tools cannot bypass domain services, sandbox off (S0). Tests: fake-provider agent smoke and tool unit tests.
 
-14. `feat(bot): add Slack capture and ask demo`  
-Goal: prove Atlas works from Slack without bypassing permissions. Files: `apps/bot/src/adapters/slack`, `packages/api/bot`, `packages/domain/audit`. Acceptance: Slack message can create capture, ask a grounded question, and receive citations/source links; platform user maps to workspace membership. Tests: signed Slack webhook fixture, unauthorized user fixture, citation rendering fixture.
+14. `feat(agent): add Slack channel expand`  
+Goal: optional post-web Slack channel expand via Eve. Files: `apps/agent/agent/channels`, Atlas identity mapping. Acceptance: Slack turn can capture/ask/act through the same tools as web; soft source links when useful; P1 confirms for external writes. Tests: signed webhook fixture and tool-path tests.
 
-15. `spike(bot): evaluate WhatsApp and Apple Messages pathways`  
-Goal: decide which consumer messaging surfaces are real near-term targets. Files: `docs/research/messaging-platforms.md`, `packages/domain/integrations`. Acceptance: compare Chat SDK support, WhatsApp provider requirements, Apple Messages for Business requirements, approval/compliance gates, webhook/security model, and demo feasibility. Tests: no code required; evidence links and go/no-go decision required.
+15. `spike(agent): evaluate WhatsApp and Apple Messages pathways`  
+Goal: decide which consumer messaging surfaces are real near-term targets. Files: `docs/research/messaging-platforms.md`, `packages/domain/integrations`. Acceptance: compare Eve/Chat SDK support, WhatsApp provider requirements, Apple Messages for Business requirements, approval/compliance gates, webhook/security model, and demo feasibility. Tests: no code required; evidence links and go/no-go decision required.
 
-16. `feat(worker): add workflow port with Temporal and local adapter`  
+16. `feat(worker): add Workflow SDK port with Vercel Workflow and @workflow/world-postgres adapters`  
 Goal: durable workflow abstraction. Files: `apps/worker`, `packages/ingestion/workflows`. Acceptance: start/resume/retry ingestion job through port. Tests: fake workflow adapter unit tests.
 
 17. `feat(ingestion): add parse, normalize, and chunk stages`  
@@ -632,7 +638,7 @@ Goal: explicit object sharing. Files: `packages/domain/sharing`, `packages/api/s
 - Realtime provider must be decided by prototype and deployment test, not preference. Vercel WebSockets can be tried, but adapter/fallback is mandatory.
 - Gmail/Calendar import scope can easily become overbroad. Start with read-only minimal scopes and incremental authorization.
 - Chat SDK is useful for proof, but every adapter adds provider secrets, webhook validation, identity mapping, and rate-limit behavior. Add only enabled adapters to dependencies.
-- Vercel Services is beta. Use it for `apps/web` + `apps/bot` only if the prototype validates local dev, preview deploys, env/service bindings, and rollback behavior.
+- Vercel Services is beta. Use it for `apps/web` + `apps/agent` only if the prototype validates local dev, preview deploys, env/service bindings, Spend Management, and rollback behavior. Hetzner + `@workflow/world-postgres` remains the documented agent exit.
 - Apple Messages/iMessage support is not a committed capability. Treat it as Apple Messages for Business/provider research until validated.
 - OCR quality is product-critical for Turkish and English. Do not cheap out here; evaluate provider quality with fixtures before committing.
 - Permission tests are release blockers. A single known private-to-shared leakage bug blocks MVP.

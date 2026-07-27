@@ -16,4 +16,4 @@ alwaysApply: false
 - Destructive migrations require explicit approval and rollback plan.
 - Add indexes for workspace, visibility, type, status, timestamps, full-text, and vector search as needed.
 - Do not use JSONB as a lazy replacement for core relational fields.
-- Add tests for private/shared leakage when touching schema or queries.
+- Add visibility / single-user scope tests when touching schema or queries. Shared-space leakage tests return when sharing ships (post-MVP).

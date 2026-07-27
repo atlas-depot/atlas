@@ -35,7 +35,7 @@ Efe may use personal provider accounts during the senior-project/MVP bootstrap t
 
 Allowed:
 
-- Efe owns Vercel, Neon, Redis, Temporal, object storage, OCR, Google OAuth, WhatsApp, Apple Messages, AI provider, and production-domain setup unless delegated.
+- Efe owns Vercel, Neon, Redis, Workflow/Eve hosting, object storage, OCR, Google OAuth, WhatsApp, Apple Messages, AI provider, and production-domain setup unless delegated.
 - Teammates use local fake providers for ordinary frontend/backend work.
 - Integration owners request only the specific secret needed for the issue.
 - Preview deployments and CI use provider env stores, not local files.
@@ -167,7 +167,7 @@ The invariant: shared dev secrets keep the team unblocked; production secrets pr
 | --- | --- | --- | --- | --- |
 | Postgres + pgvector | Docker Postgres with pgvector or Neon dev branch. | Neon or equivalent managed Postgres. | `DATABASE_URL`, optional `DIRECT_DATABASE_URL`. | Production DB, branch policy, migration safety. |
 | Redis | Local Redis or fake cache adapter. | Managed Redis. | `REDIS_URL`. | Managed instance and production sizing. |
-| Temporal/workflows | Temporal local dev server or `WorkflowPort` fake adapter. | Temporal Cloud or hosted worker stack. | `TEMPORAL_ADDRESS`, `TEMPORAL_NAMESPACE`, `TEMPORAL_TASK_QUEUE`, optional TLS vars. | Cloud namespace, account, retention, task queues. |
+| Workflow SDK / Eve | Local Workflow world or `@workflow/world-postgres`; Eve fake/local model. | Vercel Workflow + Eve on Vercel (D3); Hetzner/`eve start` exit (D2a). | `WORKFLOW_WORLD`, Postgres URL for workflow world when used, Eve/AI model vars, optional `AI_GATEWAY_API_KEY`. | Vercel project Spend Management, workflow retention, self-host exit if needed. |
 | Object storage | Local file adapter or MinIO. | R2/S3-compatible bucket. | `STORAGE_PROVIDER`, `S3_ENDPOINT`, `S3_BUCKET`, `S3_REGION`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`, `S3_FORCE_PATH_STYLE`. | Provider choice, bucket creation, lifecycle, public access policy. |
 | Auth/session | Local Better Auth-compatible secret and local database records. | Better Auth candidate after security spike, with Google OAuth connector support. | `AUTH_SECRET`, `AUTH_URL`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`. | Auth provider decision, Google OAuth app, scopes, verification. |
 | Gmail/Calendar | Fixture importer. | Google APIs through OAuth connection. | Google OAuth vars plus scope config. | Gmail/Calendar scopes, compliance. |
@@ -204,10 +204,11 @@ DIRECT_DATABASE_URL=
 # Redis
 REDIS_URL=redis://localhost:6379
 
-# Temporal
-TEMPORAL_ADDRESS=localhost:7233
-TEMPORAL_NAMESPACE=default
-TEMPORAL_TASK_QUEUE=atlas-dev
+# Workflow / Eve
+WORKFLOW_WORLD=local
+# When using @workflow/world-postgres, point at a Postgres URL (may share Neon).
+WORKFLOW_DATABASE_URL=
+EVE_AGENT_URL=http://localhost:3001
 
 # Storage
 STORAGE_PROVIDER=local
@@ -241,7 +242,7 @@ This is a starting contract, not final production config.
 Phase 0 should support two local tracks:
 
 1. Minimal local: app + fake providers.
-2. Full local: app + Postgres + Redis + Temporal + object storage emulator.
+2. Full local: app + Postgres + Redis + Workflow/Eve local world + object storage emulator.
 3. Shared dev integration: full local plus decrypted dev/integration secrets when approved.
 
 `mise run setup` may install dependencies and print service instructions. It must not create paid cloud resources.
@@ -256,7 +257,7 @@ Phase 0 should support two local tracks:
 - `.env.local` presence
 - required local env vars
 - whether fake providers are active
-- whether Postgres/Redis/Temporal are reachable when full local mode is selected
+- whether Postgres/Redis/Workflow world are reachable when full local mode is selected
 - whether optional tools such as `gh`, `vercel`, `agent-browser`, `neonctl`, `temporal`, and Docker exist
 - whether SOPS/age are installed if encrypted shared dev secrets are configured
 - who to contact when a missing value is Efe-owned

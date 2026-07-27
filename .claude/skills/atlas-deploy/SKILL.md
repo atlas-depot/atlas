@@ -36,7 +36,8 @@ Read:
 - Logs do not expose sensitive data.
 - Feature flags are configured for risky features.
 - Rollback path is clear.
-- Vercel Services is used only as deployment packaging for `apps/web` and `apps/bot`, not as a domain split.
+- Vercel Services is used only as deployment packaging for `apps/web` and `apps/agent`, not as a domain split.
+- Year-1 agent hosting is Vercel (D3) with Spend Management; Hetzner + `@workflow/world-postgres` is the documented exit.
 - Production deploy, domain, env/secrets, and provider accounts have Efe approval unless delegated.
 
 ## Commands
@@ -60,14 +61,15 @@ UI evidence: capture per /atlas-test's evidence rules (agent-browser screenshots
 
 For UI-affecting previews, capture route-specific screenshots and note any responsive/state gaps.
 
-## Vercel Services Gate
+## Vercel Services / Eve Gate
 
-If `apps/bot` is in scope:
+If `apps/agent` is in scope:
 
-- Confirm `vercel.json` uses current `services`, not older `experimentalServices`.
-- Confirm `apps/bot` shares Atlas backend services, permissions, audit, and Postgres model.
-- Confirm webhook signatures are tested.
-- Confirm local dev and preview route behavior are documented.
+- Confirm packaging does not split memory ownership away from Postgres/domain services.
+- Confirm web reaches Eve via rewrite/proxy or documented same-project topology.
+- Confirm sandbox/code-mode remains off unless an ADR enables S1.
+- Confirm Spend Management / cost notes exist for Workflow + Functions.
+- Confirm channel webhooks (when enabled) validate signatures and map identity into Atlas.
 
 ## Output
 

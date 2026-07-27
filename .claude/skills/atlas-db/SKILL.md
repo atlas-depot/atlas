@@ -38,7 +38,7 @@ Read:
 2. Check backward compatibility and data preservation.
 3. Add indexes for workspace, visibility, type, status, source, timestamps, relation endpoints, tsvector, and vector search as needed.
 4. Add repository/query tests.
-5. Add private/shared leakage fixtures when visibility changes.
+5. Add single-user scope fixtures; add shared-space leakage fixtures only when sharing ships.
 6. Update deterministic seed data when schema changes affect local/demo/eval workflows.
 7. Document rollback or forward-fix plan.
 
@@ -52,7 +52,7 @@ Never hide destructive data changes in a feature PR.
 - Are vector and full-text search strategies compatible?
 - Are relation edges typed and auditable?
 - Are migrations safe and reversible?
-- Are tests covering private/shared leakage?
+- Are tests covering unauthorized access / future sharing leakage when relevant?
 - Do embeddings/chunks/sources preserve provenance?
 - Can export/delete flows find all related data?
 

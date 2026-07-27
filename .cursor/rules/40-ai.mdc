@@ -1,6 +1,7 @@
 ---
-description: AI rules for Atlas ingestion, extraction, RAG, citations, memory writes, and evals.
+description: AI rules for Atlas Eve acting agent, ingestion, soft citations, memory writes, and evals.
 globs:
+  - apps/agent/**/*
   - packages/ai/**/*
   - packages/ingestion/**/*
   - packages/evals/**/*
@@ -9,15 +10,19 @@ alwaysApply: false
 
 # Atlas AI Rules
 
-- Permission-filter before retrieval.
-- Ground memory answers in source items and chunks.
-- Say “I do not know based on your Atlas memory” when evidence is insufficient.
+Canonical decision: `docs/architecture/adr-001-acting-first-eve.md`.
+
+- Eve in `apps/agent` is the acting brain; tools call Atlas domain services only.
+- Prefer soft source links (G1). Do not invent private memory facts when nothing relevant was retrieved.
+- Do not productize proof/receipt/policy-hash UIs.
 - Use structured outputs and validate them before writes.
-- Store AI run metadata and prompt/model versions.
-- Make memory writes auditable.
-- Low-confidence extraction goes to review.
-- External actions require risk classification.
+- Store operator traces (prompt/model/tool metadata) for evals; not as end-user product.
+- Memory writes are mostly auto (M1); only low-confidence or conflicts go to Inbox review.
+- External actions use P1 risk mapping: auto for internal writes and drafts; short confirm for real external writes; Level 4 forbidden.
+- No sandbox/code-mode default in MVP (S0).
+- Workflow SDK for durable Eve sessions and ingestion; not Temporal by default.
 - AI behavior changes require eval or smoke test updates.
 - Apply `docs/architecture/privacy-redaction-policy.md` before sending retrieved chunks, prompts, screenshots, fixtures, or raw source excerpts to external providers.
 - Do not let a model decide what is unnecessary or safe to disclose.
 - Prefer structured facts, source IDs, derived values, and stable pseudonyms before exact raw text when the task permits it.
+- Fake/local model adapters must exist for ordinary local development.

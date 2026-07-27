@@ -5,7 +5,7 @@ alwaysApply: true
 
 # Atlas Core Rules
 
-Atlas is a living second brain for capturing, organizing, retrieving, acting on, and selectively sharing memory.
+Atlas is an acting second brain: capture, organize, retrieve, and act on memory. MVP is single-user. Canonical decision: `docs/architecture/adr-001-acting-first-eve.md`.
 
 Always protect these invariants:
 
@@ -14,10 +14,11 @@ Always protect these invariants:
 - Postgres canonical DB with pgvector for MVP retrieval.
 - OKF is export/import format, not primary storage.
 - Responsive web + PWA first, not native mobile MVP.
-- Source-grounded AI answers over memory.
-- Async ingestion pipeline.
-- Backend-enforced private/shared permissions.
-- Explicit approval for risky external actions.
+- Eve in `apps/agent` is the acting brain; tools call Atlas domain services.
+- Soft citations when useful; no proof/receipt/policy theater as product.
+- Async Workflow SDK ingestion pipeline (not Temporal by default).
+- P1: auto internal writes and drafts; confirm real external writes / destructive actions.
+- No sandbox/code-mode default in MVP (S0).
 - Every PR must explain what, why, how, tests, risks, and learning.
 - Local development must work with fake/local providers before requiring real provider credentials.
 - Provider accounts, production env vars, and secrets are Efe-owned unless delegated.

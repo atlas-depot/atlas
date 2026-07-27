@@ -29,7 +29,7 @@ This file explains what every committed file in the current Atlas project knowle
 | `.claude/skills/atlas-implement/SKILL.md` | Implementation workflow after an issue/plan exists. | Coding workflow, verification, or scope rules change. |
 | `.claude/skills/atlas-issue/SKILL.md` | Turns requests into scoped GitHub issues. | Issue template or acceptance bar changes. |
 | `.claude/skills/atlas-owner-onboarding/SKILL.md` | Role-specific onboarding for owners and agents. | Ownership model or first-task guidance changes. |
-| `.claude/skills/atlas-plan/SKILL.md` | Source-grounded implementation planning, with Phase 0 requirement grilling. | Planning shape, grill framework, or architecture decision gates change. |
+| `.claude/skills/atlas-plan/SKILL.md` | ADR-aligned implementation planning, with Phase 0 requirement grilling. | Planning shape, grill framework, or architecture decision gates change. |
 | `.claude/skills/atlas-pr/SKILL.md` | Mode A opens/updates reviewable PRs with preview, screenshots, tests, risks, rollback, and senior-project evidence. Mode B babysits a PR to merge-ready: comments, CI, previews, external reviews, and readiness. | PR flow, template, babysit loop, review-tool policy, or senior-project evidence requirements change. |
 | `.claude/skills/atlas-review/SKILL.md` | Extensive PR/diff review workflow. | Review gates, external review tools, or severity model changes. |
 | `.claude/skills/atlas-security/SKILL.md` | Security/privacy/OAuth/permission/audit/export review workflow. | Threat model or security requirements change. |
@@ -81,6 +81,7 @@ This file explains what every committed file in the current Atlas project knowle
 | `docs/architecture/repository-structure.md` | Target app scaffold structure and package responsibilities. | App/package layout changes. |
 | `docs/architecture/security.md` | Security/privacy architecture. | Threat model or privacy controls change. |
 | `docs/architecture/technical-decisions.md` | Architecture decision record summary. | Stack/deployment/OKF/mobile/Convex/etc. decisions change. |
+| `docs/architecture/adr-001-acting-first-eve.md` | Accepted ADR: acting-first product, Eve brain, Workflow SDK durability. | Agent runtime, product posture, Temporal/Eve/channel decisions change. |
 | `docs/architecture/ui-system.md` | Atlas UI system and surfaces. | Design system or route surface changes. |
 | `docs/architecture/ui-quality-bar.md` | Binding UI quality bar and design reset process. Marks the first static prototype as rejected and defines the next acceptance gate. | Visual direction, design quality rules, or UI reset process changes. |
 

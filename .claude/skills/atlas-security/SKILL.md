@@ -25,18 +25,18 @@ Read:
 - Least-privilege OAuth scopes.
 - Refresh tokens encrypted.
 - Secrets not logged.
-- Private/shared memory separation enforced server-side.
-- Relation visibility checked.
-- Search, chat, graph, suggestions, exports, and notifications share permission logic.
-- External actions require correct approval level.
+- MVP is single-user (R0). When sharing ships, enforce visibility server-side.
+- Relation visibility checked when sharing exists.
+- Search, chat, graph, suggestions, exports, and notifications share the same access logic when multi-user returns.
+- External actions require correct P1 approval level (confirm real external writes; auto drafts/internal).
 - Data export and deletion paths exist or have tracked issues.
 - External provider calls use deterministic purpose-bound disclosure.
 - No model decides what is unnecessary or safe to disclose.
 - Secrets, OAuth tokens, refresh tokens, passwords, private keys, session material, raw card data, and CVV are never sent to LLMs.
 - Stable pseudonyms or derived values are preferred when exact values are not required.
 - OAuth refresh, revocation, scope changes, and token failure states are handled.
-- External actions have risk level, explicit approval when required, rollback path, and audit logs.
-- Shared spaces cannot infer private relation endpoints.
+- Eve tools cannot bypass Atlas domain services or create a second memory store.
+- Shared spaces are post-MVP; do not invent sharing UI as MVP scope.
 - Secrets do not appear in fixtures, screenshots, CI logs, or PR bodies.
 - Owner gates: see docs/process/agent-alignment.md, section Efe-Owned Gates.
 - Local development can use fake/local providers without production secrets.
@@ -55,7 +55,7 @@ Check:
 - Suggestions/dashboard cards.
 - Shared spaces.
 - Exports/OKF bundles.
-- Bot/external chat responses.
+- Bot/external chat responses (Eve channels).
 - Notifications/realtime events.
 
 ## Output

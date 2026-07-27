@@ -26,12 +26,12 @@ Read:
 - Modular monolith.
 - Domain services own business logic.
 - API handlers validate and delegate.
-- Repositories enforce common filters and permissions.
+- Repositories enforce common filters and single-user/workspace scope (sharing post-MVP).
 - External calls go through adapters.
-- Long workflows are idempotent.
-- Action runs and AI runs are auditable.
-- Durable state lives in Postgres/Redis/workflow store, not request memory.
-- Bot, web, worker, and public API surfaces call shared application services.
+- Long Workflow SDK jobs are idempotent.
+- Action runs and AI/tool runs leave operator traces for evals/debug.
+- Durable state lives in Postgres/Redis/Workflow world, not request memory.
+- Eve (`apps/agent`), web, worker, and public API surfaces call shared application services.
 - Billing and payment providers go through `BillingPort` and `PaymentPort`.
 - Raw payment credentials and card data never enter Atlas Postgres.
 
@@ -40,18 +40,17 @@ Read:
 - Validate inputs with schemas.
 - Return typed errors.
 - Do not expose internal provider errors raw.
-- Do not trust client-provided workspace membership or visibility.
+- Do not trust client-provided workspace membership.
 - Public REST API must be versioned.
-- All responses containing memory objects include visibility metadata.
-- External action endpoints require risk classification and approval state.
+- External action endpoints require P1 risk classification and confirm state when needed.
 
 ## Implementation Workflow
 
 1. Define domain/application service boundary before route code.
 2. Add or reuse Zod contracts.
-3. Add repository method with centralized permission filtering.
-4. Add audit event for writes, AI runs, actions, sharing, and exports.
-5. Add tests for happy path and permission failure.
+3. Add repository method with centralized workspace/user scope filtering.
+4. Add operator traces for writes, AI/tool runs, and actions when useful for evals.
+5. Add tests for happy path and unauthorized access.
 6. Keep provider-specific code behind adapters.
 7. Keep fake/local provider adapters available unless the issue explicitly requires real integration mode.
 8. When adding provider config, update `.env.example`, provider/env setup docs, and env checks.

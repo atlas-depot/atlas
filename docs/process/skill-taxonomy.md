@@ -24,7 +24,7 @@ These are the main verbs.
 | Skill | Mode | Purpose | Writes files? |
 | --- | --- | --- | --- |
 | `/atlas-owner-onboarding` | orient | Tell a person/agent what to read, own, run, and escalate. | No |
-| `/atlas-plan` | read-only | Produce a source-grounded plan, issue split, or ADR/RFC direction. | No, unless the user asks to write planning docs. |
+| `/atlas-plan` | read-only | Produce an ADR-aligned plan, issue split, or architecture direction (acting-first + Eve). | No, unless the user asks to write planning docs. |
 | `/atlas-implement` | write | Execute an already approved issue/plan with tests. | Yes |
 | `/atlas-review` | read-mostly | Review a diff/PR with CI, preview, review threads, external reviewers, and Atlas invariants. | No by default |
 | `/atlas-deploy` | release gate | Check preview/staging/production readiness, provider/env setup, secrets, previews, and rollback. | No by default |

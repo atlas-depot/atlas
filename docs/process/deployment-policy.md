@@ -10,7 +10,7 @@
 ## Rules
 
 - Every PR gets a preview deployment when possible.
-- PRs touching `apps/web`, `apps/bot`, API routes, or deployment config must include a preview URL or explain why preview was unavailable.
+- PRs touching `apps/web`, `apps/agent`, API routes, or deployment config must include a preview URL or explain why preview was unavailable.
 - UI/frontend preview PRs must include `agent-browser` screenshot or snapshot evidence. If `agent-browser` is missing, install it before marking preview smoke complete.
 - Production deploys only from `main`.
 - `main` must remain deployable.
@@ -24,7 +24,7 @@
 
 ## Vercel Services
 
-Vercel Services may be used to package `apps/web` and `apps/bot` under one Vercel project if the prototype validates local development, preview deployments, environment binding, rollback behavior, and webhook routing. It must not create independent memory services or bypass the shared Postgres, permissions, audit, and domain layers.
+Vercel Services may be used to package `apps/web` and `apps/agent` under one Vercel project if the prototype validates local development, preview deployments, environment binding, Spend Management, rollback behavior, and webhook routing for channels. It must not create independent memory services or bypass the shared Postgres and domain layers. Hetzner + `@workflow/world-postgres` remains the documented agent exit.
 
 ## Environment Policy
 

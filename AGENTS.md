@@ -4,7 +4,7 @@ These are project-wide instructions for AI coding agents working on Atlas.
 
 ## Project
 
-Atlas is a living second brain for knowledge workers. It captures messy digital inputs, turns them into structured memory objects and typed relationships, retrieves them with grounded AI, surfaces proactive next actions, and supports safe sharing.
+Atlas is an acting second brain for knowledge workers. It captures messy digital inputs, turns them into structured memory objects and typed relationships, retrieves and cites softly when useful, and acts proactively through an Eve-based agent on that memory. MVP is single-user; selective sharing is post-MVP. Canonical decision: `docs/architecture/adr-001-acting-first-eve.md`.
 
 Efe Baran Durmaz is the bootstrap lead and product owner. This does not create a day-to-day hierarchy for engineering work, but it does make Efe the decision source for product scope, kickstarting the application scaffold, provider accounts, production secrets, compliance-sensitive setup, final branding, and senior project coordination unless ownership is explicitly delegated.
 
@@ -25,10 +25,14 @@ If scope becomes too large, cut feature scope instead of weakening architecture.
 - Use pgvector for MVP vector search.
 - Use OKF only as a portable export/import format.
 - Build responsive web + PWA first. Do not build native mobile in MVP.
-- Enforce private/shared memory permissions in backend and database access layer, not only in UI.
-- Ground AI answers in source memory items and citations.
-- Use async workflows for ingestion, extraction, embeddings, OCR, and suggestions.
-- Require explicit confirmation for risky external actions.
+- Use Eve in `apps/agent` as the acting brain; web talks via `useEveAgent`.
+- Keep Atlas domain services as the only memory/action authority; Eve tools call them.
+- Use Workflow SDK for durable ingestion and agent sessions (Vercel Workflow year-1; `@workflow/world-postgres` local/self-host). Do not default to Temporal.
+- Prefer soft citations and useful outcomes over proof/receipt/policy theater.
+- Auto-run internal safe writes and external drafts; require short confirmation for real external writes and destructive actions (P1).
+- MVP is single-user / single workspace. Shared-space enforcement returns when sharing ships.
+- Use async Workflow pipelines for ingestion, extraction, embeddings, OCR, and suggestion materialization.
+- No sandbox/code-mode default in MVP (S0).
 
 ## Commands
 
@@ -56,8 +60,8 @@ Expected structure:
 
 ```text
 apps/web
+apps/agent
 apps/worker
-apps/bot
 packages/db
 packages/domain
 packages/api

@@ -1,6 +1,6 @@
 ---
 name: atlas-ai
-description: Design, implement, or review Atlas AI workflows and evals: ingestion, extraction, RAG, citations, memory writes, suggestions, action risk levels, prompt versioning, and provider abstraction. Use when building or reviewing AI pipelines, designing or reviewing retrieval/extraction/privacy/action-safety evals, or setting eval datasets and pass gates.
+description: Design, implement, or review Atlas AI workflows and evals: Eve acting agent, ingestion, extraction, soft citations, memory writes, suggestions, action risk levels, prompt versioning, and provider abstraction. Use when building or reviewing AI pipelines, Eve tools/schedules, designing or reviewing retrieval/extraction/privacy/action-safety evals, or setting eval datasets and pass gates.
 ---
 
 # Atlas AI Skill
@@ -25,17 +25,15 @@ If the work needs real model/OCR/crawler credentials, use the provider request p
 
 ## Required AI rules
 
-- Permission-filter before retrieval.
-- Ground memory answers in sources.
-- Say “I do not know based on your Atlas memory” when evidence is insufficient.
+- Prefer soft source links on answers/actions (G1).
+- Say uncertainty plainly when nothing relevant was retrieved; do not invent private memory facts.
 - Use structured outputs for extraction.
 - Validate outputs before writes.
-- Store AI run metadata.
-- Make memory writes auditable and reversible where possible.
-- Gate external actions by risk level.
-- Store prompt version, model, input source IDs, output JSON, validation errors, created objects, and created relations for extraction runs.
-- Separate user-visible answers from internal traces.
+- Gate real external writes with P1 short confirmation; auto-run internal writes and drafts.
 - Fake model/OCR/crawler adapters must exist for local tests and ordinary development.
+- Eve in `apps/agent` is the acting runtime; tools call Atlas domain services only.
+- No sandbox/code-mode default in MVP (S0).
+- Workflow SDK for durable ingestion and Eve sessions; not Temporal by default.
 - OCR is a day-one ingestion capability behind `OCRPort`.
 - Choose the production OCR provider only after a fixture bakeoff covering Turkish, English, screenshots, PDFs, invoices, and noisy images.
 - Disclosure and redaction before external provider calls: see /atlas-security.
@@ -53,7 +51,7 @@ Capture, parse, OCR, normalize, chunk, embed, extract entities, extract relation
 5. Merge/dedupe/rerank if configured.
 6. Select citation chunks.
 7. Generate grounded answer.
-8. If evidence is insufficient, answer exactly: `I do not know based on your Atlas memory.`
+8. Prefer soft source links when useful. If nothing relevant was retrieved, say so plainly.
 9. Persist retrieval trace for eval/debugging.
 
 ## Action Risk Rules
@@ -61,7 +59,7 @@ Capture, parse, OCR, normalize, chunk, embed, extract entities, extract relation
 - Level 0: read-only retrieval.
 - Level 1: internal safe write.
 - Level 2: draft external action.
-- Level 3: external write requiring explicit confirmation.
+- Level 3: external write requiring short confirmation (P1).
 - Level 4: destructive/irreversible external action, forbidden in MVP.
 
 Never let model output execute an external action directly.
@@ -79,7 +77,7 @@ Eval categories:
 - Dashboard suggestion usefulness.
 - Action risk classification.
 - Citation coverage.
-- “I do not know” behavior.
+- Soft citation usefulness and invented-memory failures.
 - Private/shared leakage.
 
 Required dataset minimums:

@@ -94,8 +94,8 @@ They suggest relevant Atlas skills and source-of-truth docs based on prompt text
 - pgvector for MVP semantic retrieval.
 - OKF as export/import format, not primary storage.
 - Responsive web + PWA before native mobile.
-- Source-grounded AI answers.
-- Async ingestion pipeline.
-- Private/shared memory enforced server-side.
-- Safe action approvals for external writes.
-- Architecture decisions must be documented.
+- Soft citations and an acting Eve agent on memory.
+- Async Workflow SDK ingestion pipeline.
+- Single-user MVP; sharing post-MVP.
+- P1: confirm real external writes; auto drafts and internal safe writes.
+- Architecture decisions must be documented (`docs/architecture/adr-001-acting-first-eve.md`).

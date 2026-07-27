@@ -1,6 +1,6 @@
 ---
 name: atlas-owner-onboarding
-description: Onboard a teammate or coding agent who is taking ownership of an Atlas area such as frontend, UI design, backend/API, database/permissions, AI/ingestion/evals, security/privacy, DX/deploy, or bot/integrations. Use when someone asks what to do first, what docs to read, what issues to pick, what files they own, what commands to run, or when to escalate decisions to Efe.
+description: Onboard a teammate or coding agent who is taking ownership of an Atlas area such as frontend, UI design, backend/API, database, AI/Eve/ingestion/evals, security/privacy, DX/deploy, or agent channels/integrations. Use when someone asks what to do first, what docs to read, what issues to pick, what files they own, what commands to run, or when to escalate decisions to Efe.
 ---
 
 # Atlas Owner Onboarding Skill

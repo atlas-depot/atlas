@@ -58,7 +58,7 @@ This begins when Vercel preview deploys are available.
 Rules:
 
 - Every UI/API/bot change should go through a branch and PR, even if Efe is the only reviewer.
-- Every PR touching `apps/web`, `apps/bot`, API routes, or deployment must include a preview URL or explain why preview was unavailable.
+- Every PR touching `apps/web`, `apps/agent`, API routes, or deployment must include a preview URL or explain why preview was unavailable.
 - PR description must include local commands run and preview smoke-test notes.
 - Direct pushes to `main` should be limited to emergency docs/process fixes.
 
@@ -213,7 +213,7 @@ Preferred local service strategy:
 - Postgres with pgvector through Docker Compose by default, managed Neon dev branch only when needed.
 - Redis through Docker Compose by default.
 - Object storage through MinIO for local integration, with filesystem/in-memory fake adapter only for unit tests.
-- Temporal through `WorkflowPort` fake adapter early, Docker/local Temporal when ingestion workflow testing starts.
+- Workflow SDK through local world or `@workflow/world-postgres` early; Vercel Workflow in year-1 prod (D3).
 - Deterministic seed data through `mise run db:seed`.
 
 The default `pnpm dev` path should run with fake providers when real credentials are missing. Full integration mode can require provider credentials.

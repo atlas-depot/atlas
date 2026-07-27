@@ -40,18 +40,18 @@ Known preview limitations:
 
 - [ ] No secrets added.
 - [ ] Permission paths checked.
-- [ ] Private/shared leakage considered.
+- [ ] Unauthorized access / future sharing leakage considered.
 - [ ] Logs checked for sensitive data.
 - [ ] OAuth or token handling unaffected, or reviewed.
 - [ ] Provider/env changes update `.env.example`, provider docs, and doctor/env checks.
 
 ## AI checklist, if applicable
 
-- [ ] Source grounding preserved.
+- [ ] Soft citations / useful acting preserved (G1); no proof theater.
 - [ ] Structured outputs validated.
-- [ ] Eval or smoke test added.
+- [ ] Eval or smoke test added when AI behavior changes.
 - [ ] Failure mode is safe.
-- [ ] Action risk level checked.
+- [ ] Action risk level checked (P1).
 
 ## Risk and rollback
 

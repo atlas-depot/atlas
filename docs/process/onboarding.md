@@ -99,8 +99,7 @@ Optional:
 - `vercel` for preview/deploy workflows.
 - `agent-browser` for UI screenshot, preview smoke, and visual regression evidence.
 - `neonctl` or equivalent for managed Postgres workflows.
-- `temporal` for workflow development.
-- Docker only if local Postgres/Redis/Temporal containers are used.
+- Docker only if local Postgres/Redis/Workflow containers are used.
 
 Missing optional tools must not block local web development.
 
@@ -165,7 +164,7 @@ Risk if denied:
 Phase 0 must support two local tracks:
 
 - Minimal local: app plus fake/local providers.
-- Full local: app plus Postgres, Redis, Temporal, and object storage emulator or managed dev equivalents.
+- Full local: app plus Postgres, Redis, Workflow/Eve local world, and object storage emulator or managed dev equivalents.
 
 `pnpm dev` should default to minimal local unless the developer opts into full local or integration mode.
 
@@ -173,29 +172,31 @@ Provider defaults:
 
 - Postgres/pgvector: Docker/local Postgres or Neon dev branch.
 - Redis: local Redis or fake cache adapter.
-- Temporal: `WorkflowPort` fake adapter early, Docker/local Temporal when ingestion workflows start.
+- Workflow SDK: local world or `@workflow/world-postgres` early; Vercel Workflow in year-1 prod.
 - Object storage: MinIO for local integration, filesystem/in-memory fake adapter only for unit tests.
 - AI/OCR/crawler/webhooks: deterministic fake providers and fixtures for tests and CI, real dev providers only through shared dev secrets.
+- Eve agent: local `apps/agent` with fake model; sandbox off (S0).
 - Vercel/preview/prod env: owned by Efe unless delegated.
 
 Seed defaults:
 
 - `mise run db:seed` must load deterministic local seed data.
-- Keep small local seeds separate from larger demo, leakage, and eval fixtures.
+- Keep small local seeds separate from larger demo and eval fixtures.
 - Do not use anonymized production dumps until a privacy process exists.
 
-## Vercel Services Local Contract
+## Vercel Services / Eve Local Contract
 
-If `apps/bot` is in scope, Phase 0 or the Vercel Services spike must document the local workflow.
+If `apps/agent` is in scope, Phase 0 or the Vercel Services spike must document the local workflow.
 
 Expected shape:
 
 ```text
-apps/web  -> route prefix /
-apps/bot  -> route prefix /bot
+apps/web    -> product UI + useEveAgent
+apps/agent  -> Eve routes (rewrite/proxy from web)
+apps/worker -> Workflow SDK ingestion
 ```
 
-Use current Vercel Services `services` configuration, not `experimentalServices`.
+Use current Vercel Services `services` configuration when packaging web+agent, not `experimentalServices`.
 
 The bot service is an external chat webhook surface. It must call Atlas application services and must not own memory, permissions, actions, or audit logs.
 

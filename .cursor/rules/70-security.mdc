@@ -1,29 +1,31 @@
 ---
-description: Security and privacy rules for Atlas auth, OAuth, permissions, LLM data handling, and action safety.
+description: Security and privacy rules for Atlas auth, OAuth, LLM data handling, and action safety.
 globs:
   - packages/auth/**/*
   - packages/api/**/*
   - packages/domain/**/*
   - packages/ai/**/*
   - packages/db/**/*
+  - apps/agent/**/*
 alwaysApply: false
 ---
 
 # Atlas Security Rules
 
+Canonical decision: `docs/architecture/adr-001-acting-first-eve.md`.
+
 - Never commit secrets.
 - Encrypt OAuth refresh tokens.
 - Use least-privilege scopes.
 - Do not log secrets or sensitive raw content.
-- Enforce private/shared visibility server-side.
-- Relation visibility must consider both endpoints.
-- Search, chat, graph, suggestions, exports, and notifications must use the same permission model.
+- MVP is single-user (R0). When sharing ships, enforce visibility server-side.
+- Connector secrets and OAuth tokens never go to models or channel adapters as raw values.
 - Destructive external actions are forbidden in MVP.
-- Risky external writes require explicit confirmation and audit logs.
+- Real external writes require short confirmation (P1); drafts and internal safe writes may auto-run.
 - Do not request or share personal provider account passwords, 2FA, or broad production dashboard access.
 - Provider/env changes must update `.env.example`, provider docs, and doctor/env checks.
 - Do not store raw payment credentials or card data in Atlas Postgres.
-- Live payment enablement needs PCI-boundary review, webhook verification, audit logs, rollback, and explicit approval.
+- Live payment enablement needs PCI-boundary review, webhook verification, rollback, and explicit approval.
 - Use deterministic purpose-bound disclosure from `docs/architecture/privacy-redaction-policy.md`.
 - Secrets, OAuth tokens, refresh tokens, passwords, private keys, session material, raw card data, and CVV must never be sent to LLMs.
 - Real user-derived fixtures must be redacted before commit unless Efe approves an encrypted local-only development bundle.

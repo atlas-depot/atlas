@@ -13,13 +13,13 @@ Privacy is an architecture invariant, not a feature toggle.
 - No raw payment credentials, card data, or provider admin tokens stored in Atlas Postgres.
 - Audit logs for auth, sharing, AI writes, actions, and exports.
 - User data export and deletion.
-- Backend-enforced private/shared separation.
-- Purpose-bound disclosure before cloud LLM, OCR, crawler, bot, log, screenshot, fixture, and PR artifacts.
+- Backend-enforced single-user/workspace scope in MVP; shared-space separation when sharing ships.
+- Purpose-bound disclosure before cloud LLM, OCR, crawler, Eve channel, log, screenshot, fixture, and PR artifacts.
 - Private mode for sensitive items where cloud AI is restricted.
 
 ## Redaction and disclosure
 
-Read `docs/architecture/privacy-redaction-policy.md` before changing AI, OCR, crawler, fixture, screenshot, export, bot, or provider disclosure behavior.
+Read `docs/architecture/privacy-redaction-policy.md` before changing AI, OCR, crawler, fixture, screenshot, export, Eve channel, or provider disclosure behavior.
 
 Atlas does not redact canonical memory out of existence.
 Atlas stores the full authorized memory in Postgres, then applies deterministic disclosure policy when data leaves the trusted boundary or appears in artifacts.

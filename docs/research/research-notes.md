@@ -22,9 +22,10 @@ Checked on 2026-06-30 and refreshed on 2026-07-01 for onboarding, preview, and V
 - Vercel Git integration creates preview deployments for pushes and production deployments from the production branch. Source: https://vercel.com/docs/git
 - Vercel CLI supports env management such as pulling project environment variables for local development; Atlas should still keep secret values out of Git. Source: https://vercel.com/docs/cli/env
 - Vercel Services documents the `services` field for deploying multiple apps/services in one Vercel project, and the feature is beta. Source: https://vercel.com/docs/services
-- Vercel Chat SDK is a framework for building chat interfaces across platforms; Atlas should use it for external chat surfaces only behind the same backend memory/permission layer. Source: https://vercel.com/chat and https://github.com/vercel/chat
+- Vercel Chat SDK is a transport/card layer; with Eve, prefer first-class Eve channels and use the Chat SDK channel bridge when Eve lacks a first-class adapter. Source: https://vercel.com/kb/guide/chat-sdk-and-eve and https://eve.dev/
+- Eve is the Atlas acting-agent runtime (filesystem-first durable agents on Workflow SDK). Source: https://eve.dev/ and https://vercel.com/docs/eve
 - mise supports tool version management and task execution through project configuration. Source: https://mise.jdx.dev/configuration.html and https://mise.jdx.dev/tasks/
-- Temporal documents a local development server path through the Temporal CLI; Atlas should keep Temporal behind `WorkflowPort` so local fake and cloud-backed modes can coexist. Source: https://docs.temporal.io/cli/server
+- Workflow SDK / Vercel Workflows are the Atlas durability default for Eve sessions and ingestion; Temporal is not the default (ADR-001). Source: https://workflow-sdk.dev/ and https://vercel.com/docs/workflows
 - Neon supports database branches as isolated copies of a parent branch; Atlas can use Neon dev/preview branches while keeping Postgres canonical. Source: https://neon.com/docs/manage/branches
 - 1Password CLI provides a possible future small-team secret-sharing workflow, but Atlas should not adopt it until recurring shared secret access is real. Source: https://developer.1password.com/docs/cli/
 - Auth.js now states that the project is part of Better Auth; Atlas should not default to Auth.js without re-evaluating Better Auth. Source: https://authjs.dev/

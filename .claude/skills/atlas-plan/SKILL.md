@@ -78,10 +78,12 @@ If no blocking questions remain, say so and continue to the plan.
 - Web + PWA before native mobile.
 - Modular monolith.
 - Postgres canonical database.
-- Source-grounded AI answers.
-- Async ingestion.
-- Private/shared enforcement server-side.
-- Safe approvals for external actions.
+- Eve acting brain in `apps/agent`; tools call Atlas domain services.
+- Soft citations (G1); no proof/receipt theater.
+- Async Workflow SDK ingestion (not Temporal by default).
+- Single-user MVP; sharing post-MVP.
+- P1: auto drafts/internal writes; confirm real external writes.
+- No sandbox/code-mode default in MVP (S0).
 - Evidence over agreement.
 - Quality, simplicity, robustness, scalability, security, and long-term maintainability over development cost.
 

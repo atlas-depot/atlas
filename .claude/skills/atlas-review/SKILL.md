@@ -81,7 +81,7 @@ Review:
 2. Correctness and regressions.
 3. Atlas architecture invariants.
 4. Database and migration safety.
-5. Permission and private/shared leakage.
+5. Unauthorized access and future sharing leakage.
 6. AI grounding, citations, structured outputs, and evals.
 7. Action risk and approval flow.
 8. UI quality, accessibility, responsive behavior, and preview evidence.

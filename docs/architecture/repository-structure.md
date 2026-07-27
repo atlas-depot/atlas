@@ -78,7 +78,7 @@ Allowed high-level dependency flow:
 
 ```text
 apps/web      -> packages/api, packages/auth, packages/billing, packages/ui, packages/config
-apps/bot      -> packages/api, packages/auth, packages/config
+apps/agent    -> packages/api, packages/domain, packages/ai, packages/auth, packages/config
 apps/worker   -> packages/ingestion, packages/ai, packages/api, packages/config
 
 packages/api        -> packages/domain, packages/db, packages/auth, packages/ai
@@ -94,6 +94,7 @@ packages/domain     -> no infrastructure imports
 packages/config     -> no domain imports
 ```
 
+Note: `apps/bot` is superseded by Eve channels in `apps/agent`. Do not add a parallel Chat-SDK-only bot app unless an ADR reintroduces it.
 Forbidden:
 
 - Browser code importing `packages/db`.
@@ -142,20 +143,56 @@ Deployment:
 - Vercel web surface.
 - Preview URL required for UI/API-facing PRs once Vercel is configured.
 
-### `apps/worker`
+### `apps/agent`
 
-Purpose: Durable background workers for ingestion, OCR, embeddings, extraction, suggestions, actions, exports, and eval jobs.
+Purpose: Eve acting brain. Durable chat, proactive schedules, typed tools that call Atlas domain services, and channel adapters (Eve first-class + Chat SDK bridge when needed).
 
 Contains:
 
-- Temporal worker entrypoint or WorkflowPort adapter implementation.
-- Workflow registrations.
-- Activity adapters for OCR, embeddings, storage, crawler, email/calendar imports, and action drafts.
+- `agent/` directory (instructions, agent.ts, tools, skills, channels, schedules).
+- Eve runtime config and Workflow world selection (Vercel Workflow in prod; `@workflow/world-postgres` for local/self-host exit).
+- Tool executors that call `packages/domain` / `packages/api` application services only.
+- Channel files for web-adjacent HTTP and later Slack/WhatsApp-compatible surfaces.
+
+Must not contain:
+
+- A second memory database.
+- UI product screens (those stay in `apps/web`).
+- Sandbox/code-mode defaults in MVP (S0).
+- Independent permission or action policy that bypasses Atlas domain services.
+
+README must document:
+
+- Local `eve` / `pnpm` dev commands.
+- How `apps/web` rewrites/proxies to agent routes.
+- Tool list and approval mapping (P1).
+- Fake/local model mode.
+- Spend / cost controls notes.
+
+CI responsibility:
+
+- Typecheck, tool unit tests, approval gating tests, fake-provider agent smoke.
+
+Deployment:
+
+- Year-1: Vercel alongside or as a service next to `apps/web` (D3), with Spend Management.
+- Exit: Hetzner/VPS `eve start` + `@workflow/world-postgres` (D2a). Not Cloudflare Workers.
+
+### `apps/worker`
+
+Purpose: Deterministic durable pipelines for ingestion, OCR, embeddings, extraction, linking, suggestion materialization, exports, and eval jobs on the Workflow SDK substrate.
+
+Contains:
+
+- Workflow SDK / WorkflowPort adapter implementation (not Temporal).
+- Workflow registrations for ingestion stages.
+- Activity adapters for OCR, embeddings, storage, crawler, email/calendar imports.
 - Idempotency and retry handling.
 
 Must not contain:
 
 - UI code.
+- Free-form Eve agent loops for ingestion.
 - Provider-specific logic outside adapters.
 - Durable state stored only in process memory.
 
@@ -164,7 +201,7 @@ README must document:
 - Local worker start command.
 - Workflow list.
 - Required local services.
-- Temporal local dev or `WorkflowPort` fake adapter setup.
+- `@workflow/world-postgres` or local workflow world setup.
 - Retry/idempotency rules.
 - Observability hooks.
 
@@ -174,44 +211,14 @@ CI responsibility:
 
 Deployment:
 
-- Separate worker runtime from the Next.js request path.
-- Temporal Cloud or hosted worker process when production begins.
+- Separate worker runtime from the Next.js request path when needed.
+- Same Workflow durability substrate as Eve (Vercel Workflow year-1; Postgres world for self-host).
 
-### `apps/bot`
+### `apps/bot` (superseded)
 
-Purpose: External chat/webhook surface for Slack and later WhatsApp-compatible providers. It may use Vercel Chat SDK where it improves platform adapter DX.
-
-Contains:
-
-- Signed webhook endpoints.
-- Platform identity mapping.
-- Chat SDK adapter boundary.
-- Slack capture/ask proof flow.
-- Provider-specific fixtures.
-
-Must not contain:
-
-- Independent memory store.
-- Independent permission checks.
-- Auto-send or destructive actions.
-- Normal iMessage assumptions. Apple Messages path requires Apple Messages for Business/provider feasibility.
-
-README must document:
-
-- Supported platforms.
-- Local webhook testing.
-- Signature validation fixtures.
-- Permission mapping.
-- Audit behavior.
-
-CI responsibility:
-
-- Typecheck, webhook signature tests, permission mapping tests.
-
-Deployment:
-
-- Vercel Services route such as `/bot` if the beta prototype passes.
-- Otherwise deploy as a separate small service while preserving shared package boundaries.
+Do not scaffold a standalone Chat-SDK-only bot as the omnichannel path.
+External chat is owned by `apps/agent` Eve channels.
+If a thin webhook shim is ever required, document it in a new ADR; default is Eve channels + Chat SDK bridge.
 
 ## Packages
 
@@ -557,11 +564,11 @@ CI should fail fast for deterministic errors and avoid requiring production cred
 Deployment surfaces:
 
 - `apps/web`: Vercel web app.
-- `apps/bot`: Vercel Services beta if validated, otherwise separate service.
-- `apps/worker`: Temporal worker runtime outside request path.
+- `apps/agent`: Vercel year-1 (D3) with Spend Management; Hetzner/VPS + `@workflow/world-postgres` exit (D2a).
+- `apps/worker`: Workflow SDK runtime outside the request path when needed.
 - Postgres: Neon or equivalent managed Postgres.
 - Object storage: S3-compatible adapter.
-- Redis: managed Redis.
+- Redis: managed Redis when required.
 
 Efe owns production account setup, production secrets, domain, provider account decisions, and final production deployment approval unless explicitly delegated.
 
@@ -572,8 +579,8 @@ The first application scaffold is acceptable only when:
 - `mise run setup`, `mise run doctor`, `pnpm dev`, `pnpm lint`, `pnpm typecheck`, `pnpm test`, and `pnpm build` exist.
 - `agent-browser` is installed or available through `pnpm exec agent-browser`, and `mise run doctor` reports it clearly for UI/preview workflows.
 - Root workspace packages compile.
-- `apps/web`, `apps/worker`, and package skeletons exist.
-- `apps/bot` exists if the external chat proof is in Phase 0/2.5 scope.
+- `apps/web`, `apps/agent`, `apps/worker`, and package skeletons exist.
+- Eve agent routes are reachable from web via rewrite/proxy in the documented local topology.
 - `.env.example` is complete and contains no secrets.
 - Fake/local providers let `pnpm dev` run without production credentials.
 - CI runs the same core checks as local.
