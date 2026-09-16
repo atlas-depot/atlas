@@ -24,7 +24,7 @@ Use Git history for superseded plans rather than treating them as current requir
 ## Start development
 
 Application setup commands will be added with the first working scaffold and tested before being documented here.
-The checked-in CI workflow is an unconfigured starter that currently expects a missing application manifest and lockfile; CI repair is separate from this documentation cleanup.
-The dev branch and deployment configuration must also be created and verified before the documented release flow is operational.
+Run `python3 scripts/check-repository.py` for the current repository checks. CI runs the same checks; the scaffold PR must add real Vite+ lint, typecheck, test, and build checks.
+Feature PRs target `dev`; releases go from `dev` to `main`. Vercel project linkage and deployments still need separate configuration and verification.
 
 Agents start with [AGENTS.md](AGENTS.md).

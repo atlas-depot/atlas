@@ -1,5 +1,1 @@
 blank_issues_enabled: false
-contact_links:
-  - name: Architecture discussion
-    url: https://github.com/
-    about: Use an architecture decision issue or RFC instead of a blank issue.

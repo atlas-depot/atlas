@@ -36,7 +36,7 @@ Read `docs/development.md` when changing local setup, environment handling, or d
 ## Contribution and verification
 
 The target flow is feature branch to `dev`, then a reviewed release from `dev` to `main`; read `docs/contributing.md` for merge semantics and current setup gaps.
-Issues coordinate assigned work; a small clear fix can go directly to a PR.
+Issues are for task assignment. Discuss newly noticed bugs in the team WhatsApp group or open a direct PR for an understood fix.
 Use Why / What / How / Test in PR bodies, normally within 100 words. Add visual evidence or material risk only when relevant.
 Run checks relevant to the changed behavior and report their actual results. For visible UI changes, verify mobile and desktop and provide before/after evidence.
 Keep individual contribution, AI assistance, and demonstration evidence in `docs/project-log.md`, not repeated in every PR body.

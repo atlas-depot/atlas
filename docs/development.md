@@ -38,11 +38,11 @@ Vercel environment variables are the selected starting approach. Team access and
 
 ## CI and deployment status
 
-Existing GitHub workflow files are not made operational by this documentation change. The earlier review found a pnpm-cache failure without a lockfile and downstream commands for an application that does not exist. Fix CI separately against the repository's actual stage.
+Run `python3 scripts/check-repository.py` locally. The `verify` GitHub Actions job runs it on every PR and pushes to `dev` and `main`. It checks required documents, local Markdown file links, and skill metadata without installing app dependencies. It does not validate remote links or Markdown anchors.
 
-Target CI: lightweight documentation checks now; Vite+ check/test/build and deterministic eve evals after scaffold. Paid live-model evals should be separately limited. A required verification job must report a result for docs-only changes too.
+The scaffold PR must replace the pre-scaffold guard with actual Vite+ lint/typecheck/test/build and focused deterministic eve evals. Until then, adding an application manifest deliberately fails CI so a documentation check cannot be mistaken for application verification. Paid live-model evals should be separately limited.
 
-The agreed target is feature branch preview, `dev` staging, and `main` production. Branches, protection rules, Vercel linkage, and environment separation must be configured and verified separately. See [contributing](contributing.md).
+The agreed flow is feature branch preview, `dev` staging, and `main` production. Git branches and CI do not create Vercel deployments: project linkage, team access, credentials, and environment separation require separate configuration and verification. See [contributing](contributing.md).
 
 ## Budget checks
 

@@ -1,6 +1,6 @@
 # Contributing
 
-The workflow below is the agreed target. Repository settings may still reflect the previous process; changing this document does not configure GitHub or Vercel.
+Use the branch flow below. GitHub checks and human review are separate gates; Vercel deployments require their own setup.
 
 ## Branches and releases
 
@@ -10,11 +10,13 @@ The workflow below is the agreed target. Repository settings may still reflect t
 - A production hotfix must also be brought back into `dev`.
 - Protect `dev` and `main` against direct pushes with checks appropriate to the current repository. The owner chooses a backup release maintainer.
 
-Confirm branches and protection exist before using this workflow. Do not claim a deployment unless its actual result is verified.
+Both branches require the automated `verify` check and one teammate approval. Admin bypass remains available to the owner. CODEOWNER approval is not mandatory until domain owners and backups are assigned at the team meeting. Keep the owner, domain owner, and backup on the same CODEOWNERS pattern; any one eligible owner can satisfy GitHub's owner-review requirement.
+
+Do not claim a deployment unless its actual result is verified.
 
 ## Issues
 
-Use issues for assigned work, unresolved bugs, or coordination. Small, understood fixes can go directly to a PR. The owner curates the backlog; reporting a bug does not require being able to fix it. Discussions remain unnecessary.
+Use issues only for task assignment. Raise newly noticed bugs in the team WhatsApp group or open a direct PR for an understood fix. Turn work into an assigned issue when the team needs to coordinate ownership. The owner curates the backlog; Discussions stay disabled.
 
 ## Pull requests
 
