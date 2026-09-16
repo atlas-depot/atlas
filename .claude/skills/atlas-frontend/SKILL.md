@@ -1,68 +1,30 @@
 ---
 name: atlas-frontend
-description: Implement or review Atlas frontend features using Next.js App Router, React, TypeScript, typed APIs, PWA capture, domain-oriented feature folders, and source-grounded UI states.
+description: Build or review Atlas frontend behavior using existing component libraries and responsive verification.
 ---
 
-# Atlas Frontend Skill
+# Atlas Frontend
 
-Use this skill for frontend work.
+Read `docs/product.md` for scope and `docs/architecture.md` for the client boundary.
+The team still needs to review UI choices; no visual direction or pixel layout is locked.
 
-## Required Reading
+## Component and interaction work
 
-Read:
+- Compose existing library components; do not invent custom UI primitives.
+- Do not draw custom SVG icons or use emojis as UI icons.
+- Do not use lucide-react; use an approved existing icon library.
+- Preserve keyboard behavior and accessible names supplied by components.
+- Keep loading, empty, error, and approval states understandable when touched.
+- Separate persisted user data from temporary optimistic state.
 
-- `AGENTS.md`
-- `docs/process/agent-alignment.md`
-- `docs/architecture/frontend.md`
-- `docs/architecture/ui-system.md`
-- `docs/architecture/repository-structure.md`
-- `.claude/skills/atlas-design/SKILL.md`
+Do not introduce a new design system, mandatory Storybook, or additional product surfaces solely for this task.
+Use current framework documentation and actual repository patterns before integration.
 
-## Rules
+## Verification and review
 
-- Keep UI components focused on rendering and interaction.
-- Keep domain logic in feature hooks/services or backend.
-- Use typed API clients.
-- Use TanStack Query for client-side server state, cache invalidation, retries, optimistic updates, and async UI workflows.
-- Handle loading, empty, error, and permission states.
-- Keep accessibility and keyboard flows in mind.
-- Do not introduce client-only permission enforcement as the source of truth.
-- Do not call LLMs or external integrations directly from the browser.
-- Do not add Zustand, Framer Motion, or extra state/motion libraries without a documented need.
-- Use URL state for navigation/filtering and React state for local ephemeral state.
-- Do not use TanStack Query as a permission source of truth.
-- Do not store server state in Zustand or another global client store.
-- Use Storybook for shared components, tokens, key states, and code-backed mock surfaces once the app scaffold exists.
-- All memory object responses must render visibility/provenance affordances.
-- AI answers must render source items.
-
-## Required UI states
-
-- Loading
-- Empty
-- Error
-- Unauthorized
-- Low-confidence AI result
-- Action approval required
-- Offline or sync pending where PWA capture applies
-- Permission redacted
-- Missing source/citation
-
-## Implementation Workflow
-
-1. Identify route/domain folder.
-2. Define server data contract and loading/error/empty states.
-3. Build responsive layout with keyboard path.
-4. Keep business rules in backend/domain services.
-5. Add or update Storybook stories for shared states when touching reusable UI.
-6. Add focused component tests or E2E smoke where practical.
-7. Provide screenshot or preview evidence for PRs once previews exist.
-
-## Output
-
-- Component structure.
-- State model.
-- API calls.
-- Tests.
-- Screenshots or preview requirements.
-- Accessibility and keyboard notes.
+Exercise the changed flow at desktop and mobile widths.
+Check wrapping, overflow, focus, and meaningful error recovery.
+Capture before/after screenshots for visible changes or a short recording for interactions.
+Describe actual limitations, including unavailable browser verification.
+Present visual and interaction decisions to the team for review.
+Do not treat reference mockups as approved product requirements.

@@ -1,131 +1,49 @@
-# AGENTS.md
+# Atlas agent instructions
 
-These are project-wide instructions for AI coding agents working on Atlas.
+Atlas helps people recover scattered context, keep notes, and act through a personal AI assistant.
+This repository is currently a planning baseline, not a runnable application.
 
-## Project
+## Decisions and scope
 
-Atlas is a living second brain for knowledge workers. It captures messy digital inputs, turns them into structured memory objects and typed relationships, retrieves them with grounded AI, surfaces proactive next actions, and supports safe sharing.
+Current user instructions take precedence over these files.
+Read `docs/product.md` for product scope and `docs/architecture.md` for accepted constraints versus team proposals when the task changes either.
+UI direction and unresolved backend choices require team discussion; existing prototypes are historical references, not implementation contracts.
+Do not promote an example, candidate library, or previous proposal into an accepted decision.
 
-Efe Baran Durmaz is the bootstrap lead and product owner. This does not create a day-to-day hierarchy for engineering work, but it does make Efe the decision source for product scope, kickstarting the application scaffold, provider accounts, production secrets, compliance-sensitive setup, final branding, and senior project coordination unless ownership is explicitly delegated.
+## Working here
 
-Before non-trivial work, read `docs/process/agent-alignment.md` and use the relevant `.claude/skills/atlas-*` workflow. The skills and hooks are advisory alignment layers; they do not override the user's latest instruction or these non-negotiables.
+- Inspect the current branch and working-tree changes before editing; preserve other people's work.
+- Use English for code, repository documents, and commits.
+- Keep each change reviewable; use atomic Conventional Commits without agent co-author footers.
+- Use plain hyphens rather than em dash characters in repository text.
+- Vite+ is the selected development toolchain. Read actual manifests for commands and version pins once the scaffold exists; do not invent successful checks for missing code.
+- Add a dependency or package only for a concrete consumer or capability. Consult current primary documentation before integrations.
+- Keep proposed architecture separate from implemented behavior in reports.
 
-Provider and environment setup follows `docs/process/provider-and-env-setup.md`. Local development should work with fake/local providers by default. Do not request or use Efe's personal provider passwords, 2FA, broad dashboard access, or production secrets.
+## Product boundaries
 
-Engineering standards follow `docs/process/engineering-standards.md`.
-Prefer quality, simplicity, robustness, scalability, security, and long-term maintainability over development cost.
-If scope becomes too large, cut feature scope instead of weakening architecture.
+- Compose ready-made UI components; do not author custom UI primitives, SVG icons, or emoji UI. Use an approved icon library other than lucide-react.
+- Keep user-authored notes distinguishable from model-generated content and preserve source provenance.
+- Enforce account and data access on the server. Connector credentials stay outside model context, logs, and analysis sandboxes.
+- External sends, calendar changes, destructive operations, and binding actions require user approval under the agreed action policy.
+- Approval and durable execution do not guarantee exactly-once external effects; handle retries and uncertain provider outcomes explicitly.
+- Use sandboxes on demand for bounded script, conversion, and analysis work. Persist important outputs outside disposable compute.
+- Production secrets, destructive data operations, and live deployments require explicit authorization. Repository instructions do not grant it.
 
-## Non-negotiable architecture
+Read `docs/security.md` when changing identity, connectors, memory access, external actions, or sandbox capabilities.
+Read `docs/development.md` when changing local setup, environment handling, or deployment configuration.
 
-- Use TypeScript full-stack.
-- Use a pnpm monorepo.
-- Use a modular monolith, not microservices.
-- Use PostgreSQL as the canonical system of record.
-- Use pgvector for MVP vector search.
-- Use OKF only as a portable export/import format.
-- Build responsive web + PWA first. Do not build native mobile in MVP.
-- Enforce private/shared memory permissions in backend and database access layer, not only in UI.
-- Ground AI answers in source memory items and citations.
-- Use async workflows for ingestion, extraction, embeddings, OCR, and suggestions.
-- Require explicit confirmation for risky external actions.
+## Contribution and verification
 
-## Commands
+The target flow is feature branch to `dev`, then a reviewed release from `dev` to `main`; read `docs/contributing.md` for merge semantics and current setup gaps.
+Issues are for task assignment. Discuss newly noticed bugs in the team WhatsApp group or open a direct PR for an understood fix.
+Use Why / What / How / Test in PR bodies, normally within 100 words. Add visual evidence or material risk only when relevant.
+Run checks relevant to the changed behavior and report their actual results. For visible UI changes, verify mobile and desktop and provide before/after evidence.
+Keep individual contribution, AI assistance, and demonstration evidence in `docs/project-log.md`, not repeated in every PR body.
 
-Prefer these commands. Do not invent package managers.
+## Skills
 
-```bash
-pnpm install
-pnpm dev
-pnpm lint
-pnpm typecheck
-pnpm test
-pnpm build
-pnpm db:generate
-pnpm db:migrate
-pnpm db:studio
-pnpm db:seed
-pnpm eval:smoke
-```
-
-If a command is missing, add it to `package.json` in the correct package and document it.
-
-## Project structure
-
-Expected structure:
-
-```text
-apps/web
-apps/worker
-apps/bot
-packages/db
-packages/domain
-packages/api
-packages/ai
-packages/ingestion
-packages/auth
-packages/billing
-packages/ui
-packages/config
-packages/evals
-packages/okf
-docs/architecture
-docs/process
-docs/templates
-docs/research
-```
-
-Use domain-oriented modules. Avoid dumping unrelated utilities into generic folders.
-See `docs/architecture/repository-structure.md` for package responsibilities, README expectations, CI ownership, and deployment ownership.
-
-## Code style
-
-- Strict TypeScript.
-- No `any` unless justified in a comment and localized.
-- Runtime validation at API boundaries with Zod or equivalent.
-- Prefer named exports.
-- Prefer explicit domain names over abbreviations.
-- No hidden global state for business logic.
-- No secrets in code, logs, fixtures, screenshots, or tests.
-- No raw payment credentials or card data in Atlas Postgres.
-- No unreviewed production dependencies.
-- No em dash character in repo text.
-- Do not manually edit generated files or `CHANGELOG.md`; run the generator or document why it cannot be run.
-
-## Git workflow
-
-- Follow `docs/process/solo-to-team-workflow.md`.
-- After the application scaffold exists, every meaningful code change must link to an issue.
-- Branch names: `type/issue-number-short-slug`, for example `feat/42-capture-inbox`.
-- Commits must be atomic and use Conventional Commits.
-- Commit messages must not add an agent name as co-author.
-- PRs must be small enough to review in one focused sitting.
-- Do not mix unrelated changes in one PR.
-- Do not commit generated files unless the repo policy explicitly requires them.
-- Do not push directly to `main`.
-
-## Definition of done
-
-A task is done only when:
-
-- Implementation matches the issue acceptance criteria.
-- Tests cover the main behavior and important failure cases.
-- CI passes.
-- Lint, type, test, and flaky-test failures are fixed or explicitly tracked with evidence.
-- Permissions and privacy implications are checked.
-- AI behavior is grounded, logged, and evaluated when applicable.
-- UI changes include screenshots or preview link.
-- PR explains what changed, why, how, tests run, and what the author learned.
-
-## Boundaries
-
-Never modify these without explicit user approval:
-
-- Production secrets or environment files.
-- Database migrations that drop or rewrite user data.
-- Auth, permission, or encryption code.
-- External action execution code.
-- CI deployment gates.
-- Files under `.github/` that change repository protections.
-
-When uncertain, stop and ask for the smallest clarifying question.
+Use a skill under `.claude/skills/` only when its description matches the task.
+Read its entrypoint first and load conditional references only when needed.
+A skill must contribute a specific procedure, non-obvious constraint, or useful verification contract; generic advice and copied project rules do not justify another skill.
+When shortening a skill, preserve its operational conditions and test uncertain behavior changes with representative tasks.
