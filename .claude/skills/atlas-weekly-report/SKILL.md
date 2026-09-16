@@ -1,58 +1,29 @@
 ---
 name: atlas-weekly-report
-description: Summarize Atlas senior project progress with artifact-backed evidence so each teammate can explain what they did, why it matters, how it works, how it was tested, and what they can demo.
+description: Prepare the Atlas school-project contribution report from actual PRs, reviews, tests, and demo evidence.
 ---
 
-# Atlas Weekly Report Skill
+# Atlas Weekly Report
 
-Use this skill to produce weekly progress reports.
+Read `docs/project-log.md` for the reporting location and current academic requirements.
+Use this for periodic contribution evidence, not for expanding every PR description.
 
-## Inputs
+## Gather evidence
 
-- Issues worked on.
-- PRs opened.
-- PRs reviewed.
-- Commits.
-- Tests and evals.
-- Demo evidence.
-- Blockers.
-- Preview URLs/screenshots.
-- Decisions and ADRs.
-- Owner handoffs or Efe-owned gates.
+1. Identify the reporting period and whose contribution is being reported.
+2. Inspect linked PRs, commits, reviews, tests, and demo artifacts where accessible.
+3. Distinguish individual work from team outcomes and AI-assisted work.
+4. Do not infer authorship from a merge alone or invent missing verification.
+5. Record decisions the contributor can explain and gaps they still need to learn.
 
-## Output
+## Report
 
-```md
-# Weekly Report
+Keep the entry focused on completed work, why it mattered, and concrete evidence links.
+Include test/eval outcomes and what can be demonstrated live.
+Name unresolved blockers and the next small task.
+Attribute collaborators and AI assistance accurately under the school's actual rules.
+Do not add agent co-author commit trailers as a substitute for academic attribution.
+Avoid vague claims such as "helped with the backend" without supporting artifacts.
 
-Week:
-Team member:
-
-## What I completed
-
-## Why it mattered
-
-## How I implemented it
-
-## Evidence
-
-## PRs and issues
-
-## Tests and evals
-
-## Decisions made
-
-## Blockers
-
-## Next week
-
-## What I can explain in defense
-```
-
-## Rules
-
-- Do not write vague summaries.
-- Tie every claim to an artifact when possible.
-- Identify knowledge gaps honestly.
-- Separate individual contribution from team outcome.
-- Include what can be demonstrated live.
+Do not post to Notion, GitHub, or another external audience without authorization.
+If evidence is unavailable, label that gap rather than filling it with a plausible story.

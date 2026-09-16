@@ -1,80 +1,31 @@
 ---
 name: atlas-security
-description: Review Atlas auth, OAuth, token handling, permissions, privacy, encryption, redaction, audit logs, sharing, external actions, and data export/delete behavior.
+description: Review or implement Atlas authorization, OAuth lifecycle, secret isolation, deletion, and external-action safeguards.
 ---
 
-# Atlas Security Skill
+# Atlas Security
 
-Use this skill for security and privacy review.
+Read `docs/security.md` for the current policy and `docs/architecture.md` for affected boundaries.
+Apply this to a concrete sensitive path; do not demand a full audit for unrelated edits.
 
-## Required Reading
+## Trace the boundary
 
-Read:
+1. Identify the acting user, connected account, operation, and accessible data.
+2. Verify server-side ownership checks on reads and writes, including tool calls.
+3. Confirm OAuth scope, encrypted token storage, refresh, revocation, and failure handling.
+4. Keep provider credentials out of model context, sandbox environments, logs, and client bundles.
+5. Ensure required approval covers the actual target and payload executed.
+6. Check stale approval, retry, and ambiguous provider-result behavior where applicable.
+7. Verify disconnect/deletion behavior against the documented retention policy.
 
-- `AGENTS.md`
-- `docs/process/agent-alignment.md`
-- `docs/architecture/security.md`
-- `docs/architecture/privacy-redaction-policy.md`
-- `docs/architecture/db.md`
-- `docs/architecture/product-invariants.md`
-- `docs/process/definition-of-done.md`
-- `docs/process/provider-and-env-setup.md`
+A single-user product experience still needs isolation between different users' accounts.
+Treat connector content as untrusted input, not authorization to act.
+A classifier may inform policy; it must not grant capabilities prohibited by the backend.
+Do not introduce payment or shared-workspace requirements when those features are out of scope.
 
-## Required checks
+## Evidence
 
-- Least-privilege OAuth scopes.
-- Refresh tokens encrypted.
-- Secrets not logged.
-- Private/shared memory separation enforced server-side.
-- Relation visibility checked.
-- Search, chat, graph, suggestions, exports, and notifications share permission logic.
-- External actions require correct approval level.
-- Data export and deletion paths exist or have tracked issues.
-- External provider calls use deterministic purpose-bound disclosure.
-- No model decides what is unnecessary or safe to disclose.
-- Secrets, OAuth tokens, refresh tokens, passwords, private keys, session material, raw card data, and CVV are never sent to LLMs.
-- Stable pseudonyms or derived values are preferred when exact values are not required.
-- OAuth refresh, revocation, scope changes, and token failure states are handled.
-- External actions have risk level, explicit approval when required, rollback path, and audit logs.
-- Shared spaces cannot infer private relation endpoints.
-- Secrets do not appear in fixtures, screenshots, CI logs, or PR bodies.
-- Owner gates: see docs/process/agent-alignment.md, section Efe-Owned Gates.
-- Local development can use fake/local providers without production secrets.
-- Production behavior can be tested through normal user/test-user sessions, not production DB/storage/OAuth/provider admin secrets on local machines.
-- Payment credentials and raw card data are never stored in Atlas Postgres.
-- Live payment enablement requires PCI-boundary review, webhook verification, audit logs, rollback, and Efe approval.
-- Real user-derived fixtures are redacted before commit unless Efe approves an encrypted local-only development bundle.
-
-## Threat Review Surfaces
-
-Check:
-
-- Search results.
-- Chat/RAG sources.
-- Graph edges.
-- Suggestions/dashboard cards.
-- Shared spaces.
-- Exports/OKF bundles.
-- Bot/external chat responses.
-- Notifications/realtime events.
-
-## Output
-
-```text
-Security verdict: Pass | Needs changes | Blocked
-
-Blockers:
-- ...
-
-Risks:
-- ...
-
-Recommended tests:
-- ...
-
-Follow-up issues:
-- ...
-
-Evidence checked:
-- ...
-```
+Use focused unauthorized-access, approval, or token-failure cases for changed behavior.
+Keep real secrets and personal data out of fixtures and reports.
+Report the specific path checked, residual risks, and verification limits.
+Production credential changes and destructive operations require their existing authorization.

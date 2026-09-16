@@ -1,66 +1,18 @@
 name: Task
-description: Track implementation, refactor, docs, CI, eval, or chore work.
+description: Coordinate a piece of assigned work. Small fixes can go directly to a PR.
 title: "task: "
-labels: ["task", "triage"]
 body:
   - type: textarea
     id: goal
     attributes:
       label: Goal
-    validations:
-      required: true
-  - type: dropdown
-    id: area
-    attributes:
-      label: Area
-      options:
-        - Repo setup
-        - UI
-        - Frontend
-        - Backend
-        - Database
-        - AI
-        - Eval
-        - Security/privacy
-        - Deployment
-        - Provider/env
-        - Docs
+      description: What should change and why?
     validations:
       required: true
   - type: textarea
-    id: acceptance
+    id: done
     attributes:
-      label: Acceptance criteria
-      value: |
-        - [ ] 
-    validations:
-      required: true
-  - type: textarea
-    id: files
-    attributes:
-      label: Files or packages likely touched
-    validations:
-      required: false
-  - type: textarea
-    id: provider-env
-    attributes:
-      label: Provider/env impact
-      description: New env vars, fake/local provider path, real provider access, preview env, or Efe-owned gate.
-      value: |
-        - Local fake path:
-        - New env vars:
-        - Efe-owned gate:
-    validations:
-      required: false
-  - type: textarea
-    id: tests
-    attributes:
-      label: Test requirements
-    validations:
-      required: true
-  - type: textarea
-    id: explanation
-    attributes:
-      label: Senior project explanation target
+      label: Done when
+      description: Describe the observable result and how to verify it.
     validations:
       required: true
