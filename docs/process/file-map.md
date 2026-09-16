@@ -121,6 +121,9 @@ This file explains what every committed file in the current Atlas project knowle
 | --- | --- | --- |
 | `docs/design/atlas-ui-reference-audit.md` | Evidence-driven UI reference audit after rejecting the first prototype. Extracts reusable mechanics from Vercel, Linear, OpenAI, Notion, Superhuman, Obsidian, NN/g, and Cursor. | Reference set, design principles, or audit conclusions change. |
 | `docs/design/atlas-ui-directions.md` | Three proposed Atlas UI directions and the recommended Direction A Today slice contract. | Efe approves/rejects a direction or layout/token contract changes. |
+| `docs/design/frontend-pages.md` | Frontend page inventory: routes, build phases, components, states, acceptance, and Storybook plan. | A route is added or removed, build phasing changes, or page acceptance changes. |
+| `docs/design/app-shell-spec.md` | App shell implementation mirror: widths, spacing, overflow, viewports, keyboard, and evidence pointers. | The locked contract in `ui-system.md` or tokens changes; update this mirror in the same PR. |
+| `docs/design/component-map.md` | shadcn/ui primitive mapping with install, defer, and avoid decisions plus Atlas rules. | Frontend dependencies change or Atlas UI rules change. |
 
 ## Research And Templates
 
