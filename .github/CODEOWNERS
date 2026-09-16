@@ -1,5 +1,5 @@
 # Code owners for Atlas. During solo bootstrap, @EfeDurmaz16 owns everything.
-# Reassign area owners as the team grows (see docs/process/owner-onboarding.md).
+# Reassign area owners as the team grows (see docs/contributing.md).
 
 # Default owners
 * @EfeDurmaz16
@@ -26,4 +26,4 @@
 # Auth, security, CI, deployment
 /packages/auth/ @EfeDurmaz16
 /.github/ @EfeDurmaz16
-/docs/architecture/ @EfeDurmaz16
+/docs/architecture.md @EfeDurmaz16

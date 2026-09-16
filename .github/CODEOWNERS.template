@@ -26,4 +26,4 @@
 # Auth, security, CI, deployment
 /packages/auth/ @replace-with-security-owner
 /.github/ @replace-with-maintainer
-/docs/architecture/ @replace-with-maintainer
+/docs/architecture.md @replace-with-maintainer
