@@ -38,7 +38,7 @@ Vercel environment variables are the selected starting approach. Team access and
 
 ## CI and deployment status
 
-There is no application CI before the scaffold. Add actual Vite+ lint/typecheck/test/build checks and relevant deterministic eve evals with runnable code; then make the resulting check required on `dev` and `main`. Paid live-model evals should be separately limited.
+There is no application CI before the scaffold. Add actual Vite+ lint/typecheck/test/build checks and relevant deterministic eve evals with runnable code; the owner reviews the resulting checks before merging. Paid live-model evals should be separately limited.
 
 The agreed flow is feature branch preview, `dev` staging, and `main` production. Git branches and CI do not create Vercel deployments: project linkage, team access, credentials, and environment separation require separate configuration and verification. See [contributing](contributing.md).
 
