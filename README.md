@@ -24,7 +24,7 @@ Use Git history for superseded plans rather than treating them as current requir
 ## Start development
 
 Application setup commands will be added with the first working scaffold and tested before being documented here.
-Run `python3 scripts/check-repository.py` for the current repository checks. CI runs the same checks; the scaffold PR must add real Vite+ lint, typecheck, test, and build checks.
+There is no application CI yet. Add meaningful Vite+ lint, typecheck, test, and build checks with the first working scaffold.
 Feature PRs target `dev`; releases go from `dev` to `main`. Vercel project linkage and deployments still need separate configuration and verification.
 
 Agents start with [AGENTS.md](AGENTS.md).

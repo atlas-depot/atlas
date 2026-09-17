@@ -10,7 +10,7 @@ Use the branch flow below. GitHub checks and human review are separate gates; Ve
 - A production hotfix must also be brought back into `dev`.
 - Protect `dev` and `main` against direct pushes with checks appropriate to the current repository. The owner chooses a backup release maintainer.
 
-Both branches require the automated `verify` check and one teammate approval. Admin bypass remains available to the owner. CODEOWNER approval is not mandatory until domain owners and backups are assigned at the team meeting. Keep the owner, domain owner, and backup on the same CODEOWNERS pattern; any one eligible owner can satisfy GitHub's owner-review requirement.
+Both branches require one teammate approval; only @EfeDurmaz16 can merge their PRs. The owner retains admin bypass for review requirements. Direct updates are restricted by an owner-only PR bypass rule. No automated status check is required before the application scaffold. Add meaningful CI with runnable code; the owner reviews its result and decides whether to merge. CODEOWNER approval is not mandatory until domain owners and backups are assigned at the team meeting. Keep the owner, domain owner, and backup on the same CODEOWNERS pattern; any one eligible owner can satisfy GitHub's owner-review requirement.
 
 Do not claim a deployment unless its actual result is verified.
 
