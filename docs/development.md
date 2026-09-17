@@ -38,9 +38,7 @@ Vercel environment variables are the selected starting approach. Team access and
 
 ## CI and deployment status
 
-Run `python3 scripts/check-repository.py` locally. The `verify` GitHub Actions job runs it on every PR and pushes to `dev` and `main`. It checks required documents, local Markdown file links, and skill metadata without installing app dependencies. It does not validate remote links or Markdown anchors.
-
-The scaffold PR must replace the pre-scaffold guard with actual Vite+ lint/typecheck/test/build and focused deterministic eve evals. Until then, adding an application manifest deliberately fails CI so a documentation check cannot be mistaken for application verification. Paid live-model evals should be separately limited.
+There is no application CI before the scaffold. Add actual Vite+ lint/typecheck/test/build checks and relevant deterministic eve evals with runnable code; then make the resulting check required on `dev` and `main`. Paid live-model evals should be separately limited.
 
 The agreed flow is feature branch preview, `dev` staging, and `main` production. Git branches and CI do not create Vercel deployments: project linkage, team access, credentials, and environment separation require separate configuration and verification. See [contributing](contributing.md).
 
