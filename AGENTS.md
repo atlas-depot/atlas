@@ -43,7 +43,7 @@ Keep individual contribution, AI assistance, and demonstration evidence in `docs
 
 ## Skills
 
-Use a skill under `.claude/skills/` only when its description matches the task.
+Use a skill under `.agents/skills/` only when its description matches the task.
 Read its entrypoint first and load conditional references only when needed.
 A skill must contribute a specific procedure, non-obvious constraint, or useful verification contract; generic advice and copied project rules do not justify another skill.
 When shortening a skill, preserve its operational conditions and test uncertain behavior changes with representative tasks.
