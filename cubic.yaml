@@ -1,0 +1,13 @@
+# yaml-language-server: $schema=https://cubic.dev/schema/cubic-repository-config.schema.json
+version: 1
+reviews:
+  enabled: false
+  incremental_commits: false
+  auto_approve_behavior: disabled
+  auto_approve: disabled
+  ultrareview: disabled
+pr_descriptions:
+  generate: false
+issues:
+  fix_with_cubic_buttons: false
+  pr_comment_fixes: false
