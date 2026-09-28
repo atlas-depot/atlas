@@ -52,3 +52,11 @@ Add Questions or Suggestions only when useful. A clean review can say: "No block
 Approve means the scoped change is fit to merge, not perfect or bug-free. Do not block on style, optional documentation or a bot verdict alone. After a fix, re-review the finding and affected behavior; broaden only when new evidence warrants it. Separate executed checks from proposed cases and mocked behavior from live provider results.
 
 Keep intentionally unfinished work draft even when checks pass. The planned CI-driven draft/ready transition is not implemented; do not claim it is automatic. Ready status never grants permission to merge.
+
+## AI review configuration
+
+Repository settings define CodeRabbit as the automatic reviewer for non-draft PRs and new commits. cubic is a second opinion requested with `@cubic-dev-ai review this PR`; automatic reviews and approvals are disabled. CodeRabbit can also be requested with `@coderabbitai full review`. Both preserve the author-written PR description.
+
+The configuration files do not install the GitHub Apps. cubic reads `cubic.yaml` only from the default branch, so dashboard settings must match until this change lands. Greptile is intended for manual review, with automatic triggers set to Never in its dashboard; login, installation and free-plan eligibility must be verified before claiming it is active. Bot reviews are advisory and do not replace human approval or grant merge permission.
+
+Configuration references: [CodeRabbit](https://docs.coderabbit.ai/reference/configuration), [cubic](https://docs.cubic.dev/configure/cubic-yaml), [Greptile](https://www.greptile.com/docs/quickstart).
