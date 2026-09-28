@@ -1,32 +1,34 @@
 ---
 name: atlas-test
-description: Verify an Atlas change and collect focused UI, backend, or agent-behavior evidence.
+description: Design or assess Atlas tests, investigate flakes, or establish regression-test sensitivity. Use for test-value and verification decisions, not automatically for every edit.
 ---
 
-# Atlas Test
+# Atlas test
 
-Read `docs/development.md` for the commands that actually exist.
-Read `docs/contributing.md` for evidence expected in a PR.
-There is no application scaffold yet: do not claim application tests or invent executable scripts.
+Turn the changed contract into falsifiable evidence. Read relevant product/security decisions and discover actual commands in `docs/development.md` and manifests. This skill grants no permission to add tooling, change CI policy, call live providers or run paid models.
 
-## Select checks
+## Choose the failure and boundary
 
-- Code: run the affected tests and available type/lint checks.
-- UI: use agent-browser when available to exercise the changed flow at desktop and mobile widths.
-- Backend: verify the affected request, persisted result, or workflow transition.
-- Agent behavior: run relevant eve eval scenarios when configured.
-- Schema: verify migration behavior against disposable data before user data.
-- Deployment: smoke-test the actual preview URL when a deployment exists.
+Start with the request, diff, affected callers and existing coverage. Name the failure being prevented and the observable result. Choose the smallest boundary that exercises it: a pure-rule unit test, real-storage integration test or focused user-flow test as appropriate. Layer proportions and coverage percentages are signals, not proof of correctness.
 
-For bugs, reproduce the failure and show the corrected outcome when practical.
-Use the smallest check that proves the behavior, then expand only for unresolved concerns.
-Mock tests prove orchestration, not live OAuth or provider delivery.
+Use [boundary cases](references/boundary-matrix.md) only when source grounding, account isolation, approval or action lifecycles are affected. The cases do not decide product policy. Ask for the missing contract when correction, retention or ambiguous-outcome behavior is unspecified rather than embedding a new decision in an assertion.
 
-## Evidence
+Expected results must come from the agreed contract and independent fixtures, not the implementation's own classifier, serializer or round-trip helper. Assert exact strings and call counts only when they express the contract. A policy unit test and endpoint integration test may protect different failures. Similar inputs or passing remaining tests do not establish redundancy; before removing a test, identify the lost failure mode and where it remains or why it is obsolete.
 
-Capture UI before/after screenshots or a short interaction recording when relevant.
-For backend changes, prefer a sanitized request/result, query result, or job-state transition.
-Exclude tokens and private content from screenshots, logs, fixtures, and PR attachments.
-Record what ran, what passed, and what remains unverified.
-Missing browser tooling is a verification gap, not evidence of success.
-Keep artifacts small enough for a teammate to review.
+## Execute or identify the missing evidence
+
+With no harness, provide proposed cases with trigger, expected result, enforcement point, test layer and unknowns; do not report them as passed. With a harness, run focused cases and applicable required checks. State which storage/provider/model boundaries are mocked. A mocked model tests orchestration, not live answer quality; keep statistical evals separate from deterministic access and state assertions.
+
+For an important regression, show failure without the fix and success with it where feasible. Use a targeted mutation only when critical logic or uncertain test value justifies it:
+
+1. Work in an isolated copy of the exact candidate, including relevant uncommitted files and excluding live credentials.
+2. Verify the intended fault in the diff, rebuild the mutated artifact if needed, and confirm the assertion ran. A compile/setup failure is not a detected behavioral fault.
+3. Restore the candidate in that isolated copy and verify green. Never use broad restore/reset commands in the user's working tree.
+
+An equivalent mutation or runtime normalization may survive. Report the limit; do not manufacture proof, delete a test solely on that result, or change product semantics to bless a bug.
+
+## Diagnose flakes and report
+
+Inspect fixture leakage, time, randomness, environment and product races. Use isolated resources and bounded condition waits. Diagnostic repetition is useful; retry-until-green is not acceptance. Quarantine requires an owner, deadline and visible coverage gap. Preserve a reliable critical check or expose its absence instead of silently weakening a gate.
+
+Return the contract checked, selected evidence, candidate revision, actual commands/results and remaining uncertainty. Separate designed cases, executed tests, real provider checks and model evals. Stop when the requested risks and applicable checks are covered; do not expand into an unrelated suite rewrite.
