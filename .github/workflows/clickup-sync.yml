@@ -1,0 +1,36 @@
+name: Sync issues to ClickUp
+on:
+  issues:
+    types: [opened, edited, assigned, unassigned, closed, reopened, transferred]
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Preview reconciliation without changing ClickUp
+        type: boolean
+        default: true
+permissions:
+  contents: read
+  issues: read
+concurrency:
+  group: clickup-issue-sync
+  cancel-in-progress: false
+jobs:
+  sync:
+    if: vars.CLICKUP_SYNC_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          persist-credentials: false
+      - name: Reconcile current issues
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          CLICKUP_TOKEN: ${{ secrets.CLICKUP_TOKEN }}
+          CLICKUP_ASSIGNEES_JSON: ${{ secrets.CLICKUP_ASSIGNEES_JSON }}
+          DRY_RUN: ${{ inputs.dry_run || false }}
+        run: |
+          args=()
+          if [ "$DRY_RUN" = "true" ]; then args+=(--dry-run); fi
+          python3 scripts/clickup_sync.py "${args[@]}"
