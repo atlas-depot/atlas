@@ -92,7 +92,7 @@ Vercel environment variables are the selected starting approach. Team access and
 
 ## CI and deployment status
 
-There is no application CI in this scaffold. Its local Vite+ commands are available for a separate CI setup. Do not hide the current no-tests result to manufacture a green required check. Add relevant deterministic eve evals when agent code exists. Paid live-model evals should be separately limited.
+`.github/workflows/ci.yml` runs on pull requests and pushes to `main`. Its `format`, `lint and typecheck` and `build` jobs run `vp fmt --check`, `vp lint` and `vp build` after `vp install --frozen-lockfile`. `vp lint` also type-checks because `typeCheck` is enabled in `vite.config.ts`. The required check name is `verify`, which passes only when all three jobs succeed. CI reads the Node version from `.node-version`, so local and CI runtimes stay aligned. There is no test job yet; add one with the first suite that CI should gate. Do not hide the current no-tests result to manufacture a green required check. Efe configures required checks after reviewing a real run. Add relevant deterministic eve evals when agent code exists. Paid live-model evals should be separately limited.
 
 The agreed flow is feature branch preview and `main` production. Efe or configured Vercel automation handles deployment. Configure Vercel Git integration for branch-triggered deployments or a Vercel CLI/API path for CI; branches and CI do not configure deployments by themselves: project linkage, team access, credentials, and environment separation require separate configuration and verification. See [contributing](contributing.md).
 
