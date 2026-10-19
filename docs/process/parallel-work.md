@@ -45,7 +45,7 @@ git branch backup/task-22-before-restack "$old_child"
 
 Choose a new backup name if that one already exists; do not overwrite it. Confirm that the displayed range contains only the child's work. If the boundary ref is missing, recover the recorded SHA from the PR and verify it against the child history; do not substitute the parent's current tip.
 
-After confirming that the parent PR merged, use fetched `main` as the new base. To incorporate a parent update before merge, use `origin/feat/task-17` instead and retain the child PR's parent base and draft status:
+After confirming that the parent PR merged, use fetched `main` as the new base. To incorporate a parent update before merge, use `origin/feat/task-17` instead and retain the child PR's parent base and reassess review readiness against the updated contract:
 
 ```sh
 new_base=$(git rev-parse origin/main)
@@ -63,6 +63,6 @@ git push --force-with-lease="refs/heads/feat/task-22:$expected_remote" origin HE
 git update-ref refs/atlas-bases/task-22 "$new_base" "$old_parent"
 ```
 
-If the lease fails, inspect the remote update with the owner. Do not refresh the expected SHA merely to force the push through. After a successful push, verify the remote head and update the recorded boundary in the PR. For a merged parent, retarget the child PR to `main`; inspect its displayed diff, check results and review state again. Resolve any stale evidence before marking it ready. Keep backup refs and parent boundaries until dependents no longer need them; remove worktrees only after verifying the work is safely retained.
+If the lease fails, inspect the remote update with the owner. Do not refresh the expected SHA merely to force the push through. After a successful push, verify the remote head and update the recorded boundary in the PR. For a merged parent, retarget the child PR to `main`; inspect its displayed diff, check results and review state again. Resolve stale evidence and verify approval for the final candidate before merging. Keep backup refs and parent boundaries until dependents no longer need them; remove worktrees only after verifying the work is safely retained.
 
 References: [Git worktree](https://git-scm.com/docs/git-worktree), [transplanting commits with rebase](https://git-scm.com/docs/git-rebase#_transplanting_a_topic_branch_with_onto).

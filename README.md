@@ -25,6 +25,6 @@ Use Git history for superseded plans rather than treating them as current requir
 
 Application setup commands will be added with the first working scaffold and tested before being documented here.
 There is no application CI yet. Add meaningful Vite+ lint, typecheck, test, and build checks with the first working scaffold.
-Independent PRs target `main`; dependent draft PRs can target their parent branch during development. Follow [the parallel-work procedure](docs/process/parallel-work.md) before integrating each PR into `main`. A human teammate reviews and Efe decides whether to merge. Vercel project linkage and deployments still need separate configuration and verification.
+Independent PRs target `main`; dependent PRs can target their parent branch for development and review. Follow [the parallel-work procedure](docs/process/parallel-work.md) before integrating each PR into `main`. A human teammate reviews and Efe decides whether to merge. Vercel project linkage and deployments still need separate configuration and verification.
 
 Agents start with [AGENTS.md](AGENTS.md).

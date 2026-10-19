@@ -23,7 +23,7 @@ Write the template fields from the final change. Lead with the user's observable
 
 ## Publish and verify
 
-When publication is authorized, check whether a PR already exists before creating one. Use the exact intended remote, head and base; use a body file or structured argument to preserve Markdown. Keep an incomplete or dependency-blocked candidate draft under the contribution policy.
+When publication is authorized, check whether a PR already exists before creating one. Use the exact intended remote, head and base; use a body file or structured argument to preserve Markdown. Use the contribution policy to distinguish incomplete work from completed work waiting only for its parent's merge.
 
 After pushing, reread the remote SHA and PR base/head. Confirm the published diff and description match the candidate. Local commits, a push and a PR creation are different outcomes. Inspect current required checks and review status; missing, pending or unavailable checks are not successful checks. Re-check the delta if another push changes the head.
 
