@@ -16,7 +16,15 @@ Can explain: <data flow and key tradeoff>
 Remaining blocker / next step:
 ```
 
-No completed contribution entries have been added by this documentation reset. The previous project log also contained only a template.
+## Entries
+
+Week of 2026-10-19 / onatozmenn:
+Delivered or reviewed: opened #31 (checks for every PR) and #32 (parser for the briefing fixtures) as drafts, for #19 and #22.
+Decision and reason: I wanted the checks to just run on every PR, and for a broken fixture to say which field is wrong instead of quietly passing.
+Verification: ran the checks, the 25 tests and the build locally, and the real GitHub run is green. Also made a dummy PR with one type error to see verify go red, then closed it.
+AI assistance and human contribution: AI helped me draft the code, I read through the diffs and ran everything myself.
+Can explain: what the parser looks for and why a PR can't merge when verify fails.
+Remaining blocker / next step: waiting for #17 to merge, then I'll point both PRs at main.
 
 ## Historical material
 
