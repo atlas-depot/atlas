@@ -12,6 +12,8 @@ Keep merge authority separate from review and CI requirements. Only the Efe-only
 
 Protection setup must follow the base branch: enable mandatory CODEOWNER approval after this team ownership file lands on `main`, not while Efe is the sole owner. Verify active team access before claiming everyone can review. There is no application CI yet; required check names must come from real workflows when the scaffold exists. CI success, review approval and deployment are separate facts.
 
+Use the read-only [governance audit](process/governance.md) to verify live enforcement and team membership. Its result is configuration evidence, not permission to merge or proof of human-only credential use.
+
 ## Issues
 
 Use GitHub Task issues for work requiring assignment and coordination, with a linked ClickUp task when available. Do not assume the integration synchronizes every field. Small understood fixes may use a direct PR; raise newly noticed bugs in the team WhatsApp group. The owner curates the backlog; Discussions stay disabled.
