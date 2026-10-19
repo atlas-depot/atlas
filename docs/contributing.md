@@ -59,7 +59,7 @@ Approve means the scoped change is fit to merge, not perfect or bug-free. Do not
 
 Address review threads with a verified fix and evidence, or a reasoned response against the current code and accepted decisions. Do not mark a disputed or unanswered concern resolved just to clear the conversation list. Resolving a thread does not supply human approval or prove that checks passed on the current revision.
 
-Keep intentionally unfinished work draft even when checks pass. The planned CI-driven draft/ready transition is not implemented; do not claim it is automatic. Ready status never grants permission to merge.
+Keep intentionally unfinished work draft even when checks pass. Ready status never grants permission to merge.
 
 ## AI review configuration
 

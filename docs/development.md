@@ -20,15 +20,9 @@ For UI changes, preserve accessible names and keyboard behavior from existing co
 
 Start with the accepted input/output contract and inspect its callers. Separate parsing of untrusted input, domain decisions and side effects when that makes failures independently testable; do not create layers or shared packages without a real consumer. Model meaningful states explicitly, including failure and unknown outcomes when applicable. Prefer a cohesive module that hides a decision over many forwarding wrappers. Refactor behavior-preserving structure separately from a behavior change when that makes review clearer.
 
-For a behavior change, name the failure to prevent before choosing a test. Exercise the smallest public boundary that can expose it; use real storage when persistence constraints are the concern, and a browser when user interaction is the concern. Expected results must be independent of the implementation. A mocked connector cannot establish provider behavior, and a valid citation ID cannot establish factual support.
-
-Build and verify one behavior at a time. For a regression, show failure without the fix and success with it where feasible; do not require test-first ceremony for prose or mechanical edits. Prefer accessible user-facing interactions in UI tests over component internals. Coverage identifies unexamined paths, not a target that proves quality. Use `atlas-test` for test-value, mutation or flake decisions.
+Use independent expected results and test observable behavior. Prefer accessible user-facing interactions over component internals in UI tests. Use [atlas-test](../.agents/skills/atlas-test/SKILL.md) to choose test boundaries, prove regression sensitivity and investigate flakes.
 
 Methods: [Google review guidance](https://google.github.io/eng-practices/review/reviewer/looking-for.html), [The Practical Test Pyramid](https://martinfowler.com/articles/practical-test-pyramid.html), [Testing Library principles](https://testing-library.com/docs/guiding-principles/). These inform choices; they do not add dependencies or override an accepted Atlas contract.
-
-## Bulk data repair
-
-For a future bulk data repair, establish selection/counts, a dry run, restart behavior and recovery before execution. Verify a small slice and remaining eligible records; queued-job totals alone do not prove completion. This is not authorization to modify stored data.
 
 ## Environments
 

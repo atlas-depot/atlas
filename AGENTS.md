@@ -42,4 +42,4 @@ Read `docs/contributing.md` before issue, branch, PR or review work. It owns ass
 Use a skill under `.agents/skills/` only when its description matches the task.
 Read its entrypoint first and load conditional references only when needed.
 A skill must contribute a specific procedure, non-obvious constraint, or useful verification contract; generic advice and copied project rules do not justify another skill.
-When changing this guidance, follow `docs/process/agent-guidance.md` for ownership, discovery and behavioral checks.
+Keep team policy in its canonical document; link to it from skills. Check materially changed skill procedures on representative tasks.
