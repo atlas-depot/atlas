@@ -1,41 +1,28 @@
 ---
 name: atlas-review
-description: Independently review an Atlas diff or PR for actionable defects, or re-review agreed fixes without restarting an unrelated audit.
+description: Independently investigate an Atlas diff or PR for actionable defects, or re-review a specific fix. Use atlas-resolve-review when acting as the author responding to feedback.
 ---
 
-# Atlas review
+# Review an Atlas change
 
-Read `docs/contributing.md` for agreed requirements. Consult architecture/product decisions when the changed contract needs them, and `docs/security.md` when identity, data access, credentials or external effects change. Posting a review requires authorization; reading a PR does not grant it.
+Read [contribution policy](../../../docs/contributing.md) for finding formats, evidence and approval criteria. Consult product/architecture decisions when the changed contract needs them, and security guidance for identity, credentials, data access or external effects. Reading a PR does not authorize posting a review.
 
-## Establish the reviewed artifact
+## Establish scope before judging
 
-Identify base and head, inspect the diff and affected callers, then compare behavior with the actual request. A bot comment or CI failure is an investigation lead, not a finding. If the head changes during review, state the reviewed revision and inspect the new delta before claiming the current PR is clear.
+Record actual base/head SHAs and the issue's agreed behavior. Inspect the diff and nearby implementation, then trace affected callers and tests. For a stacked PR, assess its child delta against the parent and identify assumptions inherited from that parent; final integration needs verification against main.
 
-Trace each plausible failure through a reachable trigger to an observable consequence. Prioritize unauthorized access, data loss, duplicate effects and broken user flows when those paths change. Read nearby implementation and tests to resolve the concern before reporting it. Distinguish code inspection from executed verification and mocked behavior from real storage/provider evidence.
+Use the diff to select risk paths rather than applying every checklist to every change. Trace an input through validation, state changes and outputs. At changed boundaries, ask which invariant a caller relies on and where it is enforced. Include failure/retry paths when they can alter the result. Read the existing test's assertions, not just its name or passing status.
 
-Use proportionate verification. UI evidence should cover the affected desktop/mobile behavior; backend evidence should reach the affected request, persisted effect or transition. Do not require unrelated audits, optional tooling or a rewrite to approve a small change.
+## Try to disprove each concern
 
-## Report only useful findings
+For a suspected defect, identify a reachable trigger and observable consequence. Check callers, guards and accepted decisions for evidence that invalidates it. Use a focused reproduction when it would resolve uncertainty; a concrete code trace can suffice when execution is unavailable. A bot comment is a lead, not independent evidence.
 
-For a demonstrated defect:
+Verify affected UI at desktop/mobile widths and with keyboard interaction under the policy. For backend changes, inspect the request, persisted effect or transition; screenshots do not establish those properties. Distinguish inspection from execution, and mocks from actual storage/provider evidence.
 
-```text
-Blocking: <file:line> <reachable trigger> causes <observable impact>.
-Evidence: <reproduction, failing assertion or concrete code trace>.
-```
+Separate material demonstrated defects, unmet required acceptance/verification, questions and optional improvements. Use the canonical finding format only for material blockers; a real but minor defect does not automatically block merging. Identify the smallest relevant location and explain the trigger and impact instead of prescribing a broad rewrite. Do not manufacture findings to fill a quota.
 
-Keep independently actionable findings separate. A focused remedy is optional; do not prescribe an architectural preference as the only fix. Put unresolved questions and optional suggestions outside blocking findings. Missing mandatory verification or an unmet agreed acceptance condition can block readiness, but must not be mislabeled as a proven runtime defect.
+## Re-review the result
 
-For a clean review:
+If the head changes, inspect the new delta before clearing the current PR. After a fix, rerun or retrace the original failure and affected behavior. Expand scope only for new changes or evidence of regression; do not repeat an unrelated audit.
 
-```text
-No blocking findings in <scope> at <head>.
-Verified: <actual checks or inspection>.
-Gap: <material unverified behavior, if any>.
-```
-
-Approval means fit to merge within the assessed scope, not bug-free. Request changes for material demonstrated defects or unmet agreed requirements; taste and speculative risks are not automatic blockers. Agent review supports, but does not replace, the required human CODEOWNER review or Efe's merge decision.
-
-## Re-review and stop
-
-After a fix, check the original failure and directly affected behavior against the new revision. Broaden only for new changes or concrete regression evidence. Once those are addressed, stop rather than reopening unrelated preferences or repeating the full audit.
+Return findings with evidence, reviewed revision, checks actually performed and material gaps. Use the clean-review format from the policy when appropriate. Stop once the scoped review is complete; posting or approval still follows the user's authorization and human-review policy.

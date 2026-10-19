@@ -1,33 +1,30 @@
 ---
 name: atlas-pr
-description: Prepare or update an Atlas pull request, validate review feedback, and assess readiness against the latest revision when requested.
+description: Prepare, open or update an Atlas PR from an existing change, including verifying its diff, publication and readiness. Use atlas-resolve-review for handling review feedback.
 ---
 
-# Atlas PR
+# Prepare an Atlas PR
 
-Read `docs/contributing.md` for current branch, review and merge policy. This skill does not authorize publication, commenting, settings changes or merging.
+Read [contribution policy](../../../docs/contributing.md) and the repository PR template. Follow existing authorization; preparing a draft body does not authorize publication or merging.
 
-## Prepare reviewable evidence
+## Identify the candidate
 
-Inspect the working tree, actual base/head diff and any existing PR. Preserve unrelated work; do not describe a local edit as pushed or an older check as evidence for a newer commit. If a product or architecture choice is unresolved, surface the choice before implementing it.
+Inspect status, staged and unstaged changes, current branch, remote and existing PRs for that branch. Read the issue and relevant decisions. Record base/head SHAs and inspect the three-dot diff against the actual PR base, plus local changes not yet committed. A branch name alone does not identify the reviewed artifact.
 
-Write the body around the resulting behavior, not a file inventory:
+Check that the diff solves the agreed task and contains only intended files. Look for generated churn, credentials, unrelated edits and missing callers. Stage explicit files or hunks. If the change cannot be explained as one reviewable outcome, separate it before publication without discarding local work.
 
-- **Why:** Concrete problem and existing task link. Do not create an issue merely to fill this field.
-- **Change:** Resulting behavior and material design choice.
-- **Evidence:** Checks actually run, their results and meaningful gaps.
+For dependent work, follow [parallel work](../../../docs/process/parallel-work.md) before choosing the base or rewriting history. Do not silently compare a child branch against main while describing only its child delta.
 
-A few sentences usually suffice. Include migration/risk notes only when material. For visible UI changes use desktop/mobile evidence; for backend changes use a sanitized request/result or persisted transition where useful. Neither proves the other. Do not invent commands or successful tests when no harness exists.
+## Build the evidence and description
 
-## Follow feedback and checks
+Find commands in the real manifest and development guide. Select verification from the changed behavior and the policy's evidence requirements, including desktop, mobile and keyboard for visible UI. Record commands, results and the candidate they exercised. No harness means a stated gap, not a green check.
 
-1. Record the current pushed head. Inspect required checks, relevant CI failures and unresolved review feedback; distinguish optional/informational checks from required gates.
-2. Verify each bot finding against the changed code and callers. Fix an in-scope defect, explain a disproved finding with evidence when commenting is authorized, or expose an unresolved decision. A bot verdict alone is not proof.
-3. Run focused verification after fixes, push only within authorization, then reread the head and check results. Old success does not clear new commits; absent, pending or unavailable required results are not green.
-4. Preserve an intentional draft. Technical readiness, human approval and permission to merge are separate. Do not mark ready just because no checks exist, or create placeholder CI to manufacture readiness.
+Write the template fields from the final change. Lead with the user's observable problem, then explain the behavior and any material tradeoff. Include only evidence needed to assess this candidate; link detailed artifacts instead of pasting logs. If scope changes, rewrite the title/body rather than appending a conversation history.
 
-When asked to follow a PR, continue through actionable in-scope failures. Stop and report when further progress needs credentials, a human decision or work outside scope. Do not implement a draft/ready controller or change protection rules merely to prepare a PR.
+## Publish and verify
 
-## Return control
+When publication is authorized, check whether a PR already exists before creating one. Use the exact intended remote, head and base; use a body file or structured argument to preserve Markdown. Keep an incomplete or dependency-blocked candidate draft under the contribution policy.
 
-Return the PR link, verified revision, actual verification and remaining decisions. Required review comes from another eligible human CODEOWNER; bot approval cannot substitute for it. Efe retains the final merge decision. Green checks or a review request never authorize an agent to merge.
+After pushing, reread the remote SHA and PR base/head. Confirm the published diff and description match the candidate. Local commits, a push and a PR creation are different outcomes. Inspect current required checks and review status; missing, pending or unavailable checks are not successful checks. Re-check the delta if another push changes the head.
+
+Return the PR URL, verified revision, actual evidence and remaining readiness gaps. For review feedback, use `atlas-resolve-review`; do not start a second independent review loop here.

@@ -2,7 +2,9 @@
 
 ## Branches and merge authority
 
-Use feature branches from `main` and target PRs at `main`. There is no shared `dev` integration or release step. Existing branches are not deleted by this policy.
+Start independent feature branches from `main`. All integration merges target `main`; there is no shared `dev` integration or release step. Existing branches are not deleted by this policy.
+
+Dependent work may start before its parent PR merges when the contributors agree on the needed contract. Give each branch an owner and each concurrent local task a separate worktree. A dependent PR temporarily targets its parent branch and stays draft, with the parent PR and incorporated revision recorded in its body. After the parent lands, move only the child's changes onto current `main`, retarget its PR, and verify the final candidate before human approval and Efe's merge decision. Follow [parallel work](process/parallel-work.md) for commands and squash/rebase handling. A worktree isolates files, not ports, credentials or shared services.
 
 All five teammates are intended members of the human `atlas-reviewers` CODEOWNER team. Each PR needs approval from an eligible teammate other than its author. Efe makes the final merge decision, including for Efe-authored PRs after another teammate approves. Bot approvals never replace the required human CODEOWNER.
 
@@ -13,6 +15,10 @@ Protection setup must follow the base branch: enable mandatory CODEOWNER approva
 ## Issues
 
 Use GitHub Task issues for work requiring assignment and coordination, with a linked ClickUp task when available. Do not assume the integration synchronizes every field. Small understood fixes may use a direct PR; raise newly noticed bugs in the team WhatsApp group. The owner curates the backlog; Discussions stay disabled.
+
+Before starting, read the issue, relevant comments and linked decisions. Confirm the owner, observable acceptance conditions and dependencies. Separate what can be prepared now from what needs an agreed contract or an upstream implementation. A dependency marked open does not forbid parallel work, and an open PR does not mean its contract is accepted.
+
+Keep decisions and scope changes in the issue, with links to the implementing PR and evidence. Preserve earlier decisions unless the team changes them explicitly. Use `Refs #N` while a dependent PR targets a non-default branch; once it targets `main`, use a closing reference only if it completes the issue. Verify the issue's final state after merge. A pushed branch, passing check or ready PR is not task completion; record any remaining acceptance work instead of closing it prematurely.
 
 ## Pull requests
 
@@ -50,6 +56,8 @@ Evidence: <reproduction, failing assertion or concrete code trace>.
 Add Questions or Suggestions only when useful. A clean review can say: "No blocking findings in <scope> at <head>. Verified: <actual checks>. Gap: <material unverified behavior, if any>."
 
 Approve means the scoped change is fit to merge, not perfect or bug-free. Do not block on style, optional documentation or a bot verdict alone. After a fix, re-review the finding and affected behavior; broaden only when new evidence warrants it. Separate executed checks from proposed cases and mocked behavior from live provider results.
+
+Address review threads with a verified fix and evidence, or a reasoned response against the current code and accepted decisions. Do not mark a disputed or unanswered concern resolved just to clear the conversation list. Resolving a thread does not supply human approval or prove that checks passed on the current revision.
 
 Keep intentionally unfinished work draft even when checks pass. The planned CI-driven draft/ready transition is not implemented; do not claim it is automatic. Ready status never grants permission to merge.
 

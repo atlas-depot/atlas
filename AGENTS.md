@@ -35,15 +35,11 @@ Read `docs/development.md` when changing local setup, environment handling, or d
 
 ## Contribution and verification
 
-Use feature branches targeting `main`. Read `docs/contributing.md` for human review, Efe-only merge authority, and setup status.
-Issues are for task assignment. Discuss newly noticed bugs in the team WhatsApp group or open a direct PR for an understood fix.
-Use the PR and review formats in `docs/contributing.md`; keep evidence proportional to the change.
-Run checks relevant to the changed behavior and report their actual results. For visible UI changes, verify mobile and desktop and provide before/after evidence.
-Keep individual contribution, AI assistance, and demonstration evidence in `docs/project-log.md`, not repeated in every PR body.
+Read `docs/contributing.md` before issue, branch, PR or review work. It owns assignment, parallel work, evidence requirements and merge authority. Read `docs/development.md` for programming and test conventions. Report actual verification, not intended checks.
 
 ## Skills
 
 Use a skill under `.agents/skills/` only when its description matches the task.
 Read its entrypoint first and load conditional references only when needed.
 A skill must contribute a specific procedure, non-obvious constraint, or useful verification contract; generic advice and copied project rules do not justify another skill.
-When shortening a skill, preserve its operational conditions and test uncertain behavior changes with representative tasks.
+When changing this guidance, follow `docs/process/agent-guidance.md` for ownership, discovery and behavioral checks.

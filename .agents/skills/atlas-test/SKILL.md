@@ -11,7 +11,7 @@ Turn the changed contract into falsifiable evidence. Read relevant product/secur
 
 Start with the request, diff, affected callers and existing coverage. Name the failure being prevented and the observable result. Choose the smallest boundary that exercises it: a pure-rule unit test, real-storage integration test or focused user-flow test as appropriate. Layer proportions and coverage percentages are signals, not proof of correctness.
 
-Use [boundary cases](references/boundary-matrix.md) only when source grounding, account isolation, approval or action lifecycles are affected. The cases do not decide product policy. Ask for the missing contract when correction, retention or ambiguous-outcome behavior is unspecified rather than embedding a new decision in an assertion.
+Use [boundary cases](references/boundary-matrix.md) only when source grounding, account isolation, credential disclosure, approval or action lifecycles are affected. The cases do not decide product policy. Ask for the missing contract when correction, retention or ambiguous-outcome behavior is unspecified rather than embedding a new decision in an assertion.
 
 Expected results must come from the agreed contract and independent fixtures, not the implementation's own classifier, serializer or round-trip helper. Assert exact strings and call counts only when they express the contract. A policy unit test and endpoint integration test may protect different failures. Similar inputs or passing remaining tests do not establish redundancy; before removing a test, identify the lost failure mode and where it remains or why it is obsolete.
 
