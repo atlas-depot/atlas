@@ -1,10 +1,10 @@
 # Development setup
 
-Status: the repository contains a minimal React/TypeScript web scaffold. It renders an Atlas heading and introduction, with no backend, credentials or external services required. Report the actual result of each check; a build is not a deployment and a no-tests run is not passing test evidence.
+Status: the repository contains a minimal React/TypeScript web scaffold. It renders an Atlas heading and introduction, with no backend, credentials or external services required. Report the actual result of each check. A build is not a deployment and a no-tests run is not passing test evidence.
 
 ## Tooling
 
-Use Node `22.23.2` and pnpm `11.23.0`. `.node-version` records the runtime and `package.json#packageManager` pins pnpm. Select that Node version with your existing runtime manager before installing; the project does not install or change a global runtime manager. Commit only `pnpm-lock.yaml` as the dependency lockfile.
+Use Node `22.23.2` and pnpm `11.23.0`. `.node-version` records the runtime and `package.json#packageManager` pins pnpm. Select that Node version with your existing runtime manager before installing. The project does not install or change a global runtime manager. Commit only `pnpm-lock.yaml` as the dependency lockfile.
 
 From the repository root:
 
@@ -23,23 +23,23 @@ Vite prints the local development URL. To choose an isolated port, use `pnpm dev
 | `pnpm lint` | Vite+ lint checks |
 | `pnpm typecheck` | Vite+ type checks through its TypeScript Go toolchain |
 | `pnpm test` | `vp test run`, using bundled Vitest 5.0.5 |
-| `pnpm build` | Production bundle in `dist/`; run `pnpm check` separately |
+| `pnpm build` | Production bundle in `dist/`. Run `pnpm check` separately |
 | `pnpm preview --host 127.0.0.1 --port 4177 --strictPort` | Serve the built bundle locally |
 
 The first install that creates or intentionally updates the lockfile uses `pnpm install`. Subsequent clean installs use `--frozen-lockfile` so mismatches fail instead of rewriting it. No secrets, database, seed process or paid account is needed for this scaffold.
 
-Vite+ `1.3.0` owns the frontend toolchain. `vite` resolves to its matching core alias, and the workspace overrides keep Vite and Vitest aligned with the bundled versions. The `pnpm-workspace.yaml` contains resolution settings for this one package, not empty monorepo packages. Both `lint.options.typeAware` and `typeCheck` are enabled in `vite.config.ts`; the app and tooling tsconfigs explicitly enable strict mode. Formatting excludes existing planning documents, historical prototypes and agent instructions to preserve those artifacts.
+Vite+ `1.3.0` owns the frontend toolchain. `vite` resolves to its matching core alias, and the workspace overrides keep Vite and Vitest aligned with the bundled versions. The `pnpm-workspace.yaml` explicitly includes only the root package, so local scratch and evidence folders are not discovered as applications. Both `lint.options.typeAware` and `typeCheck` are enabled in `vite.config.ts`. The app and tooling tsconfigs explicitly enable strict mode. Formatting excludes existing planning documents, historical prototypes and agent instructions to preserve those artifacts.
 
 Dependencies have concrete consumers:
 
 - `react` and `react-dom` render the page through `src/main.tsx` and the named `App` component.
 - `@vitejs/plugin-react` supplies React development transforms and refresh support.
-- `vite-plus` supplies dev, static checks, tests and production builds; the direct `vite` alias provides the matching plugin and client types.
+- `vite-plus` supplies dev, static checks, tests and production builds. The direct `vite` alias provides the matching plugin and client types.
 - `typescript` and `@types/node`, `@types/react`, `@types/react-dom` provide compiler/editor tooling and types for the code and config.
 
 ### Test runner boundary
 
-Test settings live in `vite.config.ts`: Node environment, `src/**/*.test.ts`, and `passWithNoTests: false`. Import test APIs from `vite-plus/test`; do not add a second Vitest installation or a separate `vitest.config.ts` by habit.
+Test settings live in `vite.config.ts`: Node environment, `src/**/*.test.ts`, and `passWithNoTests: false`. Import test APIs from `vite-plus/test`. Do not add a second Vitest installation or a separate `vitest.config.ts` by habit.
 
 This scaffold has no committed behavior tests. `pnpm test` currently invokes the runner and exits 1 with "No test files found". Record that result explicitly rather than claiming tests pass or enabling `passWithNoTests`. The first fixture/parser behavior tests belong to [#22](https://github.com/atlas-depot/atlas/issues/22). A disposable runner self-check verifies harness execution only and does not provide application behavior coverage.
 
@@ -47,7 +47,7 @@ Before review, verify the clean install, static checks, production build and acc
 
 ### Scaffold provenance
 
-The initial config came from `create-vite-plus@1.3.0` with `create-vite@9.2.1 --template react-ts`, generated in a separate scratch directory with agent/editor/git/hook setup disabled. Only application/config files were transferred; existing README, ignore rules and repository instructions were preserved and updated deliberately. Direct dependencies were pinned, strict mode was made explicit and template branding was replaced. The minimal page uses system fonts and semantic HTML; product typography, component libraries and motion remain future design choices.
+The initial config came from `create-vite-plus@1.3.0` with `create-vite@9.2.1 --template react-ts`, generated in a separate scratch directory with agent/editor/git/hook setup disabled. Only application/config files were transferred. Existing README, ignore rules and repository instructions were preserved and updated deliberately. Direct dependencies were pinned, strict mode was made explicit and template branding was replaced. The minimal page uses system fonts and semantic HTML. Product typography, component libraries and motion remain future design choices.
 
 References: [Vite+ create](https://viteplus.dev/guide/create), [local CLI and version alignment](https://viteplus.dev/guide/local-cli), [check](https://viteplus.dev/guide/check), [test](https://viteplus.dev/guide/test), [published template source](https://github.com/vitejs/vite/tree/create-vite%409.2.1/packages/create-vite/template-react-ts).
 
@@ -92,7 +92,7 @@ Vercel environment variables are the selected starting approach. Team access and
 
 ## CI and deployment status
 
-There is no application CI in this scaffold. Its local Vite+ commands are available for a separate CI setup; do not hide the current no-tests result to manufacture a green required check. Add relevant deterministic eve evals when agent code exists. Paid live-model evals should be separately limited.
+There is no application CI in this scaffold. Its local Vite+ commands are available for a separate CI setup. Do not hide the current no-tests result to manufacture a green required check. Add relevant deterministic eve evals when agent code exists. Paid live-model evals should be separately limited.
 
 The agreed flow is feature branch preview and `main` production. Efe or configured Vercel automation handles deployment. Configure Vercel Git integration for branch-triggered deployments or a Vercel CLI/API path for CI; branches and CI do not configure deployments by themselves: project linkage, team access, credentials, and environment separation require separate configuration and verification. See [contributing](contributing.md).
 

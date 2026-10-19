@@ -4,9 +4,9 @@ A personal assistant for scattered context: user-written notes, connected source
 
 ## Current status
 
-A minimal React/TypeScript web scaffold for a five-person school project due at the end of April 2027.
+Atlas has a minimal React/TypeScript web scaffold.
 The app currently renders the Atlas heading and introduction. Agent and provider integrations are not implemented.
-Vite+ provides development tooling; eve is the agent-runtime direction to validate.
+Vite+ provides development tooling. Eve is the agent-runtime direction to validate.
 UI direction and remaining backend choices will be reviewed with the team before they become implementation contracts.
 
 ## Read what you need
@@ -35,6 +35,6 @@ Run `pnpm check` for formatting, lint and type checks, and `pnpm build` for the 
 `pnpm test` invokes Vite+'s bundled Vitest runner. No behavior tests ship in this scaffold, so it exits with "No test files found" until the first fixture/parser tests in [#22](https://github.com/atlas-depot/atlas/issues/22). This is not passing test evidence.
 
 There is no application CI yet. CI and deployment setup remain separate work.
-Independent PRs target `main`; dependent PRs can target their parent branch for development and review. Follow [the parallel-work procedure](docs/process/parallel-work.md) before integrating each PR into `main`. A human teammate reviews and Efe decides whether to merge. Vercel project linkage and deployments still need separate configuration and verification.
+Independent PRs target `main`. Dependent PRs can target their parent branch for development and review. Follow [the parallel-work procedure](docs/process/parallel-work.md) before integrating each PR into `main`. A human teammate reviews and Efe decides whether to merge. Vercel project linkage and deployments still need separate configuration and verification.
 
 Agents start with [AGENTS.md](AGENTS.md).

@@ -1,14 +1,14 @@
 # Architecture discussion baseline
 
-The repository contains a minimal React/TypeScript web scaffold, planning material and static prototypes. The scaffold renders an Atlas heading and introduction. This page supersedes the earlier production specification; it does not claim that any provider or agent-runtime integration has been verified.
+Atlas has a minimal React/TypeScript web scaffold, planning material and static prototypes. The scaffold renders an Atlas heading and introduction. This page supersedes the earlier production specification. It does not claim that any provider or agent-runtime integration has been verified.
 
 ## Direction and open choices
 
 | Area | Status |
 | --- | --- |
-| Tooling | Vite+ 1.3.0 with pnpm; commands and verification boundaries are in [development setup](development.md) |
+| Tooling | Vite+ 1.3.0 with pnpm. Commands and verification boundaries are in [development setup](development.md) |
 | Agent runtime | eve selected as the direction; deployment and integration must pass a working spike |
-| Client | React/TypeScript web scaffold; web/PWA first remains the direction, PWA setup is not implemented, and the exact TanStack/framework arrangement remains for team review |
+| Client | React/TypeScript web scaffold. Web/PWA first remains the direction. PWA setup is not implemented. The exact TanStack/framework arrangement remains for team review |
 | Database and ORM | Open; PostgreSQL/Drizzle were proposals, not approved dependencies |
 | Auth, file storage, connector provider | Open; compare actual required capabilities and cost |
 | API | REST and GraphQL remain options; relationships alone do not require GraphQL |
@@ -47,7 +47,7 @@ These are conceptual responsibilities, not six databases or a finalized schema. 
 
 ## Small starting layout
 
-The current single web app lives in root `src/`. No shared packages or backend services exist. The following expansion remains a proposal; create folders when they contain real code:
+The current single web app lives in root `src/`. No shared packages or backend services exist. The following expansion remains a proposal. Create folders when they contain real code:
 
 ```text
 apps/web/       PWA and product screens
