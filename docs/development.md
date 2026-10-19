@@ -28,7 +28,7 @@ Vite prints the local development URL. To choose an isolated port, use `pnpm dev
 
 The first install that creates or intentionally updates the lockfile uses `pnpm install`. Subsequent clean installs use `--frozen-lockfile` so mismatches fail instead of rewriting it. No secrets, database, seed process or paid account is needed for this scaffold.
 
-Vite+ `1.3.0` owns the frontend toolchain. `vite` resolves to its matching core alias, and the workspace overrides keep Vite and Vitest aligned with the bundled versions. The `pnpm-workspace.yaml` explicitly includes only the root package, so local scratch and evidence folders are not discovered as applications. Both `lint.options.typeAware` and `typeCheck` are enabled in `vite.config.ts`. The app and tooling tsconfigs explicitly enable strict mode. Formatting excludes existing planning documents, historical prototypes and agent instructions to preserve those artifacts.
+Vite+ `1.3.0` owns the frontend toolchain. `vite` resolves to its matching core alias, and the workspace overrides keep Vite and Vitest aligned with the bundled versions. The Vite peer-version exception accommodates the core alias's `1.3.0` version versus the React plugin's ordinary Vite `^8.0.0` peer range; the override still pins the resolved package. The `pnpm-workspace.yaml` explicitly includes only the root package, so local scratch and evidence folders are not discovered as applications. Both `lint.options.typeAware` and `typeCheck` are enabled in `vite.config.ts`. The app and tooling tsconfigs explicitly enable strict mode. Formatting excludes `docs/**`, `.agents/**`, `.claude/**` and `commitlint.config.cjs`; root `AGENTS.md` and `CLAUDE.md` remain included.
 
 Dependencies have concrete consumers:
 
@@ -39,7 +39,7 @@ Dependencies have concrete consumers:
 
 ### Test runner boundary
 
-Test settings live in `vite.config.ts`: Node environment, `src/**/*.test.ts`, and `passWithNoTests: false`. Import test APIs from `vite-plus/test`. Do not add a second Vitest installation or a separate `vitest.config.ts` by habit.
+Test settings live in `vite.config.ts`: Node environment, `src/**/*.test.ts`, and `passWithNoTests: false`. This supports the parser work in #22. DOM component tests would need a matching file include and browser-like environment; neither is configured yet. Import test APIs from `vite-plus/test`. Do not add a second Vitest installation or a separate `vitest.config.ts` by habit.
 
 This scaffold has no committed behavior tests. `pnpm test` currently invokes the runner and exits 1 with "No test files found". Record that result explicitly rather than claiming tests pass or enabling `passWithNoTests`. The first fixture/parser behavior tests belong to [#22](https://github.com/atlas-depot/atlas/issues/22). A disposable runner self-check verifies harness execution only and does not provide application behavior coverage.
 
