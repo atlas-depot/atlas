@@ -40,12 +40,7 @@
     "valid": false,
     "issues": [
       {
-        "path": [
-          "sources",
-          1,
-          "source",
-          "author"
-        ],
+        "path": ["sources", 1, "source", "author"],
         "reason": "The external message message-1 is missing source.author."
       }
     ]
