@@ -34,7 +34,7 @@ Evidence: What actually ran, its result, and relevant verification gaps.
 
 Add a migration, risk or rollback note only when material. For visible UI changes, verify desktop, mobile width and keyboard behavior; attach before/after screenshots or a short recording when still images cannot show the behavior. For backend changes, use a sanitized request/result or persisted-state example when useful. Screenshots alone do not verify backend behavior.
 
-Do not repeat the diff as a file list, paste logs, or require an academic reflection in every PR. At weekly meetings, update [project-log.md](project-log.md) with attributable contributions, decisions and evidence links. A merge identity alone does not prove authorship.
+Do not repeat the diff as a file list, paste logs, or require an academic reflection in every PR. Contribution notes may stay local; no committed log entry or separate log PR is required. When a team or school report is needed, summarize existing PR, review and verification links. A merge identity alone does not prove authorship.
 
 ## Design before implementation
 
@@ -63,7 +63,7 @@ Keep intentionally unfinished work draft even when checks pass. Ready status nev
 
 ## AI review configuration
 
-Repository settings define CodeRabbit as the automatic reviewer for non-draft PRs and new commits. cubic is a second opinion requested with `@cubic-dev-ai review this PR`; automatic reviews and approvals are disabled. CodeRabbit can also be requested with `@coderabbitai full review`. Both preserve the author-written PR description.
+CodeRabbit is configured for automatic reviews of non-draft PRs, but this OSS repository currently requires a manual trigger, and PRs targeting a non-default branch may also be skipped. Request a review with `@coderabbitai full review` and read the actual review result; a successful status can report a skipped review. cubic is a second opinion requested with `@cubic-dev-ai review this PR`; automatic reviews and approvals are disabled. Both are configured to preserve the author-written PR description.
 
 The configuration files do not install the GitHub Apps. cubic reads `cubic.yaml` only from the default branch, so dashboard settings must match until this change lands. Greptile uses `.greptile/config.json` for manual reviews via `@greptileai`, with automatic events and approvals disabled and Base effort selected. Match the Atlas dashboard setting to Never without changing other repositories. Installation and free-plan eligibility must be verified before claiming it is active. Bot reviews are advisory and do not replace human approval or grant merge permission.
 
