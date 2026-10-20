@@ -1,0 +1,48 @@
+{
+  "valid-example.json": {
+    "valid": true,
+    "sourceCount": 2,
+    "briefingItemCount": 1,
+    "briefingItems": [
+      {
+        "index": 0,
+        "text": "Prepare the budget summary for the project review on 22 October at 14:00.",
+        "links": [
+          {
+            "referenceIndex": 0,
+            "targetId": "note-1",
+            "content": "Prepare the budget summary before the project review.",
+            "origin": {
+              "kind": "user_note"
+            }
+          },
+          {
+            "referenceIndex": 1,
+            "targetId": "message-1",
+            "content": "The project review is on 22 October at 14:00.",
+            "origin": {
+              "kind": "external_message",
+              "author": "Deniz (synthetic)",
+              "sentAt": "2026-10-16T09:00:00Z"
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "empty-example.json": {
+    "valid": true,
+    "sourceCount": 0,
+    "briefingItemCount": 0,
+    "briefingItems": []
+  },
+  "malformed-missing-author.json": {
+    "valid": false,
+    "issues": [
+      {
+        "path": ["sources", 1, "source", "author"],
+        "reason": "The external message message-1 is missing source.author."
+      }
+    ]
+  }
+}

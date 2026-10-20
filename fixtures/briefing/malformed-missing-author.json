@@ -1,0 +1,25 @@
+{
+  "sources": [
+    {
+      "id": "note-1",
+      "kind": "user_note",
+      "content": "Prepare the budget summary before the project review."
+    },
+    {
+      "id": "message-1",
+      "kind": "external_message",
+      "content": "The project review is on 22 October at 14:00.",
+      "source": {
+        "sentAt": "2026-10-16T09:00:00Z"
+      }
+    }
+  ],
+  "briefing": {
+    "items": [
+      {
+        "text": "Prepare the budget summary for the project review on 22 October at 14:00.",
+        "sourceIds": ["note-1", "message-1"]
+      }
+    ]
+  }
+}
