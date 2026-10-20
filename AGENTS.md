@@ -35,15 +35,11 @@ Read `docs/development.md` when changing local setup, environment handling, or d
 
 ## Contribution and verification
 
-The target flow is feature branch to `dev`, then a reviewed release from `dev` to `main`; read `docs/contributing.md` for merge semantics and current setup gaps.
-Issues are for task assignment. Discuss newly noticed bugs in the team WhatsApp group or open a direct PR for an understood fix.
-Use Why / What / How / Test in PR bodies, normally within 100 words. Add visual evidence or material risk only when relevant.
-Run checks relevant to the changed behavior and report their actual results. For visible UI changes, verify mobile and desktop and provide before/after evidence.
-Keep individual contribution, AI assistance, and demonstration evidence in `docs/project-log.md`, not repeated in every PR body.
+Read `docs/contributing.md` before issue, branch, PR or review work. It owns assignment, parallel work, evidence requirements and merge authority. Read `docs/development.md` for programming and test conventions. Report actual verification, not intended checks.
 
 ## Skills
 
-Use a skill under `.claude/skills/` only when its description matches the task.
+Use a skill under `.agents/skills/` only when its description matches the task.
 Read its entrypoint first and load conditional references only when needed.
 A skill must contribute a specific procedure, non-obvious constraint, or useful verification contract; generic advice and copied project rules do not justify another skill.
-When shortening a skill, preserve its operational conditions and test uncertain behavior changes with representative tasks.
+Keep team policy in its canonical document; link to it from skills. Check materially changed skill procedures on representative tasks.

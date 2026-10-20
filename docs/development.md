@@ -10,7 +10,19 @@ Target onboarding: clone, obtain authorized development access, install dependen
 
 ## Code conventions
 
-Use strict TypeScript without `any`, named exports, and explicit dependencies instead of hidden business globals. Parse untrusted API/tool input with runtime schemas at boundaries. Keep shared contracts small; do not create abstractions without real callers.
+Use strict TypeScript without `any`, named exports, and explicit dependencies instead of hidden business globals. Parse untrusted API/tool input with Zod schemas at boundaries. Keep shared contracts small; do not create abstractions without real callers.
+
+For an API change, specify caller identity, inputs, outputs and errors; inspect affected callers. Update generated contracts through their generator when one exists. Use actual persistence constraints and access filters, not an assumed future ORM.
+
+For UI changes, preserve accessible names and keyboard behavior from existing components. Distinguish optimistic state from persisted data and handle the loading, empty and error states affected by the change. UI verification evidence belongs in the PR as described in [contributing](contributing.md).
+
+## Choosing implementation and test boundaries
+
+Start with the accepted input/output contract and inspect its callers. Separate parsing of untrusted input, domain decisions and side effects when that makes failures independently testable; do not create layers or shared packages without a real consumer. Model meaningful states explicitly, including failure and unknown outcomes when applicable. Prefer a cohesive module that hides a decision over many forwarding wrappers. Refactor behavior-preserving structure separately from a behavior change when that makes review clearer.
+
+Use independent expected results and test observable behavior. Prefer accessible user-facing interactions over component internals in UI tests. Use [atlas-test](../.agents/skills/atlas-test/SKILL.md) to choose test boundaries, prove regression sensitivity and investigate flakes.
+
+Methods: [Google review guidance](https://google.github.io/eng-practices/review/reviewer/looking-for.html), [The Practical Test Pyramid](https://martinfowler.com/articles/practical-test-pyramid.html), [Testing Library principles](https://testing-library.com/docs/guiding-principles/). These inform choices; they do not add dependencies or override an accepted Atlas contract.
 
 ## Environments
 
@@ -18,10 +30,9 @@ Use strict TypeScript without `any`, named exports, and explicit dependencies in
 | --- | --- | --- |
 | Local | Fast development and deterministic tests | Seed data, mocks by default; personal test accounts when needed |
 | PR preview | Review an isolated code change | Test data and credentials; no production access |
-| dev staging | Exercise merged features together | Shared test environment with clearly scoped accounts |
 | Production | Published main release | Separate real-user data and credentials |
 
-Different preview URLs do not automatically provide isolated databases. Choose preview data isolation once the database is selected. Keep scheduled/proactive actions off in previews by default; enable deliberately for an integration test.
+Different preview URLs do not automatically provide isolated databases. Choose preview data isolation once the database is selected. Keep scheduled/proactive actions and live connector subscriptions off in previews by default; enable deliberately for an integration test.
 
 Local environments need matching versions and migrations, not copies of production data. Do not require every contributor to have paid model keys for routine tests.
 
@@ -40,7 +51,9 @@ Vercel environment variables are the selected starting approach. Team access and
 
 There is no application CI before the scaffold. Add actual Vite+ lint/typecheck/test/build checks and relevant deterministic eve evals with runnable code; the owner reviews the resulting checks before merging. Paid live-model evals should be separately limited.
 
-The agreed flow is feature branch preview, `dev` staging, and `main` production. Git branches and CI do not create Vercel deployments: project linkage, team access, credentials, and environment separation require separate configuration and verification. See [contributing](contributing.md).
+The agreed flow is feature branch preview and `main` production. Efe or configured Vercel automation handles deployment. Configure Vercel Git integration for branch-triggered deployments or a Vercel CLI/API path for CI; branches and CI do not configure deployments by themselves: project linkage, team access, credentials, and environment separation require separate configuration and verification. See [contributing](contributing.md).
+
+After an authorized deployment, verify the deployed revision and affected live flow. A successful build is not a live smoke test, and application rollback does not imply database rollback.
 
 ## Budget checks
 

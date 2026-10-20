@@ -2,9 +2,9 @@
 
 Five-person school project, planned delivery at the end of April 2027. Confirm the school's AI-assistance and attribution requirements before assigning implementation work.
 
-Keep evidence short and attributable. Link actual PRs, reviews, tests, evals, or demonstrations rather than writing long narrative reports. Record AI assistance and human verification to the extent required by the school. Do not fabricate learning, authorship, or successful runs.
+This is an optional template. Contribution notes may stay local; no committed entry or separate PR is required. When a team or school report is needed, use existing PR, review, test, eval or demonstration links. Keep evidence short and attributable. Record AI assistance and human verification to the extent required by the school. Do not fabricate learning, authorship, or successful runs.
 
-## Weekly entry format
+## Optional entry format
 
 ```text
 Week / contributor:

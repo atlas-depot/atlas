@@ -14,9 +14,9 @@ UI direction and remaining backend choices will be reviewed with the team before
 - [Product](docs/product.md): intended use, scope, and decisions still open.
 - [Architecture](docs/architecture.md): responsibility boundaries and candidate implementation.
 - [Development](docs/development.md): local setup, environments, and current infrastructure gaps.
-- [Contributing](docs/contributing.md): small PRs and the intended dev/main release flow.
+- [Contributing](docs/contributing.md): small PRs, human review, and parallel work that integrates into main.
 - [Security](docs/security.md): identity, connected accounts, memory, and external actions.
-- [Project log](docs/project-log.md): individual contribution and academic evidence.
+- [Project log](docs/project-log.md): optional template for contribution and academic evidence.
 
 Older design prototypes under `docs/prototypes/` are historical experiments, not the selected UI.
 Use Git history for superseded plans rather than treating them as current requirements.
@@ -25,6 +25,6 @@ Use Git history for superseded plans rather than treating them as current requir
 
 Application setup commands will be added with the first working scaffold and tested before being documented here.
 There is no application CI yet. Add meaningful Vite+ lint, typecheck, test, and build checks with the first working scaffold.
-Feature PRs target `dev`; releases go from `dev` to `main`. Vercel project linkage and deployments still need separate configuration and verification.
+Independent PRs target `main`; dependent PRs can target their parent branch for development and review. Follow [the parallel-work procedure](docs/process/parallel-work.md) before integrating each PR into `main`. A human teammate reviews and Efe decides whether to merge. Vercel project linkage and deployments still need separate configuration and verification.
 
 Agents start with [AGENTS.md](AGENTS.md).
