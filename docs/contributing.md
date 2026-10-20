@@ -34,7 +34,7 @@ Evidence: What actually ran, its result, and relevant verification gaps.
 
 Add a migration, risk or rollback note only when material. For visible UI changes, verify desktop, mobile width and keyboard behavior; attach before/after screenshots or a short recording when still images cannot show the behavior. For backend changes, use a sanitized request/result or persisted-state example when useful. Screenshots alone do not verify backend behavior.
 
-Do not repeat the diff as a file list, paste logs, or require an academic reflection in every PR. At weekly meetings, update [project-log.md](project-log.md) with attributable contributions, decisions and evidence links. A merge identity alone does not prove authorship.
+Do not repeat the diff as a file list, paste logs, or require an academic reflection in every PR. Contribution notes may stay local; no committed log entry or separate log PR is required. When a team or school report is needed, summarize existing PR, review and verification links. A merge identity alone does not prove authorship.
 
 ## Design before implementation
 
