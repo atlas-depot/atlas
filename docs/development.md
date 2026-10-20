@@ -4,7 +4,7 @@ Status: the repository contains a minimal React/TypeScript web scaffold. It rend
 
 ## Tooling
 
-Use Node `22.23.2` and pnpm `11.23.0`. `.node-version` records the runtime and `package.json#packageManager` pins pnpm. Select that Node version with your existing runtime manager before installing. The project does not install or change a global runtime manager. Commit only `pnpm-lock.yaml` as the dependency lockfile.
+Use Node `24.22.0` LTS and pnpm `11.23.0`. `.node-version` records the runtime and `package.json#packageManager` pins pnpm. Select that Node version with your existing runtime manager before installing. The project does not install or change a global runtime manager. Commit only `pnpm-lock.yaml` as the dependency lockfile.
 
 From the repository root:
 

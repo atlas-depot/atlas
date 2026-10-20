@@ -23,7 +23,7 @@ Use Git history for superseded plans rather than treating them as current requir
 
 ## Start development
 
-Use Node `22.23.2` and pnpm `11.23.0`, pinned in `.node-version` and `package.json`.
+Use Node `24.22.0` LTS and pnpm `11.23.0`, pinned in `.node-version` and `package.json`.
 
 ```sh
 pnpm install --frozen-lockfile
