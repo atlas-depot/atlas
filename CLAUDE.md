@@ -1,6 +1,5 @@
 # Atlas
 
-Read `AGENTS.md` for project instructions.
-Task-specific skills live in `.agents/skills/`; load only a matching skill.
+@AGENTS.md
 
-`.claude/skills/` contains relative symlinks for Claude discovery; edit the canonical files in `.agents/skills/`.
+Shared skill procedures live in `.agents/skills/`. `.claude/skills/` contains regular discovery files that load those procedures, so checkout does not require symlink support. Edit procedures in `.agents/skills/`; keep each discovery file's name and description aligned with its shared skill.
