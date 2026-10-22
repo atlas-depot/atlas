@@ -1,7 +1,7 @@
 # Atlas agent instructions
 
 Atlas helps people recover scattered context, keep notes, and act through a personal AI assistant.
-This repository is currently a planning baseline, not a runnable application.
+This repository contains a minimal runnable web scaffold and planning material.
 
 ## Decisions and scope
 
