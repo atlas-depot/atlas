@@ -20,7 +20,8 @@ Vite prints the local development URL. To choose an isolated port, use `pnpm dev
 | Command | What runs |
 | --- | --- |
 | `pnpm check` | Vite+ format, lint and type checks |
-| `pnpm lint` | Vite+ lint checks |
+| `pnpm format:check` | Oxfmt formatting validation without writing files |
+| `pnpm lint` | Oxlint rules and full type checking with the enabled options |
 | `pnpm typecheck` | Vite+ type checks through its TypeScript Go toolchain |
 | `pnpm test` | `vp test run`, using bundled Vitest 5.0.5 |
 | `pnpm build` | Production bundle in `dist/`. Run `pnpm check` separately |
@@ -29,6 +30,25 @@ Vite prints the local development URL. To choose an isolated port, use `pnpm dev
 The first install that creates or intentionally updates the lockfile uses `pnpm install`. Subsequent clean installs use `--frozen-lockfile` so mismatches fail instead of rewriting it. No secrets, database, seed process or paid account is needed for this scaffold.
 
 Vite+ `1.3.0` owns the frontend toolchain. `vite` resolves to its matching core alias, and the workspace overrides keep Vite and Vitest aligned with the bundled versions. The Vite peer-version exception accommodates the core alias's `1.3.0` version versus the React plugin's ordinary Vite `^8.0.0` peer range; the override still pins the resolved package. The `pnpm-workspace.yaml` explicitly includes only the root package, so local scratch and evidence folders are not discovered as applications. Both `lint.options.typeAware` and `typeCheck` are enabled in `vite.config.ts`. The app and tooling tsconfigs explicitly enable strict mode. Formatting excludes `docs/**`, `.agents/**`, `.claude/**` and `commitlint.config.cjs`; root `AGENTS.md` and `CLAUDE.md` remain included.
+
+### Static-check verification
+
+`pnpm check`, `pnpm format:check`, `pnpm lint` and `pnpm typecheck` validate without auto-fixing files. Keep `--fix` out of CI-facing commands. Use `pnpm exec vp fmt` deliberately when you want to write formatting fixes locally.
+
+Oxfmt checks layout, such as spacing and quotes; it does not detect incorrect types. Oxlint enforces configured rules, such as `typescript/no-explicit-any`; an explicit `any` is legal TypeScript but violates this rule. Type checking rejects incompatible assignments; it cannot prove a correctly typed calculation produces the right business result. `typeAware` enables rules needing type information, while `typeCheck` enables full type checking. Keep both enabled. With this configuration, `pnpm lint` also reports type errors; `pnpm typecheck` isolates the compiler diagnostics.
+
+To reproduce the #18 failure checks, use a disposable copy of the current candidate with its own frozen-lockfile install. Add only one of the following variants as `src/check-probe.ts` at a time. Leave it unimported to verify checks include source outside the application's import graph. Run all four commands after each variant, then remove the file and rerun them.
+
+| Variant (one-line file) | `format:check` | `lint` | `typecheck` | `check` |
+| --- | --- | --- | --- | --- |
+| `export const checkProbe="Atlas";` | Fail | Pass | Pass | Fail |
+| `export const checkProbe: any = "Atlas";` | Pass | Fail | Pass | Fail |
+| `export const checkProbe: number = "Atlas";` | Pass | Fail | Fail | Fail |
+| Probe removed | Pass | Pass | Pass | Pass |
+
+Failure means a nonzero exit with the intended formatting, lint or type diagnostic, not an install/configuration error. Compare source and config contents before and after the commands to confirm they do not write fixes. Never commit the deliberate faults. These probes verify static-check enforcement, not application behavior tests. Formatting covers supported non-ignored repository files; lint covers supported code files, and type checking follows `tsconfig.app.json` (`src`) and `tsconfig.node.json` (`vite.config.ts`).
+
+### Dependency consumers
 
 Dependencies have concrete consumers:
 
