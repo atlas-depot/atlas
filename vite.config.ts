@@ -33,7 +33,7 @@ export default defineConfig({
   plugins: lazyPlugins(() => [react()]),
   test: {
     environment: "node",
-    include: ["src/**/*.test.ts"],
+    include: ["src/**/*.test.ts", "scripts/**/*.test.ts"],
     passWithNoTests: false,
   },
 });

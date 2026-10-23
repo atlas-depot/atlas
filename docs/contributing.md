@@ -16,7 +16,7 @@ Protection setup must follow the base branch: enable mandatory CODEOWNER approva
 
 ## Issues
 
-Use GitHub Task issues for work requiring assignment and coordination, with a linked ClickUp task when available. Do not assume the integration synchronizes every field. Small understood fixes may use a direct PR; raise newly noticed bugs in the team WhatsApp group. The owner curates the backlog; Discussions stay disabled.
+Use GitHub Task issues for work requiring assignment and coordination, with a linked ClickUp task when available. Only explicitly mapped task statuses synchronize on issue close/reopen; see [ClickUp status sync](process/clickup-sync.md) for setup and limits. Other fields remain manual. Small understood fixes may use a direct PR; raise newly noticed bugs in the team WhatsApp group. The owner curates the backlog; Discussions stay disabled.
 
 Before starting, read the issue, relevant comments and linked decisions. Confirm the owner, observable acceptance conditions and dependencies. Separate what can be prepared now from what needs an agreed contract or an upstream implementation. A dependency marked open does not forbid parallel work, and an open PR does not mean its contract is accepted.
 
