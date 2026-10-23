@@ -50,7 +50,7 @@ Failure means a nonzero exit with the intended formatting, lint or type diagnost
 
 ### Optional pre-push hook
 
-The repository includes `.githooks/pre-push`, but it is not active by default. To run `pnpm check` and `pnpm build` before every push in this clone:
+The repository includes `.githooks/pre-push`, but it is not active by default. To run `pnpm check`, the ClickUp sync tests and `pnpm build` before every push in this clone:
 
 ```sh
 git config --local core.hooksPath .githooks
@@ -62,7 +62,7 @@ This changes the hook path only for the current clone and replaces any existing 
 git config --local --unset core.hooksPath
 ```
 
-The hook runs the same local checks as the CI `verify` gate and does not install dependencies. Run `pnpm install --frozen-lockfile` first. Use `git push --no-verify` only for an intentional bypass.
+The hook runs the same local checks as the CI `verify` gate: `pnpm check`, `pnpm exec vp test run scripts/clickup-sync.test.ts`, and `pnpm build`. It does not install dependencies. Run `pnpm install --frozen-lockfile` first. Use `git push --no-verify` only for an intentional bypass.
 
 ### Dependency consumers
 

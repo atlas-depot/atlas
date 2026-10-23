@@ -13,5 +13,6 @@ fi
 
 echo "pre-push: running Atlas checks"
 pnpm check
+pnpm exec vp test run scripts/clickup-sync.test.ts
 pnpm build
 echo "pre-push: checks passed"
