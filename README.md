@@ -34,7 +34,7 @@ Run `pnpm check` for formatting, lint and type checks, and `pnpm build` for the 
 
 `pnpm test` runs the fixture parser tests in `src/fixtures/parse-fixtures.test.ts` with Vite+'s bundled Vitest runner ([#22](https://github.com/atlas-depot/atlas/issues/22)). A run that finds no test files is not passing evidence.
 
-There is no application CI yet. CI and deployment setup remain separate work.
+CI runs format, lint, typecheck and build checks on pull requests through the `verify` check in `.github/workflows/ci.yml`. There is no test job yet. Deployment setup remains separate work.
 Independent PRs target `main`. Dependent PRs can target their parent branch for development and review. Follow [the parallel-work procedure](docs/process/parallel-work.md) before integrating each PR into `main`. A human teammate reviews and Efe decides whether to merge. Vercel project linkage and deployments still need separate configuration and verification.
 
 Agents start with [AGENTS.md](AGENTS.md).

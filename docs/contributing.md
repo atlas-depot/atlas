@@ -10,7 +10,7 @@ All five teammates are intended members of the human `atlas-reviewers` CODEOWNER
 
 Keep merge authority separate from review and CI requirements. Only the Efe-only `atlas-merge` team may bypass the update restriction, and only through a PR. Efe has no review/CI bypass. Organization owners can still administer these settings; ordinary merge restrictions do not remove organization administration rights.
 
-Protection setup must follow the base branch: enable mandatory CODEOWNER approval after this team ownership file lands on `main`, not while Efe is the sole owner. Verify active team access before claiming everyone can review. There is no application CI yet; required check names must come from real workflows when the scaffold exists. CI success, review approval and deployment are separate facts.
+Protection setup must follow the base branch: enable mandatory CODEOWNER approval after this team ownership file lands on `main`, not while Efe is the sole owner. Verify active team access before claiming everyone can review. Once `.github/workflows/ci.yml` has run on a real pull request, its `verify` check is the CI status to require; do not require a check name before a workflow produces it. CI success, review approval and deployment are separate facts.
 
 ## Issues
 
