@@ -76,7 +76,7 @@ Dependencies have concrete consumers:
 
 ### Test runner boundary
 
-Test settings live in `vite.config.ts`: Node environment, `src/**/*.test.ts`, and `passWithNoTests: false`. DOM component tests would need a matching file include and browser-like environment; neither is configured yet. Import test APIs from `vite-plus/test`. Do not add a second Vitest installation or a separate `vitest.config.ts` by habit.
+Test settings live in `vite.config.ts`: Node environment, `src/**/*.test.ts` and `scripts/**/*.test.ts`, and `passWithNoTests: false`. DOM component tests would need a matching file include and browser-like environment; neither is configured yet. Import test APIs from `vite-plus/test`. Do not add a second Vitest installation or a separate `vitest.config.ts` by habit.
 
 The fixture parser tests in `src/fixtures/parse-fixtures.test.ts` ([#22](https://github.com/atlas-depot/atlas/issues/22)) read the synthetic examples in `fixtures/briefing/` from disk. Each invalid case must produce exactly one issue at its expected field path. A run that finds no test files is not passing evidence, so keep `passWithNoTests` disabled. A disposable runner self-check verifies harness execution only and does not provide application behavior coverage.
 
