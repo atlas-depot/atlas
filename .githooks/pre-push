@@ -1,0 +1,17 @@
+#!/bin/sh
+set -eu
+
+if ! command -v pnpm >/dev/null 2>&1; then
+  echo "pre-push: pnpm is not available; install the pinned toolchain first" >&2
+  exit 1
+fi
+
+if [ ! -d node_modules ]; then
+  echo "pre-push: dependencies are not installed; run pnpm install --frozen-lockfile" >&2
+  exit 1
+fi
+
+echo "pre-push: running Atlas checks"
+pnpm check
+pnpm build
+echo "pre-push: checks passed"

@@ -48,6 +48,22 @@ To reproduce the #18 failure checks, use a disposable copy of the current candid
 
 Failure means a nonzero exit with the intended formatting, lint or type diagnostic, not an install/configuration error. Compare source and config contents before and after the commands to confirm they do not write fixes. Never commit the deliberate faults. These probes verify static-check enforcement, not application behavior tests. Formatting covers supported non-ignored repository files; lint covers supported code files, and type checking follows `tsconfig.app.json` (`src`) and `tsconfig.node.json` (`vite.config.ts`).
 
+### Optional pre-push hook
+
+The repository includes `.githooks/pre-push`, but it is not active by default. To run `pnpm check` and `pnpm build` before every push in this clone:
+
+```sh
+git config --local core.hooksPath .githooks
+```
+
+This changes the hook path only for the current clone and replaces any existing `core.hooksPath` value. If you already use another hook manager, keep it and merge this check manually instead. Disable the hook with:
+
+```sh
+git config --local --unset core.hooksPath
+```
+
+The hook runs the same local checks as the CI `verify` gate and does not install dependencies. Run `pnpm install --frozen-lockfile` first. Use `git push --no-verify` only for an intentional bypass.
+
 ### Dependency consumers
 
 Dependencies have concrete consumers:
