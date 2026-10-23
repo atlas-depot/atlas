@@ -41,6 +41,7 @@ jobs:
           run-install: false
       - run: vp install --frozen-lockfile
       - run: vp lint
+      - run: vp test run scripts/clickup-sync.test.ts
 
   build:
     runs-on: ubuntu-24.04
