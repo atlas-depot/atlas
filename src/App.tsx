@@ -91,7 +91,7 @@ function BriefingView({
                   if (!source) return null;
                   return (
                     <button
-                      key={sourceId}
+                      key={`${sourceId}-${referenceIndex}`}
                       type="button"
                       aria-label={linkName(source, referenceIndex + 1)}
                       aria-pressed={sourceId === selectedId}
