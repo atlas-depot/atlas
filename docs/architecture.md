@@ -1,20 +1,50 @@
 # Architecture discussion baseline
 
-Atlas has a minimal React/TypeScript web scaffold, planning material and static prototypes. The scaffold renders an Atlas heading and introduction. This page supersedes the earlier production specification. It does not claim that any provider or agent-runtime integration has been verified.
+Atlas has a React/TypeScript scaffold with a fixed synthetic source viewer, planning material and static prototypes. This page supersedes the earlier production specification. The isolated eve/OpenRouter experiment below is verified locally; the web application does not yet call an agent backend.
 
 ## Direction and open choices
 
 | Area | Status |
 | --- | --- |
 | Tooling | Vite+ 1.3.0 with pnpm. Commands and verification boundaries are in [development setup](development.md) |
-| Agent runtime | eve selected as the direction; deployment and integration must pass a working spike |
+| Agent runtime | eve selected as the direction; a local provider invocation is verified below. Web integration and deployment remain unverified |
 | Client | React/TypeScript web scaffold. Web/PWA first remains the direction. PWA setup is not implemented. The exact TanStack/framework arrangement remains for team review |
 | Database and ORM | Open; PostgreSQL/Drizzle were proposals, not approved dependencies |
 | Auth, file storage, connector provider | Open; compare actual required capabilities and cost |
 | API | REST and GraphQL remain options; relationships alone do not require GraphQL |
 | Memory provider | Open; file-based and hosted approaches can be tested without requiring a vector DB |
-| Model and gateway | Open; validate OpenRouter credit use and tool quality with evals |
+| Model and gateway | OpenRouter verified for the isolated smoke; product model choice and tool quality still need evals |
 | Hosting | Vercel direction with existing Pro; exact services and team access unverified |
+
+## First eve entrypoint experiment (#26)
+
+On 24 October 2026, [the isolated experiment](../experiments/eve-openrouter/README.md)
+ran on Node 24.22.0 with eve 0.83.0, AI SDK 7.0.152 and OpenRouter provider 3.1.0.
+`eve dev --no-ui --no-default-extensions` served only on loopback. The public
+`Client` from `eve/client` created a session and sent a synthetic note through
+the configured OpenRouter `LanguageModel`, without a Vercel login or deployment.
+
+- Input: `Synthetic note: The Atlas review is on 22 October at 14:00. What time is the review?`
+- Actual output: `The review is at 14:00 on 22 October.`
+- The final smoke observed `step.completed`, `turn.completed` and the session
+  boundary. `waiting` means the reusable session awaits another message.
+- Each of two successful calls reported 67 input and 14 output tokens using
+  `openai/gpt-4.1-mini`. eve did not report a direct-provider USD cost. OpenRouter's
+  key usage updates asynchronously; do not treat an immediate zero delta as free.
+  A later key-usage read reported **$0.0000984 total** for the two calls.
+- The smoke requires a dedicated key with a non-resetting provider-enforced cap
+  of at most $1. Model output is limited to 256 tokens; optional built-in tools
+  and development extensions are disabled.
+
+eve supplied agent discovery, the local HTTP/session runtime, model invocation,
+and streamed lifecycle/usage events. OpenRouter supplied model routing and billing.
+Atlas still owns user authorization, source selection and provenance, product
+data, and external-action policy. This experiment has no retrieval or connector
+tools and does not prove durability, restart recovery, action safety, or answer quality.
+
+The next decision is which bounded Atlas flow should use this entrypoint, with
+its authorization and source contract agreed before connecting the web app.
+Another teammate must reproduce the documented run before #26 is complete.
 
 ## Responsibility boundaries
 
