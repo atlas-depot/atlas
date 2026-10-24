@@ -1,0 +1,2 @@
+# Git hooks run through sh; keep LF so the shebang works on Windows too.
+.githooks/** text eol=lf
