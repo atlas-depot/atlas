@@ -29,6 +29,13 @@ Vite prints the local development URL. To choose an isolated port, use `pnpm dev
 
 The first install that creates or intentionally updates the lockfile uses `pnpm install`. Subsequent clean installs use `--frozen-lockfile` so mismatches fail instead of rewriting it. No secrets, database, seed process or paid account is needed for this scaffold.
 
+The isolated [eve experiment](../experiments/eve-openrouter/README.md) has its own
+workspace and lockfile. Before root `check`, `lint`, or the opt-in pre-push hook,
+also run `pnpm --dir experiments/eve-openrouter install --frozen-lockfile` so the
+repository-wide linter can resolve its types. CI performs this install too.
+Installing and type-checking the experiment need no API key and make no model calls;
+its live smoke command remains a separate, explicitly budgeted action.
+
 Vite+ `1.3.0` owns the frontend toolchain. `vite` resolves to its matching core alias, and the workspace overrides keep Vite and Vitest aligned with the bundled versions. The Vite peer-version exception accommodates the core alias's `1.3.0` version versus the React plugin's ordinary Vite `^8.0.0` peer range; the override still pins the resolved package. The `pnpm-workspace.yaml` explicitly includes only the root package, so local scratch and evidence folders are not discovered as applications. Both `lint.options.typeAware` and `typeCheck` are enabled in `vite.config.ts`. The app and tooling tsconfigs explicitly enable strict mode. Formatting excludes `docs/**`, `.agents/**`, `.claude/**` and `commitlint.config.cjs`; root `AGENTS.md` and `CLAUDE.md` remain included.
 
 ### Static-check verification

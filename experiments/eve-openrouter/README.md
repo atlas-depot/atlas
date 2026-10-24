@@ -3,6 +3,9 @@
 This isolated experiment addresses [#26](https://github.com/atlas-depot/atlas/issues/26):
 synthetic input -> an actual eve session -> OpenRouter -> an observable answer.
 It is outside the Atlas web application and its root workspace.
+Repository-wide lint/type checks still inspect its TypeScript files. CI installs
+this directory's frozen dependencies before those checks, without a model key or
+live invocation.
 
 ## Run locally
 
