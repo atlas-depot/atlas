@@ -13,9 +13,9 @@ corepack enable pnpm
 pnpm --version
 ```
 
-`corepack enable` writes shims next to the Node binary, so a system-wide Node installation may need elevated permissions. Otherwise run one-off commands as `corepack pnpm <command>`, which uses the same pinned version without changing `PATH`. A pnpm obtained another way is not the pinned version and may resolve dependencies differently.
+`corepack enable` writes shims next to the Node binary, so a system-wide Node installation may need elevated permissions. Otherwise run one-off commands as `corepack pnpm <command>`, which uses the same pinned version without changing `PATH`. Check that any existing pnpm installation reports `11.23.0`.
 
-A local Node other than `24.22.0` makes pnpm print `[WARN] Unsupported engine` on every command. That warning does not fail the install, but activate the version from `.node-version` before recording setup or check results, because CI runs on the pinned runtime.
+A local Node other than `24.22.0` may make project commands report an `[WARN] Unsupported engine` warning; `pnpm --version` alone does not. That warning does not fail the install, but activate the version from `.node-version` before recording setup or check results, because CI runs on the pinned runtime.
 
 From the repository root:
 
