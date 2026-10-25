@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { createBudgetedOpenRouter } from "./budget-provider.ts";
 
-const budget = { limit: 1, limit_reset: null, limit_remaining: 0.9 };
+const budget = { limit: 1, limit_reset: null, limit_remaining: 0.9, include_byok_in_limit: true };
 const prompt = [
   { role: "user" as const, content: [{ type: "text" as const, text: "Synthetic note" }] },
 ];
@@ -29,6 +29,8 @@ for (const data of [
   { ...budget, limit: null },
   { ...budget, limit_reset: "daily" },
   { ...budget, limit_remaining: 0 },
+  { ...budget, include_byok_in_limit: false },
+  { limit: 1, limit_reset: null, limit_remaining: 0.9 },
   {},
 ]) {
   await test(`rejects unsafe server budget ${JSON.stringify(data)} before a model request`, async () => {
@@ -103,8 +105,40 @@ for (const failure of ["network", "http", "json"]) {
     });
     await assert.rejects(provider("openai/gpt-4.1-mini").doGenerate({ prompt }), {
       message:
-        "Server key check failed. Use a non-resetting limit of at most $1 with remaining credit.",
+        "Server key check failed. Use a non-resetting limit of at most $1 with remaining credit and BYOK usage included.",
     });
     assert.equal(calls, 1);
   });
 }
+
+await test("caller cancellation during preflight stays an AbortError without a model request", async () => {
+  const controller = new AbortController();
+  const requests: string[] = [];
+  const provider = createBudgetedOpenRouter("fake-server-key", async (input, init) => {
+    requests.push(input instanceof Request ? input.url : input.toString());
+    assert.ok(init?.signal);
+    const signal = init.signal;
+    return new Promise<Response>((_resolve, reject) => {
+      signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+      controller.abort("private cancellation detail");
+    });
+  });
+  await assert.rejects(
+    provider("openai/gpt-4.1-mini").doGenerate({ prompt, abortSignal: controller.signal }),
+    { name: "AbortError", message: "Model request cancelled." },
+  );
+  assert.deepEqual(requests, ["https://openrouter.ai/api/v1/key"]);
+});
+
+await test("an already-cancelled call performs no HTTP request", async () => {
+  const provider = createBudgetedOpenRouter("fake-server-key", async () => {
+    assert.fail("A cancelled call must not reach the network.");
+  });
+  await assert.rejects(
+    provider("openai/gpt-4.1-mini").doGenerate({
+      prompt,
+      abortSignal: AbortSignal.abort("private cancellation detail"),
+    }),
+    { name: "AbortError", message: "Model request cancelled." },
+  );
+});

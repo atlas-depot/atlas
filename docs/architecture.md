@@ -32,8 +32,10 @@ the configured OpenRouter `LanguageModel`, without a Vercel login or deployment.
   `openai/gpt-4.1-mini`. eve did not report a direct-provider USD cost. OpenRouter's
   key usage updates asynchronously; do not treat an immediate zero delta as free.
   A later key-usage read reported **$0.0000984 total** for the two calls.
-- The smoke requires a dedicated key with a non-resetting provider-enforced cap
-  of at most $1. Model output is limited to 256 tokens; optional built-in tools
+- The current server guard requires a dedicated key with a non-resetting
+  provider-enforced cap of at most $1, including BYOK spending. These guard
+  checks are tested with mocked HTTP separately from the historical live calls.
+  Model output is limited to 256 tokens; optional built-in tools
   and development extensions are disabled.
 
 eve supplied agent discovery, the local HTTP/session runtime, model invocation,

@@ -20,6 +20,10 @@ cp -n .env.example .env.local
 ```
 
 Create a dedicated OpenRouter key with a **non-resetting total limit of at most $1**.
+The key must also include BYOK spending in that limit: OpenRouter's key metadata
+must report `include_byok_in_limit: true`. A false or missing value is rejected,
+because an account's own provider key could otherwise incur spend outside the
+checked limit. Enable the corresponding key setting before running the experiment.
 Set `OPENROUTER_API_KEY` in `.env.local`, never a `VITE_*` variable. Do not overwrite
 an existing local env file. The file is ignored by Git. eve loads it locally.
 
@@ -55,8 +59,10 @@ for a request that already reached the provider.
 - Key usage can settle after the response, and a shared key would make the delta
   ambiguous. Use a dedicated key. Do not interpret a zero delta as a free call.
 - `pnpm test` exercises the actual provider with fake keys and mocked HTTP,
-  including unsafe limits and credential mismatch. CI runs these tests without
-  credentials. They do not replace live smoke or teammate reproduction.
+  including unsafe limits, BYOK accounting, cancellation and credential mismatch.
+  It also imports the actual agent to verify that its model uses the guard.
+  CI runs these tests without credentials. They do not replace live smoke or
+  teammate reproduction.
 - This verifies the runtime/provider path, not durability, authorization,
   retrieval quality, tool reliability, or production readiness.
 

@@ -6,6 +6,7 @@ const keySchema = z.object({
     limit: z.number().positive().max(1),
     limit_reset: z.null(),
     limit_remaining: z.number().positive(),
+    include_byok_in_limit: z.literal(true),
   }),
 });
 
@@ -19,6 +20,10 @@ export function createBudgetedOpenRouter(
     fetch: async (input, init) => {
       if (!apiKey)
         throw new Error("Set OPENROUTER_API_KEY in the server's ignored .env.local file.");
+      const throwIfCancelled = () => {
+        if (init?.signal?.aborted) throw new DOMException("Model request cancelled.", "AbortError");
+      };
+      throwIfCancelled();
       // Check the server credential on every request, including SDK retries.
       // Never trust a preflight performed by a client in another process.
       try {
@@ -34,10 +39,13 @@ export function createBudgetedOpenRouter(
           throw new Error("Invalid key budget.");
         }
       } catch {
+        // Preserve cancellation semantics without disclosing the caller's reason.
+        throwIfCancelled();
         throw new Error(
-          "Server key check failed. Use a non-resetting limit of at most $1 with remaining credit.",
+          "Server key check failed. Use a non-resetting limit of at most $1 with remaining credit and BYOK usage included.",
         );
       }
+      throwIfCancelled();
       const headers = new Headers(init?.headers);
       headers.set("Authorization", `Bearer ${apiKey}`);
       return fetchImpl(input, { ...init, headers, redirect: "error" });

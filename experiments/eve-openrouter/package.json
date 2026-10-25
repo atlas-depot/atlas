@@ -7,7 +7,7 @@
     "info": "eve info --json",
     "dev": "eve dev --no-ui --no-default-extensions --host 127.0.0.1 --port 2026",
     "smoke": "node smoke.ts",
-    "test": "node --test agent/budget-provider.test.ts"
+    "test": "node --test agent/budget-provider.test.ts agent/agent.test.ts"
   },
   "dependencies": {
     "@openrouter/ai-sdk-provider": "3.1.0",
