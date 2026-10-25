@@ -1,5 +1,2 @@
 packages:
   - "."
-minimumReleaseAgeExclude:
-  - "@ai-sdk/gateway@4.0.125"
-  - ai@7.0.152

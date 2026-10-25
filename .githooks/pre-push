@@ -11,6 +11,11 @@ if [ ! -d node_modules ]; then
   exit 1
 fi
 
+if [ ! -d experiments/eve-openrouter/node_modules ]; then
+  echo "pre-push: experiment dependencies are not installed; run pnpm --dir experiments/eve-openrouter install --frozen-lockfile" >&2
+  exit 1
+fi
+
 echo "pre-push: running Atlas checks"
 pnpm check
 pnpm --dir experiments/eve-openrouter test
