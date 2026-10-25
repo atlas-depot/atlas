@@ -40,7 +40,13 @@ jobs:
           cache: true
           run-install: false
       - run: vp install --frozen-lockfile
+      - name: Install isolated experiment dependencies for type checking
+        working-directory: experiments/eve-openrouter
+        run: vp install --frozen-lockfile
       - run: vp lint
+      - name: Test the experiment budget guard without credentials or live calls
+        working-directory: experiments/eve-openrouter
+        run: node --test agent/budget-provider.test.ts agent/agent.test.ts
       - run: vp test run scripts/clickup-sync.test.ts
 
   build:

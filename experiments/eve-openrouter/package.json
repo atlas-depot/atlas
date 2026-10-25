@@ -1,0 +1,26 @@
+{
+  "name": "atlas-eve-openrouter-spike",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "check": "tsc --noEmit",
+    "info": "eve info --json",
+    "dev": "eve dev --no-ui --no-default-extensions --host 127.0.0.1 --port 2026",
+    "smoke": "node smoke.ts",
+    "test": "node --test agent/budget-provider.test.ts agent/agent.test.ts"
+  },
+  "dependencies": {
+    "@openrouter/ai-sdk-provider": "3.1.0",
+    "ai": "7.0.152",
+    "eve": "0.83.0",
+    "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "@types/node": "24.10.0",
+    "typescript": "6.0.2"
+  },
+  "engines": {
+    "node": "24.22.0"
+  },
+  "packageManager": "pnpm@11.23.0"
+}
