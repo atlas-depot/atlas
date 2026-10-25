@@ -69,7 +69,7 @@ This changes the hook path only for the current clone and replaces any existing 
 git config --local --unset core.hooksPath
 ```
 
-The hook runs the same local checks as the CI `verify` gate: `pnpm check`, `pnpm exec vp test run scripts/clickup-sync.test.ts`, and `pnpm build`. It does not install dependencies. Run `pnpm install --frozen-lockfile` first. Use `git push --no-verify` only for an intentional bypass.
+The hook runs the same local checks as the CI `verify` gate: `pnpm check`, `pnpm --dir experiments/eve-openrouter test`, `pnpm exec vp test run scripts/clickup-sync.test.ts`, and `pnpm build`. The experiment tests use fake keys and mocked HTTP, never a paid model. It does not install dependencies. Run the root and experiment frozen installs described above first. Use `git push --no-verify` only for an intentional bypass.
 
 ### Dependency consumers
 

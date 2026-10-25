@@ -14,6 +14,7 @@ Use Node 24.22.0 and pnpm 11.23.0. From this directory:
 ```sh
 pnpm install --frozen-lockfile
 pnpm check
+pnpm test
 EVE_TELEMETRY_DISABLED=1 pnpm run info
 cp -n .env.example .env.local
 ```
@@ -30,9 +31,13 @@ pnpm dev
 pnpm smoke
 ```
 
-The smoke checks the key's provider-enforced cap before starting a model turn.
-It sends one fixed synthetic note and requires a completed answer containing
-`14:00`. It prints only the synthetic input/answer, session ID, and usage delta.
+The server checks its own key's provider-enforced cap before every model request
+and explicitly uses that same key for the request. Exported server environment
+variables take precedence over `.env.local`; a stale high-limit key is rejected.
+The smoke needs no credential. It sends one fixed synthetic note and requires a
+completed answer containing `14:00`. It prints the synthetic input/answer, session
+ID and per-step usage. It does not measure dollar spend: a separate client's key
+may differ from the server's. Check spending for the server's key in OpenRouter.
 The request has a 60-second client deadline; on failure it attempts to cancel the
 turn. Stop the server after the experiment. Cancellation does not undo charges
 for a request that already reached the provider.
@@ -49,6 +54,9 @@ for a request that already reached the provider.
   `costUsd` is not a reliable OpenRouter spending cap; the key limit enforces the budget.
 - Key usage can settle after the response, and a shared key would make the delta
   ambiguous. Use a dedicated key. Do not interpret a zero delta as a free call.
+- `pnpm test` exercises the actual provider with fake keys and mocked HTTP,
+  including unsafe limits and credential mismatch. CI runs these tests without
+  credentials. They do not replace live smoke or teammate reproduction.
 - This verifies the runtime/provider path, not durability, authorization,
   retrieval quality, tool reliability, or production readiness.
 

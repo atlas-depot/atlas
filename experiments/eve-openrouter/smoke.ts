@@ -1,35 +1,6 @@
 import { Client, type StepCompletedStreamEvent } from "eve/client";
-import { z } from "zod";
-
-const keySchema = z.object({
-  data: z.object({
-    limit: z.number().positive().max(1),
-    limit_reset: z.null(),
-    limit_remaining: z.number().nonnegative(),
-    usage: z.number().nonnegative(),
-  }),
-});
-
-async function readKeyUsage(apiKey: string) {
-  const response = await fetch("https://openrouter.ai/api/v1/key", {
-    headers: { Authorization: `Bearer ${apiKey}` },
-    redirect: "error",
-    signal: AbortSignal.timeout(15_000),
-  });
-  if (!response.ok) throw new Error("OpenRouter key check failed.");
-  const parsed = keySchema.safeParse(await response.json());
-  if (!parsed.success) {
-    throw new Error("Use a key with remaining credit and a non-resetting limit of at most $1.");
-  }
-  return parsed.data.data;
-}
 
 async function main() {
-  const apiKey = process.env.OPENROUTER_API_KEY;
-  if (!apiKey) throw new Error("Set OPENROUTER_API_KEY in the ignored .env.local file.");
-
-  const before = await readKeyUsage(apiKey);
-  if (before.limit_remaining <= 0) throw new Error("OpenRouter key has no remaining credit.");
   const client = new Client({ host: "http://127.0.0.1:2026", redirect: "error" });
   const signal = AbortSignal.timeout(60_000);
   const { session } = await client.sessions.create({ signal });
@@ -67,7 +38,6 @@ async function main() {
     ) {
       throw new Error("The eve turn did not complete with the expected synthetic answer.");
     }
-    const after = await readKeyUsage(apiKey);
     console.log(
       JSON.stringify(
         {
@@ -85,9 +55,7 @@ async function main() {
             outputTokens: data.usage?.outputTokens ?? null,
             costUsd: data.usage?.costUsd ?? null,
           })),
-          keyUsageDeltaUsd: after.usage - before.usage,
-          keyLimitUsd: after.limit,
-          note: "Key usage may settle later. This smoke check is not an answer-quality evaluation.",
+          note: "The server validates its own key budget. This smoke does not measure dollar spend or answer quality.",
         },
         null,
         2,
@@ -108,10 +76,6 @@ async function main() {
 main().catch((error: unknown) => {
   // Only our own fixed diagnostics reach stdout/stderr, never provider bodies or credentials.
   const safeMessages = new Set([
-    "Set OPENROUTER_API_KEY in the ignored .env.local file.",
-    "OpenRouter key check failed.",
-    "OpenRouter key has no remaining credit.",
-    "Use a key with remaining credit and a non-resetting limit of at most $1.",
     "Smoke failed. Inspect the local eve status; provider response bodies are not logged here.",
   ]);
   console.error(

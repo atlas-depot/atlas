@@ -1,7 +1,7 @@
-import { createOpenRouter } from "@openrouter/ai-sdk-provider";
 import { defineAgent } from "eve";
+import { createBudgetedOpenRouter } from "./budget-provider.ts";
 
-const openrouter = createOpenRouter();
+const openrouter = createBudgetedOpenRouter(process.env.OPENROUTER_API_KEY);
 
 // eve discovers agent configuration through this default export.
 export default defineAgent({
