@@ -39,6 +39,10 @@ Thumbs.db
 *.swp
 *.swo
 
+# Browser regression output
+test-results/
+playwright-report/
+
 # Local databases and artifacts
 *.sqlite
 *.sqlite3

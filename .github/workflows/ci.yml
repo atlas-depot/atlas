@@ -57,6 +57,29 @@ jobs:
       - run: vp install --frozen-lockfile
       - run: vp build
 
+  browser:
+    name: browser regression
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: voidzero-dev/setup-vp@68f39c78aaf39be468cabd2afb09c162574c84af # v1.21.2
+        with:
+          node-version-file: .node-version
+          cache: true
+          run-install: false
+      - run: vp install --frozen-lockfile
+      - run: vp exec playwright install --with-deps chromium
+      - run: vp exec playwright test
+      - name: Upload the failure trace
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: playwright-trace
+          path: test-results/
+          retention-days: 7
+
   verify:
     needs: [format, lint, build]
     if: always()
