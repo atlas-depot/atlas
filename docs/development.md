@@ -6,6 +6,17 @@ Status: the repository contains a minimal React/TypeScript web scaffold. It rend
 
 Use Node `24.22.0` LTS and pnpm `11.23.0`. `.node-version` records the runtime and `package.json#packageManager` pins pnpm. Select that Node version with your existing runtime manager before installing. The project does not install or change a global runtime manager. Commit only `pnpm-lock.yaml` as the dependency lockfile.
 
+If `pnpm` is not on your `PATH`, enable it through Corepack, which ships with Node and installs the version pinned in `package.json#packageManager`:
+
+```sh
+corepack enable pnpm
+pnpm --version
+```
+
+`corepack enable` writes shims next to the Node binary, so a system-wide Node installation may need elevated permissions. Otherwise run one-off commands as `corepack pnpm <command>`, which uses the same pinned version without changing `PATH`. A pnpm obtained another way is not the pinned version and may resolve dependencies differently.
+
+A local Node other than `24.22.0` makes pnpm print `[WARN] Unsupported engine` on every command. That warning does not fail the install, but activate the version from `.node-version` before recording setup or check results, because CI runs on the pinned runtime.
+
 From the repository root:
 
 ```sh
