@@ -35,6 +35,7 @@ Vite prints the local development URL. To choose an isolated port, use `pnpm dev
 | `pnpm lint` | Oxlint rules and full type checking with the enabled options |
 | `pnpm typecheck` | Vite+ type checks through its TypeScript Go toolchain |
 | `pnpm test` | `vp test run`, using bundled Vitest 5.0.5 |
+| `pnpm test:e2e` | Playwright Test against the built bundle, see [browser regression](#browser-regression) |
 | `pnpm build` | Production bundle in `dist/`. Run `pnpm check` separately |
 | `pnpm preview --host 127.0.0.1 --port 4177 --strictPort` | Serve the built bundle locally |
 
@@ -92,6 +93,10 @@ Test settings live in `vite.config.ts`: Node environment, `src/**/*.test.ts` and
 The fixture parser tests in `src/fixtures/parse-fixtures.test.ts` ([#22](https://github.com/atlas-depot/atlas/issues/22)) read the synthetic examples in `fixtures/briefing/` from disk. Each invalid case must produce exactly one issue at its expected field path. A run that finds no test files is not passing evidence, so keep `passWithNoTests` disabled. A disposable runner self-check verifies harness execution only and does not provide application behavior coverage.
 
 Before review, verify the clean install, static checks, production build and accessible Atlas heading in a real browser at mobile and desktop widths. Keep browser evidence separate from runner setup evidence.
+
+### Browser regression
+
+`pnpm test:e2e` runs Playwright Test (declared in `playwright.config.ts`) against the production bundle, which the config builds and serves on `127.0.0.1:4177` before the first test. `pnpm exec playwright install chromium` installs the browser once per machine. Specs live in `e2e/`, so the Vitest include patterns stay unchanged. The `browser regression` CI job is separate from the required `verify` check, and a failure keeps a trace under `test-results/` that CI uploads.
 
 ### Scaffold provenance
 
