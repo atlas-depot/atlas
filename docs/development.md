@@ -100,13 +100,13 @@ Test settings live in `vite.config.ts`: Node environment, `src/**/*.test.ts` and
 
 The fixture parser tests in `src/fixtures/parse-fixtures.test.ts` ([#22](https://github.com/atlas-depot/atlas/issues/22)) read the synthetic examples in `fixtures/briefing/` from disk. Each invalid case must produce exactly one issue at its expected field path. A run that finds no test files is not passing evidence, so keep `passWithNoTests` disabled. A disposable runner self-check verifies harness execution only and does not provide application behavior coverage.
 
+Before review, verify the clean install, static checks, production build and accessible Atlas heading in a real browser at mobile and desktop widths. Keep browser evidence separate from runner setup evidence.
+
 ### Coverage
 
 `pnpm coverage` runs the full Vitest suite with V8 coverage. Coverage includes `src/**/*.{ts,tsx}` and `scripts/**/*.ts`; it excludes test and spec files, `e2e/`, `experiments/`, config files, declarations and generated output. The `text` reporter prints file-level coverage to the job log, and `text-summary` writes line, statement, function and branch totals to `coverage/summary.txt`. The `coverage` CI job appends those totals to the Actions run summary with the tested revision; it uploads no artifact and keeps no baseline. The job fails when tests fail or the summary is missing or empty.
 
 The coverage job is separate from the required `verify` check. It runs on pull requests and pushes to `main`, and reviewers inspect its summary and logs before merging. Percentages are informational: there is no percentage threshold, and executed lines do not prove useful assertions. Line coverage counts executed lines; branch coverage counts decision outcomes. `coverage/` is ignored. When the coverage job is introduced or changes materially, record its actual step duration in the pull request.
-
-Before review, verify the clean install, static checks, production build and accessible Atlas heading in a real browser at mobile and desktop widths. Keep browser evidence separate from runner setup evidence.
 
 ### Browser regression
 
