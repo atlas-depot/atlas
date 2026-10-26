@@ -34,6 +34,25 @@ export default defineConfig({
   test: {
     environment: "node",
     include: ["src/**/*.test.ts", "scripts/**/*.test.ts"],
+    coverage: {
+      provider: "v8",
+      include: ["src/**/*.{ts,tsx}", "scripts/**/*.ts"],
+      exclude: [
+        "**/*.test.*",
+        "**/*.spec.*",
+        "**/*.config.*",
+        "**/*.d.ts",
+        "e2e/**",
+        "experiments/**",
+        "dist/**",
+        "coverage/**",
+      ],
+      reporter: [
+        ["text", { maxCols: 120, skipFull: false }],
+        ["text-summary", { file: "summary.txt" }],
+      ],
+      reportsDirectory: "coverage",
+    },
     passWithNoTests: false,
   },
 });

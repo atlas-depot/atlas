@@ -35,6 +35,7 @@ Vite prints the local development URL. To choose an isolated port, use `pnpm dev
 | `pnpm lint` | Oxlint rules and full type checking with the enabled options |
 | `pnpm typecheck` | Vite+ type checks through its TypeScript Go toolchain |
 | `pnpm test` | `vp test run`, using bundled Vitest 5.0.5 |
+| `pnpm coverage` | `vp test run --coverage`, V8 coverage with the scope below |
 | `pnpm test:e2e` | Playwright Test against the built bundle, see [browser regression](#browser-regression) |
 | `pnpm build` | Production bundle in `dist/`. Run `pnpm check` separately |
 | `pnpm preview --host 127.0.0.1 --port 4177 --strictPort` | Serve the built bundle locally |
@@ -81,7 +82,7 @@ This changes the hook path only for the current clone and replaces any existing 
 git config --local --unset core.hooksPath
 ```
 
-The hook runs the same local checks as the CI `verify` gate: `pnpm check`, `pnpm --dir experiments/eve-openrouter test`, `pnpm exec vp test run scripts/clickup-sync.test.ts`, and `pnpm build`. The experiment tests use fake keys and mocked HTTP, never a paid model. It does not install dependencies. Run the root and experiment frozen installs described above first. Use `git push --no-verify` only for an intentional bypass.
+The hook runs `pnpm check`, `pnpm --dir experiments/eve-openrouter test`, `pnpm exec vp test run scripts/clickup-sync.test.ts`, and `pnpm build`. It does not run the separate coverage job; use `pnpm coverage` for that. The experiment tests use fake keys and mocked HTTP, never a paid model. It does not install dependencies. Run the root and experiment frozen installs described above first. Use `git push --no-verify` only for an intentional bypass.
 
 ### Dependency consumers
 
@@ -98,6 +99,12 @@ Dependencies have concrete consumers:
 Test settings live in `vite.config.ts`: Node environment, `src/**/*.test.ts` and `scripts/**/*.test.ts`, and `passWithNoTests: false`. DOM component tests would need a matching file include and browser-like environment; neither is configured yet. Import test APIs from `vite-plus/test`. Do not add a second Vitest installation or a separate `vitest.config.ts` by habit.
 
 The fixture parser tests in `src/fixtures/parse-fixtures.test.ts` ([#22](https://github.com/atlas-depot/atlas/issues/22)) read the synthetic examples in `fixtures/briefing/` from disk. Each invalid case must produce exactly one issue at its expected field path. A run that finds no test files is not passing evidence, so keep `passWithNoTests` disabled. A disposable runner self-check verifies harness execution only and does not provide application behavior coverage.
+
+### Coverage
+
+`pnpm coverage` runs the full Vitest suite with V8 coverage. Coverage includes `src/**/*.{ts,tsx}` and `scripts/**/*.ts`; it excludes test and spec files, `e2e/`, `experiments/`, config files, declarations and generated output. The `text` reporter prints file-level coverage to the job log, and `text-summary` writes line, statement, function and branch totals to `coverage/summary.txt`. The `coverage` CI job appends those totals to the Actions run summary with the tested revision; it uploads no artifact and keeps no baseline. The job fails when tests fail or the summary is missing or empty.
+
+The coverage job is separate from the required `verify` check. It runs on pull requests and pushes to `main`, and reviewers inspect its summary and logs before merging. Percentages are informational: there is no percentage threshold, and executed lines do not prove useful assertions. Line coverage counts executed lines; branch coverage counts decision outcomes. `coverage/` is ignored. When the coverage job is introduced or changes materially, record its actual step duration in the pull request.
 
 Before review, verify the clean install, static checks, production build and accessible Atlas heading in a real browser at mobile and desktop widths. Keep browser evidence separate from runner setup evidence.
 
@@ -152,7 +159,7 @@ Vercel environment variables are the selected starting approach. Team access and
 
 ## CI and deployment status
 
-`.github/workflows/ci.yml` runs on pull requests and pushes to `main`. Its `format`, `lint and typecheck` and `build` jobs run `vp fmt --check`, `vp lint` and `vp build` after `vp install --frozen-lockfile`. `vp lint` also type-checks because `typeCheck` is enabled in `vite.config.ts`. The required check name is `verify`, which passes only when all three jobs succeed. CI reads the Node version from `.node-version`, so local and CI runtimes stay aligned. There is no test job yet; add one with the first suite that CI should gate. Do not hide the current no-tests result to manufacture a green required check. Efe configures required checks after reviewing a real run. Add relevant deterministic eve evals when agent code exists. Paid live-model evals should be separately limited.
+`.github/workflows/ci.yml` runs on pull requests and pushes to `main`. Its `format`, `lint and typecheck`, `coverage` and `build` jobs run `vp fmt --check`, `vp lint`, `vp test run --coverage` and `vp build` after `vp install --frozen-lockfile`. `vp lint` also type-checks because `typeCheck` is enabled in `vite.config.ts`. The required check name is `verify`, which passes only when `format`, `lint and typecheck` and `build` succeed. The `coverage` job runs the full Vitest suite with coverage as a separate check; reviewers inspect its summary and logs, but it is not part of `verify` and is not a required merge check. CI reads the Node version from `.node-version`, so local and CI runtimes stay aligned. Efe configures required checks after reviewing a real run. Add relevant deterministic eve evals when agent code exists. Paid live-model evals should be separately limited.
 
 The agreed flow is feature branch preview and `main` production. Efe or configured Vercel automation handles deployment. Configure Vercel Git integration for branch-triggered deployments or a Vercel CLI/API path for CI; branches and CI do not configure deployments by themselves: project linkage, team access, credentials, and environment separation require separate configuration and verification. See [contributing](contributing.md).
 
