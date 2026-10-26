@@ -47,7 +47,33 @@ jobs:
       - name: Test the experiment budget guard without credentials or live calls
         working-directory: experiments/eve-openrouter
         run: node --test agent/budget-provider.test.ts agent/agent.test.ts
-      - run: vp test run scripts/clickup-sync.test.ts
+
+  coverage:
+    name: coverage
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: voidzero-dev/setup-vp@68f39c78aaf39be468cabd2afb09c162574c84af # v1.21.2
+        with:
+          node-version-file: .node-version
+          cache: true
+          run-install: false
+      - run: vp install --frozen-lockfile
+      - name: Run tests with coverage
+        run: vp test run --coverage
+      - name: Publish coverage summary
+        env:
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          test -s coverage/summary.txt
+          {
+            echo "### Coverage: ${GITHUB_SHA}${PR_HEAD_SHA:+ (PR head ${PR_HEAD_SHA})}"
+            echo '```'
+            cat coverage/summary.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
 
   build:
     runs-on: ubuntu-24.04
