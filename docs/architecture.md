@@ -1,6 +1,6 @@
 # Architecture discussion baseline
 
-Atlas has a React/TypeScript scaffold with a fixed synthetic source viewer, planning material and static prototypes. This page supersedes the earlier production specification. The isolated eve/OpenRouter experiment below is verified locally; the web application does not yet call an agent backend.
+Atlas has a React/TypeScript scaffold with a fixed synthetic source viewer and a local Hono API scaffold. The API exposes health and a protected notes boundary, but real sign-in and note persistence remain separate tasks. This page records accepted decisions separately from implemented integrations. The isolated eve/OpenRouter experiment below is verified locally; the web application does not yet call an agent backend.
 
 ## Direction and open choices
 
@@ -9,12 +9,23 @@ Atlas has a React/TypeScript scaffold with a fixed synthetic source viewer, plan
 | Tooling | Vite+ 1.3.0 with pnpm. Commands and verification boundaries are in [development setup](development.md) |
 | Agent runtime | eve selected as the direction; a local provider invocation is verified below. Web integration and deployment remain unverified |
 | Client | React/TypeScript web scaffold. Web/PWA first remains the direction. PWA setup is not implemented. The exact TanStack/framework arrangement remains for team review |
-| Database and ORM | Open; PostgreSQL/Drizzle were proposals, not approved dependencies |
-| Auth, file storage, connector provider | Open; compare actual required capabilities and cost |
-| API | REST and GraphQL remain options; relationships alone do not require GraphQL |
+| Database and ORM | Neon PostgreSQL and Drizzle approved. Each developer gets an isolated remote branch, with shared staging and separate production. Provisioning and persistence belong to #46 |
+| Authentication | WorkOS AuthKit approved for hosted Google and email/password sign-in. The server owns the callback and an HttpOnly session cookie. Integration belongs to #47 |
+| API | Hono on Node 24, REST and shared Zod schemas approved. Local `/api` routing is implemented; note operations belong to #51 |
+| File storage and connector provider | Open; compare required capabilities and cost when these integrations enter scope |
 | Memory provider | Open; file-based and hosted approaches can be tested without requiring a vector DB |
 | Model and gateway | OpenRouter verified for the isolated smoke; product model choice and tool quality still need evals |
 | Hosting | Vercel direction with existing Pro; exact services and team access unverified |
+
+## Notes sprint boundary (#45-#54)
+
+The current sprint builds online personal notes with explicit Save, followed by a user-triggered AI draft that stays separate from the original. Markdown source and preview are in scope. Offline synchronization, live collaboration, PDF import, external connectors, search and richer generated views are outside this batch.
+
+The [notes API contract](notes-api.md) exposes five note fields: `id`, `title`, `content`, `createdAt` and `updatedAt`. `content` contains Markdown. Client-created timestamps describe when writing began; server timestamps describe successful updates. Strong ETags and `If-Match` protect updates and deletions without adding a revision field to the JSON. Database ownership always comes from the verified session.
+
+Hono handles HTTP and session boundaries. Keep note operations independent of Hono so that later agent tools can call the same authorized operations. Until #47 and #51 connect those boundaries, the executable rejects notes requests with `401`; a trusted session injected in a test reaches an explicit `501` response. It does not fabricate users, saved notes or successful writes.
+
+Neon branches isolate development data and resets. They do not resolve competing migration files. Review migrations in Git before applying them to shared staging. Provider access, dashboard seats, secrets and production deployment still need separate setup and verification.
 
 ## First eve entrypoint experiment (#26)
 
@@ -79,13 +90,16 @@ These are conceptual responsibilities, not six databases or a finalized schema. 
 
 ## Small starting layout
 
-The current single web app lives in root `src/`. No shared packages or backend services exist. The following expansion remains a proposal. Create folders when they contain real code:
+Keep the existing root application and add only folders with a current consumer:
 
 ```text
-apps/web/       PWA and product screens
-apps/agent/     eve integration and Atlas backend modules
-packages/       Only code genuinely shared by multiple apps
+src/            React application and synthetic source viewer
+server/         Hono application, startup and environment validation
+shared/         Browser-safe notes API schemas
+experiments/    Isolated experiments with their own setup
 ```
+
+Server configuration and credentials must stay outside `shared/` and browser imports. No monorepo migration or extra shared package is required for this slice.
 
 Do not pre-create worker, billing, vector, ingestion, or OKF packages. Do not add another workflow system or continuous heartbeat until a concrete gap requires it. Agent state must survive sandbox shutdown. Persist useful artifacts outside disposable compute.
 
@@ -111,6 +125,8 @@ Start with synthetic data and one useful flow. Add retrieval indexes, OCR, graph
 - [eve documentation](https://eve.dev/docs) and [source](https://github.com/vercel/eve)
 - [eve evals](https://eve.dev/docs/evals/overview)
 - [Vite+](https://viteplus.dev/guide/)
+- [Hono on Node.js](https://hono.dev/docs/getting-started/nodejs)
+- [HTTP conditional requests](https://www.rfc-editor.org/rfc/rfc9110.html#section-13)
 - [Google OAuth lifecycle](https://developers.google.com/identity/protocols/oauth2)
 
 These are implementation references, not evidence that Atlas already integrates them.

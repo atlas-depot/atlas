@@ -1,6 +1,6 @@
 # Development setup
 
-Status: the repository contains a minimal React/TypeScript web scaffold. It renders an Atlas heading and introduction, with no backend, credentials or external services required. Report the actual result of each check. A build is not a deployment and a no-tests run is not passing test evidence.
+Status: the repository contains a React/TypeScript source viewer and a local Hono API scaffold. The API has a health endpoint and a protected notes boundary. WorkOS sign-in and Neon persistence are not connected yet; routine setup needs no credentials or external services. Report the actual result of each check. A build is not a deployment and a no-tests run is not passing test evidence.
 
 ## Tooling
 
@@ -30,6 +30,8 @@ Vite prints the local development URL. To choose an isolated port, use `pnpm dev
 
 | Command | What runs |
 | --- | --- |
+| `pnpm dev:api` | Watch and run the Node/Hono API on loopback |
+| `pnpm start:api` | Run the same API entrypoint without watch mode |
 | `pnpm check` | Vite+ format, lint and type checks |
 | `pnpm format:check` | Oxfmt formatting validation without writing files |
 | `pnpm lint` | Oxlint rules and full type checking with the enabled options |
@@ -49,7 +51,7 @@ repository-wide linter can resolve its types. CI performs this install too.
 Installing and type-checking the experiment need no API key and make no model calls;
 its live smoke command remains a separate, explicitly budgeted action.
 
-Vite+ `1.3.0` owns the frontend toolchain. `vite` resolves to its matching core alias, and the workspace overrides keep Vite and Vitest aligned with the bundled versions. The Vite peer-version exception accommodates the core alias's `1.3.0` version versus the React plugin's ordinary Vite `^8.0.0` peer range; the override still pins the resolved package. The `pnpm-workspace.yaml` explicitly includes only the root package, so local scratch and evidence folders are not discovered as applications. Both `lint.options.typeAware` and `typeCheck` are enabled in `vite.config.ts`. The app and tooling tsconfigs explicitly enable strict mode. Formatting excludes `docs/**`, `.agents/**`, `.claude/**` and `commitlint.config.cjs`; root `AGENTS.md` and `CLAUDE.md` remain included.
+Vite+ `1.3.0` owns the frontend toolchain. `vite` resolves to its matching core alias, and the workspace overrides keep Vite and Vitest aligned with the bundled versions. The Vite peer-version exception accommodates the core alias's `1.3.0` version versus the React plugin's ordinary Vite `^8.0.0` peer range; the override still pins the resolved package. The `pnpm-workspace.yaml` explicitly includes only the root package, so local scratch and evidence folders are not discovered as applications. Both `lint.options.typeAware` and `typeCheck` are enabled in `vite.config.ts`. The app and Node tsconfigs enable strict mode; the Node config also covers `server/` and `shared/`. Formatting excludes `docs/**`, `.agents/**`, `.claude/**` and `commitlint.config.cjs`; root `AGENTS.md` and `CLAUDE.md` remain included.
 
 ### Static-check verification
 
@@ -66,7 +68,7 @@ To reproduce the #18 failure checks, use a disposable copy of the current candid
 | `export const checkProbe: number = "Atlas";` | Pass | Fail | Fail | Fail |
 | Probe removed | Pass | Pass | Pass | Pass |
 
-Failure means a nonzero exit with the intended formatting, lint or type diagnostic, not an install/configuration error. Compare source and config contents before and after the commands to confirm they do not write fixes. Never commit the deliberate faults. These probes verify static-check enforcement, not application behavior tests. Formatting covers supported non-ignored repository files; lint covers supported code files, and type checking follows `tsconfig.app.json` (`src`) and `tsconfig.node.json` (`vite.config.ts`).
+Failure means a nonzero exit with the intended formatting, lint or type diagnostic, not an install/configuration error. Compare source and config contents before and after the commands to confirm they do not write fixes. Never commit the deliberate faults. These probes verify static-check enforcement, not application behavior tests. Formatting covers supported non-ignored repository files; lint covers supported code files, and type checking follows `tsconfig.app.json` (`src`) and `tsconfig.node.json` (`vite.config.ts` and Node-side code).
 
 ### Optional pre-push hook
 
@@ -92,11 +94,12 @@ Dependencies have concrete consumers:
 - `@vitejs/plugin-react` supplies React development transforms and refresh support.
 - `vite-plus` supplies dev, static checks, tests and production builds. The direct `vite` alias provides the matching plugin and client types.
 - `typescript` and `@types/node`, `@types/react`, `@types/react-dom` provide compiler/editor tooling and types for the code and config.
-- `zod` validates the briefing fixture examples in `src/fixtures/parse-fixtures.ts`, the runtime boundary for fixture data.
+- `zod` validates briefing fixtures, the shared notes contract and backend configuration.
+- `hono` handles API routing and middleware; `@hono/node-server` connects its Fetch handler to Node HTTP. Node 24 runs the TypeScript entrypoint directly, so no extra development transpiler is needed.
 
 ### Test runner boundary
 
-Test settings live in `vite.config.ts`: Node environment, `src/**/*.test.ts` and `scripts/**/*.test.ts`, and `passWithNoTests: false`. DOM component tests would need a matching file include and browser-like environment; neither is configured yet. Import test APIs from `vite-plus/test`. Do not add a second Vitest installation or a separate `vitest.config.ts` by habit.
+Test settings live in `vite.config.ts`: Node environment, tests under `src/`, `scripts/`, `server/` and `shared/`, and `passWithNoTests: false`. DOM component tests would need a matching file include and browser-like environment; neither is configured yet. Import test APIs from `vite-plus/test`. Do not add a second Vitest installation or a separate `vitest.config.ts` by habit.
 
 The fixture parser tests in `src/fixtures/parse-fixtures.test.ts` ([#22](https://github.com/atlas-depot/atlas/issues/22)) read the synthetic examples in `fixtures/briefing/` from disk. Each invalid case must produce exactly one issue at its expected field path. A run that finds no test files is not passing evidence, so keep `passWithNoTests` disabled. A disposable runner self-check verifies harness execution only and does not provide application behavior coverage.
 
@@ -104,7 +107,7 @@ Before review, verify the clean install, static checks, production build and acc
 
 ### Coverage
 
-`pnpm coverage` runs the full Vitest suite with V8 coverage. Coverage includes `src/**/*.{ts,tsx}` and `scripts/**/*.ts`; it excludes test and spec files, `e2e/`, `experiments/`, config files, declarations and generated output. The `text` reporter prints file-level coverage to the job log, and `text-summary` writes line, statement, function and branch totals to `coverage/summary.txt`. The `coverage` CI job appends those totals to the Actions run summary with the tested revision; it uploads no artifact and keeps no baseline. The job fails when tests fail or the summary is missing or empty.
+`pnpm coverage` runs the full Vitest suite with V8 coverage. Coverage includes application code under `src/`, `scripts/`, `server/` and `shared/`; it excludes test and spec files, `e2e/`, `experiments/`, config files, declarations and generated output. The `text` reporter prints file-level coverage to the job log, and `text-summary` writes line, statement, function and branch totals to `coverage/summary.txt`. The `coverage` CI job appends those totals to the Actions run summary with the tested revision; it uploads no artifact and keeps no baseline. The job fails when tests fail or the summary is missing or empty.
 
 The coverage job is separate from the required `verify` check. It runs on pull requests and pushes to `main`, and reviewers inspect its summary and logs before merging. Percentages are informational: there is no percentage threshold, and executed lines do not prove useful assertions. Line coverage counts executed lines; branch coverage counts decision outcomes. `coverage/` is ignored. When the coverage job is introduced or changes materially, record its actual step duration in the pull request.
 
@@ -117,6 +120,29 @@ The coverage job is separate from the required `verify` check. It runs on pull r
 The initial config came from `create-vite-plus@1.3.0` with `create-vite@9.2.1 --template react-ts`, generated in a separate scratch directory with agent/editor/git/hook setup disabled. Only application/config files were transferred. Existing README, ignore rules and repository instructions were preserved and updated deliberately. Direct dependencies were pinned, strict mode was made explicit and template branding was replaced. The minimal page uses system fonts and semantic HTML. Product typography, component libraries and motion remain future design choices.
 
 References: [Vite+ create](https://viteplus.dev/guide/create), [local CLI and version alignment](https://viteplus.dev/guide/local-cli), [check](https://viteplus.dev/guide/check), [test](https://viteplus.dev/guide/test), [published template source](https://github.com/vitejs/vite/tree/create-vite%409.2.1/packages/create-vite/template-react-ts).
+
+## Local API
+
+Run the frontend and backend in separate terminals from the repository root:
+
+```sh
+cp .env.example .env
+pnpm dev:api
+```
+
+```sh
+pnpm dev
+```
+
+Both development commands read the root `.env`. The backend binds only to `127.0.0.1`. `API_PORT` defaults to `3001`; if supplied, it must be a decimal integer from 0 to 65535. Port `0` requests an ephemeral port for entrypoint tests; use a fixed nonzero port when running the frontend proxy. Invalid configuration stops startup before listening and reports the setting name without printing its value. Use a different port for each concurrent checkout.
+
+Vite forwards `/api` and `/api/...` to that local port without changing the path. Browser callers use relative URLs such as `fetch('/api/health')`; no separate browser API origin or wildcard CORS is needed. Through the frontend URL printed by Vite, `GET /api/health` returns `200`, and `GET /api/notes` returns `401` until WorkOS is connected. The health response proves only that the process is running, not database or provider readiness.
+
+`pnpm start:api` runs the same entrypoint without watch mode. The API uses Node's native TypeScript support. `pnpm build` still builds the frontend only; it neither deploys nor bundles the API. Production routing remains separate work.
+
+The [notes contract](notes-api.md) defines the payloads and conditional-write behavior for the next tasks. #45's tests exercise startup, the unauthenticated boundary and shared schemas. Tests with an injected session do not prove WorkOS sign-in or database isolation.
+
+Only `API_PORT` is consumed now. The commented WorkOS and Neon settings in `.env.example` are preparation for #46 and #47, not credentials required to run the scaffold. Do not copy them into `VITE_*`, serialize `process.env` into frontend configuration, or import server modules from browser code.
 
 ## Code conventions
 
@@ -142,7 +168,7 @@ Methods: [Google review guidance](https://google.github.io/eng-practices/review/
 | PR preview | Review an isolated code change | Test data and credentials; no production access |
 | Production | Published main release | Separate real-user data and credentials |
 
-Different preview URLs do not automatically provide isolated databases. Choose preview data isolation once the database is selected. Keep scheduled/proactive actions and live connector subscriptions off in previews by default; enable deliberately for an integration test.
+Different preview URLs do not automatically provide isolated databases. Neon is selected: use a remote branch per developer, shared staging for integration and separate production. Database provisioning is tracked in #46; a branch name or preview URL alone is not evidence of isolation. Keep scheduled/proactive actions and live connector subscriptions off in previews by default; enable deliberately for an integration test.
 
 Local environments need matching versions and migrations, not copies of production data. Do not require every contributor to have paid model keys for routine tests.
 

@@ -1,5 +1,6 @@
 import react from "@vitejs/plugin-react";
 import { defineConfig, lazyPlugins } from "vite-plus";
+import { readServerEnv } from "./server/env.ts";
 
 // https://vite.dev/config/
 export default defineConfig({
@@ -31,12 +32,24 @@ export default defineConfig({
     ],
   },
   plugins: lazyPlugins(() => [react()]),
+  server: {
+    proxy: {
+      "^/api(?:/|$)": {
+        target: `http://127.0.0.1:${readServerEnv(process.env).port}`,
+      },
+    },
+  },
   test: {
     environment: "node",
-    include: ["src/**/*.test.ts", "scripts/**/*.test.ts"],
+    include: [
+      "src/**/*.test.ts",
+      "scripts/**/*.test.ts",
+      "server/**/*.test.ts",
+      "shared/**/*.test.ts",
+    ],
     coverage: {
       provider: "v8",
-      include: ["src/**/*.{ts,tsx}", "scripts/**/*.ts"],
+      include: ["src/**/*.{ts,tsx}", "scripts/**/*.ts", "server/**/*.ts", "shared/**/*.ts"],
       exclude: [
         "**/*.test.*",
         "**/*.spec.*",
