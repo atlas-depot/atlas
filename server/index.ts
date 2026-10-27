@@ -18,8 +18,12 @@ function main() {
     (address) => console.log(`Atlas API listening on http://127.0.0.1:${address.port}`),
   );
   server.on("error", () => {
-    console.error("Atlas API could not start. Check API_PORT and port availability.");
-    process.exitCode = 1;
+    if (server.listening) {
+      console.error("Atlas API server error.");
+    } else {
+      console.error("Atlas API could not start. Check API_PORT and port availability.");
+      process.exitCode = 1;
+    }
   });
   let closing = false;
   const shutdown = () => {

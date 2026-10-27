@@ -4,6 +4,8 @@ Atlas has a React/TypeScript source viewer and a local Hono API scaffold. Health
 
 ## Accepted decisions
 
+The [agreed sprint scope](https://github.com/atlas-depot/atlas/issues/45) records these choices.
+
 | Area | Decision |
 | --- | --- |
 | Client | React/TypeScript with Vite+. Web/PWA first; PWA setup remains unimplemented |

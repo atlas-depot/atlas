@@ -34,17 +34,25 @@ describe("Hono authentication boundary", () => {
     onTestFinished(() => {
       log.mockRestore();
     });
+    const secret = "SYNTHETIC_SECRET_NEVER_RETURN";
     const app = createApp(async () => {
-      throw new Error("SYNTHETIC_SECRET_NEVER_RETURN");
+      const error = new Error(secret);
+      error.name = secret;
+      throw error;
     });
-    const response = await app.request("/api/notes");
+    const response = await app.request(`/api/notes/${secret}?token=${secret}`, {
+      headers: { Cookie: `session=${secret}` },
+    });
     expect(response.status).toBe(500);
     expect(response.headers.get("Cache-Control")).toBe("no-store");
     expect(await response.json()).toEqual({
       error: { code: "INTERNAL_ERROR", message: "Request failed." },
     });
-    expect(log).toHaveBeenCalled();
-    expect(JSON.stringify(log.mock.calls)).not.toContain("SYNTHETIC_SECRET_NEVER_RETURN");
+    expect(log).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({ method: "GET", route: "/api/notes/:id" }),
+    );
+    expect(JSON.stringify(log.mock.calls)).not.toContain(secret);
   });
 
   it("returns JSON for unknown routes", async () => {
