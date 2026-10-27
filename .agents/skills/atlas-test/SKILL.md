@@ -13,19 +13,21 @@ Start with the request, diff, affected callers and existing coverage. Name the f
 
 Use [boundary cases](references/boundary-matrix.md) only when source grounding, account isolation, credential disclosure, approval or action lifecycles are affected. The cases do not decide product policy. Ask for the missing contract when correction, retention or ambiguous-outcome behavior is unspecified rather than embedding a new decision in an assertion.
 
-Expected results must come from the agreed contract and independent fixtures, not the implementation's own classifier, serializer or round-trip helper. Assert exact strings and call counts only when they express the contract. A policy unit test and endpoint integration test may protect different failures. Similar inputs or passing remaining tests do not establish redundancy; before removing a test, identify the lost failure mode and where it remains or why it is obsolete.
+Derive expected results from agreed requirements and independently worked examples before reading implementation details where practical. If the contract is unclear, ask rather than copying the current output. Then inspect the code for boundary cases; code-aware testing is useful, but its classifier, serializer or round-trip helper must not supply its own expected answer. Keep expectation review separate from implementation review. A second agent or model can share the author's assumptions and is not independent proof.
+
+Use unit tests for meaningful rules, not every helper. Use real-boundary integration tests for routing, persistence, account isolation and concurrent writes when those features exist. Assert exact strings and call counts only when they express the contract. Similar inputs or passing remaining tests do not establish redundancy; before removing a test, identify the lost failure mode and where it remains or why it is obsolete.
 
 ## Execute or identify the missing evidence
 
-With no harness, provide proposed cases with trigger, expected result, enforcement point, test layer and unknowns; do not report them as passed. With a harness, run focused cases and applicable required checks. State which storage/provider/model boundaries are mocked. A mocked model tests orchestration, not live answer quality; keep statistical evals separate from deterministic access and state assertions.
+With no harness, provide proposed cases with trigger, expected result, enforcement point, test layer and unknowns; do not report them as passed. With a harness, run focused cases and applicable required checks. State which storage/provider/model boundaries are mocked. Injecting an identity or a null authentication result tests downstream handling, not cookie/JWT verification. Schema tests do not establish HTTP enforcement or database isolation. A mocked model tests orchestration, not live answer quality.
 
 For an important regression, show failure without the fix and success with it where feasible. Use a targeted mutation only when critical logic or uncertain test value justifies it:
 
 1. Work in an isolated copy of the exact candidate, including relevant uncommitted files and excluding live credentials.
-2. Verify the intended fault in the diff, rebuild the mutated artifact if needed, and confirm the assertion ran. A compile/setup failure is not a detected behavioral fault.
+2. Verify the intended fault in the diff, rebuild the mutated artifact if needed, and confirm the test ran. A harness setup failure is not detection; failure of a build/startup command being tested can be the expected regression.
 3. Restore the candidate in that isolated copy and verify green. Never use broad restore/reset commands in the user's working tree.
 
-An equivalent mutation or runtime normalization may survive. Report the limit; do not manufacture proof, delete a test solely on that result, or change product semantics to bless a bug.
+Distinguish a real defect found by an existing test, a review finding subsequently covered by a regression test, and a deliberately injected fault. Mutation establishes sensitivity to that fault, not overall correctness or real-bug discovery. An equivalent mutation or runtime normalization may survive. Report the limit; do not manufacture proof, delete a test solely on that result, or change product semantics to bless a bug.
 
 ## Diagnose flakes and report
 
