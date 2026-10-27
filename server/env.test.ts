@@ -11,7 +11,7 @@ it.each(["", " 3001", "1.5", "-1", "65536", "SYNTHETIC_SECRET", "Infinity"])(
   "rejects invalid port %s without echoing its value",
   (port) => {
     expect(() => readServerEnv({ API_PORT: port })).toThrow(
-      "Invalid API_PORT: expected an integer from 0 to 65535.",
+      /^Invalid API_PORT: expected an integer from 0 to 65535\.$/,
     );
   },
 );
@@ -33,7 +33,7 @@ it("requires both WorkOS settings and preserves the exact configured issuer", ()
     { WORKOS_CLIENT_ID: "client_atlasTest", WORKOS_ISSUER: "http://issuer.test" },
   ]) {
     expect(() => readServerEnv(settings)).toThrow(
-      "Set both WORKOS_CLIENT_ID and WORKOS_ISSUER to valid WorkOS environment values.",
+      /^Set both WORKOS_CLIENT_ID and WORKOS_ISSUER to valid WorkOS environment values\.$/,
     );
   }
 });
