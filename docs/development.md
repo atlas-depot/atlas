@@ -1,21 +1,8 @@
 # Development setup
 
-Status: the repository contains a React/TypeScript source viewer and a local Hono API scaffold. The API has a health endpoint and a protected notes boundary. WorkOS sign-in and Neon persistence are not connected yet; routine setup needs no credentials or external services. Report the actual result of each check. A build is not a deployment and a no-tests run is not passing test evidence.
+Use Node `24.22.0` and pnpm `11.23.0`, pinned in `.node-version` and `package.json`. Select the runtime with your existing version manager. Routine setup and tests need no provider credentials or paid accounts.
 
 ## Tooling
-
-Use Node `24.22.0` LTS and pnpm `11.23.0`. `.node-version` records the runtime and `package.json#packageManager` pins pnpm. Select that Node version with your existing runtime manager before installing. The project does not install or change a global runtime manager. Commit only `pnpm-lock.yaml` as the dependency lockfile.
-
-If `pnpm` is not on your `PATH`, enable it through Corepack, which ships with Node and installs the version pinned in `package.json#packageManager`:
-
-```sh
-corepack enable pnpm
-pnpm --version
-```
-
-`corepack enable` writes shims next to the Node binary, so a system-wide Node installation may need elevated permissions. Otherwise run one-off commands as `corepack pnpm <command>`, which uses the same pinned version without changing `PATH`. Check that any existing pnpm installation reports `11.23.0`.
-
-A local Node other than `24.22.0` may make project commands report an `[WARN] Unsupported engine` warning; `pnpm --version` alone does not. That warning does not fail the install, but activate the version from `.node-version` before recording setup or check results, because CI runs on the pinned runtime.
 
 From the repository root:
 
@@ -23,176 +10,93 @@ From the repository root:
 node --version
 pnpm --version
 pnpm install --frozen-lockfile
+pnpm --dir experiments/eve-openrouter install --frozen-lockfile
 pnpm dev
 ```
 
-Vite prints the local development URL. To choose an isolated port, use `pnpm dev --host 127.0.0.1 --port 5177 --strictPort`. Stop the server with Ctrl-C.
+The isolated experiment has its own workspace and lockfile. Its dependency install is required before repository-wide lint/type checks and the optional pre-push hook, because those checks inspect its TypeScript. Installing it does not make model calls. If Corepack is available, `corepack pnpm <command>` can use the pinned pnpm without changing global shims.
 
-| Command | What runs |
+Use `pnpm install` only when intentionally changing dependencies and commit the resulting lockfile. Subsequent installs use `--frozen-lockfile`. Vite+ owns the toolchain; retain its matching Vite alias and Vitest overrides in `pnpm-workspace.yaml`.
+
+| Command | Purpose |
 | --- | --- |
-| `pnpm dev:api` | Watch and run the Node/Hono API on loopback |
-| `pnpm start:api` | Run the same API entrypoint without watch mode |
-| `pnpm check` | Vite+ format, lint and type checks |
-| `pnpm format:check` | Oxfmt formatting validation without writing files |
-| `pnpm lint` | Oxlint rules and full type checking with the enabled options |
-| `pnpm typecheck` | Vite+ type checks through its TypeScript Go toolchain |
-| `pnpm test` | `vp test run`, using bundled Vitest 5.0.5 |
-| `pnpm coverage` | `vp test run --coverage`, V8 coverage with the scope below |
-| `pnpm test:e2e` | Playwright Test against the built bundle, see [browser regression](#browser-regression) |
-| `pnpm build` | Production bundle in `dist/`. Run `pnpm check` separately |
-| `pnpm preview --host 127.0.0.1 --port 4177 --strictPort` | Serve the built bundle locally |
+| `pnpm dev` | Frontend development server |
+| `pnpm dev:api` | Node/Hono API with watch mode |
+| `pnpm start:api` | Same API entrypoint without watch mode |
+| `pnpm check` | Format, lint and type checks |
+| `pnpm format:check` | Formatting check without rewriting files |
+| `pnpm lint` | Lint with type-aware rules and full type checking |
+| `pnpm typecheck` | Type checks only |
+| `pnpm test` | Unit and integration tests |
+| `pnpm coverage` | Tests with V8 coverage |
+| `pnpm test:e2e` | Playwright against the built frontend |
+| `pnpm build` | Frontend bundle in `dist/`, not an API build or deployment |
+| `pnpm preview --host 127.0.0.1 --port 4177 --strictPort` | Serve the built frontend locally |
 
-The first install that creates or intentionally updates the lockfile uses `pnpm install`. Subsequent clean installs use `--frozen-lockfile` so mismatches fail instead of rewriting it. No secrets, database, seed process or paid account is needed for this scaffold.
-
-The isolated [eve experiment](../experiments/eve-openrouter/README.md) has its own
-workspace and lockfile. Before root `check`, `lint`, or the opt-in pre-push hook,
-also run `pnpm --dir experiments/eve-openrouter install --frozen-lockfile` so the
-repository-wide linter can resolve its types. CI performs this install too.
-Installing and type-checking the experiment need no API key and make no model calls;
-its live smoke command remains a separate, explicitly budgeted action.
-
-Vite+ `1.3.0` owns the frontend toolchain. `vite` resolves to its matching core alias, and the workspace overrides keep Vite and Vitest aligned with the bundled versions. The Vite peer-version exception accommodates the core alias's `1.3.0` version versus the React plugin's ordinary Vite `^8.0.0` peer range; the override still pins the resolved package. The `pnpm-workspace.yaml` explicitly includes only the root package, so local scratch and evidence folders are not discovered as applications. Both `lint.options.typeAware` and `typeCheck` are enabled in `vite.config.ts`. The app and Node tsconfigs enable strict mode; the Node config also covers `server/` and `shared/`. Formatting excludes `docs/**`, `.agents/**`, `.claude/**` and `commitlint.config.cjs`; root `AGENTS.md` and `CLAUDE.md` remain included.
-
-### Static-check verification
-
-`pnpm check`, `pnpm format:check`, `pnpm lint` and `pnpm typecheck` validate without auto-fixing files. Keep `--fix` out of CI-facing commands. Use `pnpm exec vp fmt` deliberately when you want to write formatting fixes locally.
-
-Oxfmt checks layout, such as spacing and quotes; it does not detect incorrect types. Oxlint enforces configured rules, such as `typescript/no-explicit-any`; an explicit `any` is legal TypeScript but violates this rule. Type checking rejects incompatible assignments; it cannot prove a correctly typed calculation produces the right business result. `typeAware` enables rules needing type information, while `typeCheck` enables full type checking. Keep both enabled. With this configuration, `pnpm lint` also reports type errors; `pnpm typecheck` isolates the compiler diagnostics.
-
-To reproduce the #18 failure checks, use a disposable copy of the current candidate with its own frozen-lockfile install. Add only one of the following variants as `src/check-probe.ts` at a time. Leave it unimported to verify checks include source outside the application's import graph. Run all four commands after each variant, then remove the file and rerun them.
-
-| Variant (one-line file) | `format:check` | `lint` | `typecheck` | `check` |
-| --- | --- | --- | --- | --- |
-| `export const checkProbe="Atlas";` | Fail | Pass | Pass | Fail |
-| `export const checkProbe: any = "Atlas";` | Pass | Fail | Pass | Fail |
-| `export const checkProbe: number = "Atlas";` | Pass | Fail | Fail | Fail |
-| Probe removed | Pass | Pass | Pass | Pass |
-
-Failure means a nonzero exit with the intended formatting, lint or type diagnostic, not an install/configuration error. Compare source and config contents before and after the commands to confirm they do not write fixes. Never commit the deliberate faults. These probes verify static-check enforcement, not application behavior tests. Formatting covers supported non-ignored repository files; lint covers supported code files, and type checking follows `tsconfig.app.json` (`src`) and `tsconfig.node.json` (`vite.config.ts` and Node-side code).
-
-### Optional pre-push hook
-
-The repository includes `.githooks/pre-push`, but it is not active by default. To run `pnpm check`, the ClickUp sync tests and `pnpm build` before every push in this clone:
-
-```sh
-git config --local core.hooksPath .githooks
-```
-
-This changes the hook path only for the current clone and replaces any existing `core.hooksPath` value. If you already use another hook manager, keep it and merge this check manually instead. Disable the hook with:
-
-```sh
-git config --local --unset core.hooksPath
-```
-
-The hook runs `pnpm check`, `pnpm --dir experiments/eve-openrouter test`, `pnpm exec vp test run scripts/clickup-sync.test.ts`, and `pnpm build`. It does not run the separate coverage job; use `pnpm coverage` for that. The experiment tests use fake keys and mocked HTTP, never a paid model. It does not install dependencies. Run the root and experiment frozen installs described above first. Use `git push --no-verify` only for an intentional bypass.
-
-### Dependency consumers
-
-Dependencies have concrete consumers:
-
-- `react` and `react-dom` render the page through `src/main.tsx` and the named `App` component.
-- `@vitejs/plugin-react` supplies React development transforms and refresh support.
-- `vite-plus` supplies dev, static checks, tests and production builds. The direct `vite` alias provides the matching plugin and client types.
-- `typescript` and `@types/node`, `@types/react`, `@types/react-dom` provide compiler/editor tooling and types for the code and config.
-- `zod` validates briefing fixtures, the shared notes contract and backend configuration.
-- `hono` handles API routing and middleware; `@hono/node-server` connects its Fetch handler to Node HTTP. Node 24 runs the TypeScript entrypoint directly, so no extra development transpiler is needed.
-
-### Test runner boundary
-
-Test settings live in `vite.config.ts`: Node environment, tests under `src/`, `scripts/`, `server/` and `shared/`, and `passWithNoTests: false`. DOM component tests would need a matching file include and browser-like environment; neither is configured yet. Import test APIs from `vite-plus/test`. Do not add a second Vitest installation or a separate `vitest.config.ts` by habit.
-
-The fixture parser tests in `src/fixtures/parse-fixtures.test.ts` ([#22](https://github.com/atlas-depot/atlas/issues/22)) read the synthetic examples in `fixtures/briefing/` from disk. Each invalid case must produce exactly one issue at its expected field path. A run that finds no test files is not passing evidence, so keep `passWithNoTests` disabled. A disposable runner self-check verifies harness execution only and does not provide application behavior coverage.
-
-Before review, verify the clean install, static checks, production build and accessible Atlas heading in a real browser at mobile and desktop widths. Keep browser evidence separate from runner setup evidence.
-
-### Coverage
-
-`pnpm coverage` runs the full Vitest suite with V8 coverage. Coverage includes application code under `src/`, `scripts/`, `server/` and `shared/`; it excludes test and spec files, `e2e/`, `experiments/`, config files, declarations and generated output. The `text` reporter prints file-level coverage to the job log, and `text-summary` writes line, statement, function and branch totals to `coverage/summary.txt`. The `coverage` CI job appends those totals to the Actions run summary with the tested revision; it uploads no artifact and keeps no baseline. The job fails when tests fail or the summary is missing or empty.
-
-The coverage job is separate from the required `verify` check. It runs on pull requests and pushes to `main`, and reviewers inspect its summary and logs before merging. Percentages are informational: there is no percentage threshold, and executed lines do not prove useful assertions. Line coverage counts executed lines; branch coverage counts decision outcomes. `coverage/` is ignored. When the coverage job is introduced or changes materially, record its actual step duration in the pull request.
-
-### Browser regression
-
-`pnpm test:e2e` runs Playwright Test (declared in `playwright.config.ts`) against the production bundle, which the config builds and serves on `127.0.0.1:4177` before the first test. `pnpm exec playwright install chromium` installs the browser once per machine. Specs live in `e2e/`, so the Vitest include patterns stay unchanged. The `browser regression` CI job is separate from the required `verify` check, and a failure keeps a trace under `test-results/` that CI uploads.
-
-### Scaffold provenance
-
-The initial config came from `create-vite-plus@1.3.0` with `create-vite@9.2.1 --template react-ts`, generated in a separate scratch directory with agent/editor/git/hook setup disabled. Only application/config files were transferred. Existing README, ignore rules and repository instructions were preserved and updated deliberately. Direct dependencies were pinned, strict mode was made explicit and template branding was replaced. The minimal page uses system fonts and semantic HTML. Product typography, component libraries and motion remain future design choices.
-
-References: [Vite+ create](https://viteplus.dev/guide/create), [local CLI and version alignment](https://viteplus.dev/guide/local-cli), [check](https://viteplus.dev/guide/check), [test](https://viteplus.dev/guide/test), [published template source](https://github.com/vitejs/vite/tree/create-vite%409.2.1/packages/create-vite/template-react-ts).
+Static checks do not auto-fix files. Run `pnpm exec vp fmt` deliberately when formatting should change. Both TypeScript configs use strict mode; the Node config also includes `server/` and `shared/`.
 
 ## Local API
 
-Run the frontend and backend in separate terminals from the repository root:
+In a second terminal, from the repository root:
 
 ```sh
-cp .env.example .env
+cp -n .env.example .env
 pnpm dev:api
 ```
 
-```sh
-pnpm dev
-```
+The development commands read root `.env`. `API_PORT` defaults to `3001` and accepts a decimal integer from 0 to 65535. Use a fixed nonzero port for development; `0` requests an ephemeral port for entrypoint tests. The backend binds to `127.0.0.1`. Invalid configuration fails startup without echoing environment values.
 
-Both development commands read the root `.env`. The backend binds only to `127.0.0.1`. `API_PORT` defaults to `3001`; if supplied, it must be a decimal integer from 0 to 65535. Port `0` requests an ephemeral port for entrypoint tests; use a fixed nonzero port when running the frontend proxy. Invalid configuration stops startup before listening and reports the setting name without printing its value. Use a different port for each concurrent checkout.
+Vite proxies `/api` and `/api/...` to the backend without changing the path. Browser callers use relative URLs such as `fetch('/api/health')`. Health returns `200`; notes return `401` until authentication is connected. Health is process liveness, not database or provider readiness. The Node entrypoint runs TypeScript directly, without a separate transpiler.
 
-Vite forwards `/api` and `/api/...` to that local port without changing the path. Browser callers use relative URLs such as `fetch('/api/health')`; no separate browser API origin or wildcard CORS is needed. Through the frontend URL printed by Vite, `GET /api/health` returns `200`, and `GET /api/notes` returns `401` until WorkOS is connected. The health response proves only that the process is running, not database or provider readiness.
+For concurrent worktrees, set different `API_PORT` values and frontend ports, for example `pnpm dev --host 127.0.0.1 --port 5177 --strictPort`. Stop both processes with Ctrl-C. Production routing is separate configuration.
 
-`pnpm start:api` runs the same entrypoint without watch mode. The API uses Node's native TypeScript support. `pnpm build` still builds the frontend only; it neither deploys nor bundles the API. Production routing remains separate work.
+## Tests and coverage
 
-The [notes contract](notes-api.md) defines the payloads and conditional-write behavior for the next tasks. #45's tests exercise startup, the unauthenticated boundary and shared schemas. Tests with an injected session do not prove WorkOS sign-in or database isolation.
+Import test APIs from `vite-plus/test`. The existing runner discovers tests under `src/`, `scripts/`, `server/` and `shared/`, with `passWithNoTests: false`. Do not add another Vitest installation. A no-tests run is not passing evidence.
 
-Only `API_PORT` is consumed now. The commented WorkOS and Neon settings in `.env.example` are preparation for #46 and #47, not credentials required to run the scaffold. Do not copy them into `VITE_*`, serialize `process.env` into frontend configuration, or import server modules from browser code.
+Coverage includes those source directories and excludes tests, declarations, configuration, generated output, `e2e/` and `experiments/`. It prints file-level coverage and writes totals to `coverage/summary.txt`. Percentages are informational, with no threshold; assert behavior rather than aiming only to execute lines.
+
+Test session injection does not prove WorkOS sign-in or database isolation. Keep mocked provider checks separate from live verification, and run paid model tests only with an explicit budget. See [atlas-test](../.agents/skills/atlas-test/SKILL.md) for boundary selection and regression checks.
+
+### Browser regression
+
+Install Chromium once with `pnpm exec playwright install chromium`. Playwright builds the frontend and serves it on `127.0.0.1:4177` without reusing an existing server. An occupied port fails the run. CI retains a trace on failure. For visible UI changes, also verify mobile width, desktop and keyboard behavior.
+
+### Optional pre-push hook
+
+Enable the repository hook with `git config --local core.hooksPath .githooks`. This replaces any existing hook path in the clone; integrate it manually if another hook manager is in use. Disable it with `git config --local --unset core.hooksPath`.
+
+The hook runs `pnpm check`, isolated experiment tests, ClickUp sync tests and `pnpm build`. It does not install dependencies or run coverage/browser tests. Both dependency installs above must already exist.
 
 ## Code conventions
 
-Use strict TypeScript without `any`, named exports, and explicit dependencies instead of hidden business globals. Parse untrusted API/tool input with Zod schemas at boundaries. Keep shared contracts small; do not create abstractions without real callers.
+- Use strict TypeScript, named exports and explicit dependencies. Name collection routes with plural resources, such as `/api/notes`.
+- Keep shared request authentication separate from resource authorization. Authenticate once at the protected boundary, then scope every resource operation to that identity.
+- Keep field contracts in Zod schemas. TSDoc explains semantic decisions that types cannot express; avoid duplicate prose, numbered-issue comments and wrappers without a consumer.
+- Test observable behavior at the smallest useful boundary with independent expected results. Inspect other callers before changing a shared function.
+- Keep UI states accessible and distinguish unsaved, loading, empty and failed operations. Preserve user input when saving fails.
 
-For an API change, specify caller identity, inputs, outputs and errors; inspect affected callers. Update generated contracts through their generator when one exists. Use actual persistence constraints and access filters, not an assumed future ORM.
+References: [Google review guidance](https://google.github.io/eng-practices/review/reviewer/looking-for.html), [The Practical Test Pyramid](https://martinfowler.com/articles/practical-test-pyramid.html), [Testing Library principles](https://testing-library.com/docs/guiding-principles/).
 
-For UI changes, preserve accessible names and keyboard behavior from existing components. Distinguish optimistic state from persisted data and handle the loading, empty and error states affected by the change. UI verification evidence belongs in the PR as described in [contributing](contributing.md).
+## Environments and secrets
 
-## Choosing implementation and test boundaries
+| Environment | Data and access |
+| --- | --- |
+| Local | Synthetic data and mocks; isolated remote Neon branch per developer when provisioned |
+| PR preview | Test data and credentials, no production access |
+| Staging | Shared integration database with reviewed migrations |
+| Production | Separate real-user data and credentials |
 
-Start with the accepted input/output contract and inspect its callers. Separate parsing of untrusted input, domain decisions and side effects when that makes failures independently testable; do not create layers or shared packages without a real consumer. Model meaningful states explicitly, including failure and unknown outcomes when applicable. Prefer a cohesive module that hides a decision over many forwarding wrappers. Refactor behavior-preserving structure separately from a behavior change when that makes review clearer.
+Preview URLs do not isolate databases. Neon branches isolate data and resets, not migration conflicts. Keep scheduled actions and connector subscriptions off in previews unless enabled for a specific test. Match versions and migrations without copying production data.
 
-Use independent expected results and test observable behavior. Prefer accessible user-facing interactions over component internals in UI tests. Use [atlas-test](../.agents/skills/atlas-test/SKILL.md) to choose test boundaries, prove regression sensitivity and investigate flakes.
+Commit only safe `.env.example` values and validate consumed settings at startup. Real env files stay ignored. Server credentials must never enter `VITE_*`, frontend configuration, logs or browser imports. User OAuth tokens belong in protected provider storage, not a shared `.env`.
 
-Methods: [Google review guidance](https://google.github.io/eng-practices/review/reviewer/looking-for.html), [The Practical Test Pyramid](https://martinfowler.com/articles/practical-test-pyramid.html), [Testing Library principles](https://testing-library.com/docs/guiding-principles/). These inform choices; they do not add dependencies or override an accepted Atlas contract.
-
-## Environments
-
-| Environment | Intended use | Data and side effects |
-| --- | --- | --- |
-| Local | Fast development and deterministic tests | Seed data, mocks by default; personal test accounts when needed |
-| PR preview | Review an isolated code change | Test data and credentials; no production access |
-| Production | Published main release | Separate real-user data and credentials |
-
-Different preview URLs do not automatically provide isolated databases. Neon is selected: use a remote branch per developer, shared staging for integration and separate production. Database provisioning is tracked in #46; a branch name or preview URL alone is not evidence of isolation. Keep scheduled/proactive actions and live connector subscriptions off in previews by default; enable deliberately for an integration test.
-
-Local environments need matching versions and migrations, not copies of production data. Do not require every contributor to have paid model keys for routine tests.
-
-## Secrets and account access
-
-Vercel environment variables are the selected starting approach. Team access and any extra seat charges still require verification. Do not add Infisical or a parallel encrypted secret vault without a concrete need.
-
-- Commit only `.env.example` with names and safe placeholders; validate required configuration at startup.
-- Ignore real local env files. Never copy production secrets into development.
-- Once the project is linked and access granted, use the documented Vercel env workflow to obtain development values.
-- Variables exposed to the browser, including `VITE_*`, must contain only public configuration.
-- OAuth application credentials are deployment secrets. Each user's OAuth tokens belong in protected connector storage, not a shared `.env`.
-- Keep model, connector, and sandbox credentials available only to the backend processes that need them.
+Vercel environment variables are the selected hosting approach. Project linkage, access and any seat charges still need verification. Track model, sandbox, storage and connector costs together; credits are finite and a token cap does not cap the whole product bill.
 
 ## CI and deployment status
 
-`.github/workflows/ci.yml` runs on pull requests and pushes to `main`. Its `format`, `lint and typecheck`, `coverage` and `build` jobs run `vp fmt --check`, `vp lint`, `vp test run --coverage` and `vp build` after `vp install --frozen-lockfile`. `vp lint` also type-checks because `typeCheck` is enabled in `vite.config.ts`. The required check name is `verify`, which passes only when `format`, `lint and typecheck` and `build` succeed. The `coverage` job runs the full Vitest suite with coverage as a separate check; reviewers inspect its summary and logs, but it is not part of `verify` and is not a required merge check. CI reads the Node version from `.node-version`, so local and CI runtimes stay aligned. Efe configures required checks after reviewing a real run. Add relevant deterministic eve evals when agent code exists. Paid live-model evals should be separately limited.
+CI runs on pull requests and pushes to `main`. Required `verify` aggregates format, lint/typecheck and build. Coverage runs the full root suite separately and publishes its summary; browser regression is also separate. Neither belongs to the `verify` aggregate. The lint job installs the isolated experiment and runs its mocked budget-guard tests without credentials. CI uses `.node-version`.
 
-The agreed flow is feature branch preview and `main` production. Efe or configured Vercel automation handles deployment. Configure Vercel Git integration for branch-triggered deployments or a Vercel CLI/API path for CI; branches and CI do not configure deployments by themselves: project linkage, team access, credentials, and environment separation require separate configuration and verification. See [contributing](contributing.md).
+Feature previews and `main` production remain the deployment direction. Git branches and passing CI do not configure Vercel linkage, routing or credentials. After an authorized deployment, verify the revision and affected live flow. Application rollback does not roll back the database. Follow [contributing](contributing.md) for PR evidence and merge authority.
 
-After an authorized deployment, verify the deployed revision and affected live flow. A successful build is not a live smoke test, and application rollback does not imply database rollback.
-
-## Budget checks
-
-Track model, sandbox, workflow, storage, and connector costs together. Credits are finite and service-specific. Set execution time and resource limits, stop idle sandbox compute, and record actual spend during the first integration test. Do not claim that a model-token limit caps the whole product bill.
-
-References: [Vercel Git integration](https://vercel.com/docs/git), [Vercel env CLI](https://vercel.com/docs/cli/env), [Vite environment variables](https://vite.dev/guide/env-and-mode).
+References: [Vite+ local CLI](https://viteplus.dev/guide/local-cli), [Vite environment variables](https://vite.dev/guide/env-and-mode), [Vercel Git integration](https://vercel.com/docs/git), [Vercel env CLI](https://vercel.com/docs/cli/env).
