@@ -11,7 +11,10 @@ export type AuthenticateRequest = (request: Request) => Promise<AuthenticatedUse
 export function requireAuth(authenticateRequest: AuthenticateRequest) {
   return createMiddleware<AuthEnv>(async (c, next) => {
     const user = await authenticateRequest(c.req.raw);
-    if (!user) return c.json(apiError("UNAUTHENTICATED", "Sign in to continue."), 401);
+    if (!user) {
+      c.header("WWW-Authenticate", 'Bearer realm="atlas"');
+      return c.json(apiError("UNAUTHENTICATED", "Sign in to continue."), 401);
+    }
     c.set("user", user);
     await next();
   });

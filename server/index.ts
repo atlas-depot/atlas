@@ -1,18 +1,20 @@
 import { serve } from "@hono/node-server";
+import { WorkOS } from "@workos-inc/node";
 import { createApp } from "./app.ts";
 import { readServerEnv } from "./env.ts";
+import { createBearerAuthenticator } from "./workos.ts";
 
 function main() {
-  let port: number;
+  let configuration: ReturnType<typeof readServerEnv>;
   try {
-    ({ port } = readServerEnv(process.env));
+    configuration = readServerEnv(process.env);
   } catch {
-    console.error("Atlas API could not start. API_PORT must be an integer from 0 to 65535.");
+    console.error("Atlas API could not start. Check API_PORT and WorkOS configuration.");
     process.exitCode = 1;
     return;
   }
-  // TODO: Connect WorkOS authentication; the server currently rejects every private request.
-  const app = createApp(async () => null);
+  const { port, workos } = configuration;
+  const app = createApp(workos ? createBearerAuthenticator(new WorkOS(workos)) : async () => null);
   const server = serve(
     { fetch: app.fetch, hostname: "127.0.0.1", port, overrideGlobalObjects: false },
     (address) => console.log(`Atlas API listening on http://127.0.0.1:${address.port}`),

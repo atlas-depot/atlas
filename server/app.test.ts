@@ -16,6 +16,7 @@ describe("Hono authentication boundary", () => {
       headers: { "X-User-Id": "forged", Authorization: "Bearer fake", Cookie: "session=fake" },
     });
     expect(response.status).toBe(401);
+    expect(response.headers.get("WWW-Authenticate")).toBe('Bearer realm="atlas"');
     expect(response.headers.get("Cache-Control")).toBe("no-store");
     expect(await response.json()).toMatchObject({ error: { code: "UNAUTHENTICATED" } });
   });

@@ -46,7 +46,9 @@ pnpm dev:api
 
 The development commands read root `.env`. `API_PORT` defaults to `3001` and accepts a decimal integer from 0 to 65535. Use a fixed nonzero port for development; `0` requests an ephemeral port for entrypoint tests. The backend binds to `127.0.0.1`. Invalid configuration fails startup without echoing environment values.
 
-Vite proxies `/api` and `/api/...` to the backend without changing the path. Browser callers use relative URLs such as `fetch('/api/health')`. Health returns `200`; notes return `401` until authentication is connected. Health is process liveness, not database or provider readiness. The Node entrypoint runs TypeScript directly, without a separate transpiler.
+Vite proxies `/api` and `/api/...` to the backend without changing the path. Browser callers use relative URLs such as `fetch('/api/health')`. Health returns `200`; authenticated notes currently return `501` until storage is connected. Health is process liveness, not database or provider readiness. The Node entrypoint runs TypeScript directly, without a separate transpiler.
+
+For WorkOS Bearer authentication, set both `WORKOS_CLIENT_ID` and `WORKOS_ISSUER` to your development environment's values. The issuer must match exactly; do not infer it from the client ID. The SDK verifies signed user access tokens against WorkOS's client-specific JWKS. No API key is needed for verification. Omit both settings to keep private routes denied during scaffold work; partial or malformed configuration prevents startup. Invalid credentials return `401` with a Bearer challenge, while verification-service failures return `500`. Token verification is offline and does not immediately detect revoked sessions. Browser login, sealed cookies and refresh remain pending; never put tokens in browser storage to work around this.
 
 For concurrent worktrees, set different `API_PORT` values and frontend ports, for example `pnpm dev --host 127.0.0.1 --port 5177 --strictPort`. Stop both processes with Ctrl-C. Production routing is separate configuration.
 

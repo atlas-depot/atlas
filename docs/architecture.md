@@ -10,7 +10,7 @@ The [agreed sprint scope](https://github.com/atlas-depot/atlas/issues/45) record
 | --- | --- |
 | Client | React/TypeScript with Vite+. Web/PWA first; PWA setup remains unimplemented |
 | API | Hono on Node 24, REST and shared Zod schemas |
-| Authentication | WorkOS AuthKit with hosted Google and email/password sign-in, server callback and HttpOnly session cookie |
+| Authentication | WorkOS AuthKit with hosted Google and email/password sign-in, server callback and HttpOnly session cookie; the API also accepts verified WorkOS Bearer access tokens |
 | Database | Neon PostgreSQL with Drizzle, one remote branch per developer, shared staging and separate production |
 | Agent runtime | eve; verify its existing capabilities before adding another runtime or workflow system |
 | Hosting | Vercel direction; production routing, deployment and team access need setup and verification |

@@ -5,7 +5,7 @@ import { readServerEnv } from "./server/env.ts";
 // https://vite.dev/config/
 export default defineConfig(({ command, isPreview }) => {
   const isDevServer = command === "serve" && !isPreview && !process.env.VITEST;
-  const apiPort = isDevServer ? readServerEnv(process.env).port : undefined;
+  const apiPort = isDevServer ? readServerEnv({ API_PORT: process.env.API_PORT }).port : undefined;
   if (apiPort === 0) throw new Error("Use a nonzero API_PORT for the development proxy.");
   return {
     fmt: {

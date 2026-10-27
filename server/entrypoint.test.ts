@@ -13,7 +13,7 @@ const root = fileURLToPath(new URL("../", import.meta.url));
 async function startApi() {
   const child = spawn(process.execPath, ["server/index.ts"], {
     cwd: root,
-    env: { ...process.env, API_PORT: "0" },
+    env: { ...process.env, API_PORT: "0", WORKOS_CLIENT_ID: undefined, WORKOS_ISSUER: undefined },
     stdio: ["ignore", "pipe", "pipe"],
   });
   onTestFinished(async () => {
@@ -50,6 +50,8 @@ it("serves health and protects API routes through the real Node entrypoint and V
   const api = await startApi();
   vi.stubEnv("API_PORT", new URL(api).port);
   vi.stubEnv("VITEST", "");
+  vi.stubEnv("WORKOS_CLIENT_ID", "client_fixture");
+  vi.stubEnv("WORKOS_ISSUER", "");
   onTestFinished(() => {
     vi.unstubAllEnvs();
   });
@@ -71,6 +73,7 @@ it("serves health and protects API routes through the real Node entrypoint and V
   for (const path of ["/api/notes", "/api?probe=1"]) {
     const response = await fetch(`${url}${path}`, { signal: AbortSignal.timeout(3_000) });
     expect(response.status).toBe(401);
+    expect(response.headers.get("WWW-Authenticate")).toBe('Bearer realm="atlas"');
     expect(await response.json()).toMatchObject({ error: { code: "UNAUTHENTICATED" } });
   }
 }, 20_000);
