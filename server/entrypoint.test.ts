@@ -1,5 +1,8 @@
 import { execFile, spawn } from "node:child_process";
 import { once } from "node:events";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { createServer } from "vite-plus";
@@ -85,3 +88,14 @@ it("rejects invalid startup configuration with safe diagnostics", async () => {
   });
   expect(result).toMatchObject({ stderr: expect.not.stringContaining("SYNTHETIC_SECRET") });
 });
+
+it("builds the frontend even when backend port configuration is invalid", async () => {
+  const output = await mkdtemp(join(tmpdir(), "atlas-build-"));
+  onTestFinished(() => rm(output, { recursive: true, force: true }));
+  await promisify(execFile)(
+    process.execPath,
+    ["node_modules/vite-plus/bin/vp", "build", "--outDir", output],
+    { cwd: root, env: { ...process.env, API_PORT: "invalid", VITEST: "" }, timeout: 20_000 },
+  );
+  expect(await readFile(join(output, "index.html"), "utf8")).toContain('type="module"');
+}, 30_000);
