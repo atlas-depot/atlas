@@ -1,6 +1,6 @@
 # Architecture
 
-Atlas has a React/TypeScript source viewer and a local Hono API scaffold. Health requests work; WorkOS sign-in, note persistence and the agent-backed product flow are not connected yet.
+Atlas has a React/TypeScript source viewer and a local Hono API. Health, the public authentication routes and the protected API boundary run. WorkOS browser sign-in stores only a sealed HttpOnly session cookie; note persistence and the agent-backed product flow are not connected yet.
 
 ## Accepted decisions
 
@@ -21,9 +21,13 @@ File storage, connector adapters, memory storage and the product model remain op
 
 The notes sprint covers online personal notes, explicit Save, Markdown source and preview, followed by a user-triggered AI draft kept separate from the original. Offline synchronization, live collaboration, PDF import, connectors, search and richer generated views are outside this batch.
 
-The executable provides public health and a protected API boundary. Authentication rejects requests by default. Tests inject a trusted identity; authenticated note operations return `501` until persistence is connected.
+The executable provides public health and authentication routes plus a protected API boundary. Requests without a verified Bearer token or browser session are rejected. Tests inject a trusted identity; authenticated note operations return `501` until persistence is connected. Invalid or expired credentials return `401`, rejected cookie-origin checks return `403`, and provider outages return `500`.
 
-The [note schemas](../shared/notes.ts) own the payload and timestamp contract. [HTTP schemas](../shared/http.ts) own errors and conditional-write headers.
+`server/browser-auth.ts` owns hosted AuthKit PKCE, the sealed `atlas_session` cookie, refresh and WorkOS logout. `server/workos.ts` verifies Bearer access tokens offline. `server/auth.ts` keeps one protected boundary and enforces Bearer-versus-cookie precedence; an `Authorization` header never falls back to the cookie. Browser tokens stay inside the HttpOnly cookie and are never returned by the session route.
+
+Deterministic tests use a synthetic provider and a local fake WorkOS API; they cover state, PKCE, refresh outcomes, logout, account replacement, CSRF and Bearer precedence. Live Google and email/password verification succeeded against WorkOS Staging; the five-person dashboard access check and the notes UI remain pending.
+
+The [note schemas](../shared/notes.ts) own the payload and timestamp contract. [HTTP schemas](../shared/http.ts) own errors and conditional-write headers. [Session schemas](../shared/auth.ts) own the browser-safe identity returned by `GET /api/auth/session`.
 
 ## Responsibility boundaries
 
