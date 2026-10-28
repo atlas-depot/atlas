@@ -68,6 +68,10 @@ function createTestApp(
   });
 }
 
+function notesPath(method: string): string {
+  return method === "POST" ? "/api/notes" : "/api/notes/note_fixture";
+}
+
 describe("public authentication routes", () => {
   it("redirects login to hosted AuthKit and sets the transaction cookie", async () => {
     const response = await createTestApp(fakeBrowserAuth()).request("/api/auth/login");
@@ -285,41 +289,47 @@ describe("public authentication routes", () => {
 });
 
 describe("protected API origin boundary", () => {
-  it("rejects cookie-authenticated unsafe requests without the exact origin", async () => {
-    const authenticateRequest = vi.fn(async () => ({ userId: alice.id }));
-    const auth = fakeBrowserAuth({ authenticate: authenticateRequest });
-    const app = createTestApp(auth, authenticateRequest);
-    const unsafeRequests: Array<Record<string, string>> = [
-      { Cookie: `${SESSION_COOKIE_NAME}=session_fixture` },
-      {
-        Cookie: `${SESSION_COOKIE_NAME}=session_fixture`,
-        Origin: "https://evil.example.test",
-      },
-    ];
-    for (const headers of unsafeRequests) {
-      const response = await app.request("/api/notes", { method: "POST", headers });
-      expect(response.status).toBe(403);
-      expect(await response.json()).toMatchObject({ error: { code: "FORBIDDEN" } });
-    }
-    expect(authenticateRequest).not.toHaveBeenCalled();
-  });
+  it.each(["POST", "PUT", "DELETE"] as const)(
+    "rejects cookie-authenticated %s requests without the exact origin",
+    async (method) => {
+      const authenticateRequest = vi.fn(async () => ({ userId: alice.id }));
+      const auth = fakeBrowserAuth({ authenticate: authenticateRequest });
+      const app = createTestApp(auth, authenticateRequest);
+      const unsafeRequests: Array<Record<string, string>> = [
+        { Cookie: `${SESSION_COOKIE_NAME}=session_fixture` },
+        {
+          Cookie: `${SESSION_COOKIE_NAME}=session_fixture`,
+          Origin: "https://evil.example.test",
+        },
+      ];
+      for (const headers of unsafeRequests) {
+        const response = await app.request(notesPath(method), { method, headers });
+        expect(response.status).toBe(403);
+        expect(await response.json()).toMatchObject({ error: { code: "FORBIDDEN" } });
+      }
+      expect(authenticateRequest).not.toHaveBeenCalled();
+    },
+  );
 
-  it("allows a cookie-authenticated unsafe request from the configured origin", async () => {
-    const authenticateRequest = vi.fn(async () => ({ userId: alice.id }));
-    const app = createTestApp(
-      fakeBrowserAuth({ authenticate: authenticateRequest }),
-      authenticateRequest,
-    );
-    const response = await app.request("/api/notes", {
-      method: "POST",
-      headers: {
-        Cookie: `${SESSION_COOKIE_NAME}=session_fixture`,
-        Origin: appOrigin,
-      },
-    });
-    expect(response.status).toBe(501);
-    expect(authenticateRequest).toHaveBeenCalledTimes(1);
-  });
+  it.each(["POST", "PUT", "DELETE"] as const)(
+    "allows a cookie-authenticated %s request from the configured origin",
+    async (method) => {
+      const authenticateRequest = vi.fn(async () => ({ userId: alice.id }));
+      const app = createTestApp(
+        fakeBrowserAuth({ authenticate: authenticateRequest }),
+        authenticateRequest,
+      );
+      const response = await app.request(notesPath(method), {
+        method,
+        headers: {
+          Cookie: `${SESSION_COOKIE_NAME}=session_fixture`,
+          Origin: appOrigin,
+        },
+      });
+      expect(response.status).toBe(501);
+      expect(authenticateRequest).toHaveBeenCalledTimes(1);
+    },
+  );
 
   it("does not require an origin for safe methods", async () => {
     const response = await createTestApp(fakeBrowserAuth()).request("/api/notes", {
@@ -328,42 +338,47 @@ describe("protected API origin boundary", () => {
     expect(response.status).toBe(501);
   });
 
-  it("exempts Bearer requests from the cookie origin check", async () => {
-    const authenticateRequest = vi.fn(async () => ({ userId: alice.id }));
-    const app = createTestApp(
-      fakeBrowserAuth({ authenticate: authenticateRequest }),
-      authenticateRequest,
-    );
-    const response = await app.request("/api/notes", {
-      method: "POST",
-      headers: {
-        Cookie: `${SESSION_COOKIE_NAME}=session_fixture`,
-        Authorization: "Bearer fake",
-      },
-    });
-    expect(response.status).toBe(501);
-    expect(authenticateRequest).toHaveBeenCalledTimes(1);
-  });
-
-  it.each(["", "Bearer invalid"])(
-    "does not fall back to the cookie when a Bearer request has no origin: %s",
-    async (authorization) => {
+  it.each(["POST", "PUT", "DELETE"] as const)(
+    "exempts Bearer %s requests from the cookie origin check",
+    async (method) => {
+      const authenticateRequest = vi.fn(async () => ({ userId: alice.id }));
       const app = createTestApp(
-        fakeBrowserAuth(),
-        createRequestAuthenticator(
-          async () => null,
-          async () => ({ userId: alice.id }),
-        ),
+        fakeBrowserAuth({ authenticate: authenticateRequest }),
+        authenticateRequest,
       );
-      const response = await app.request("/api/notes", {
-        method: "POST",
+      const response = await app.request(notesPath(method), {
+        method,
         headers: {
           Cookie: `${SESSION_COOKIE_NAME}=session_fixture`,
-          Authorization: authorization,
+          Authorization: "Bearer fake",
         },
       });
-      expect(response.status).toBe(401);
-      expect(response.headers.get("WWW-Authenticate")).toBe('Bearer realm="atlas"');
+      expect(response.status).toBe(501);
+      expect(authenticateRequest).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it.each(["POST", "PUT", "DELETE"] as const)(
+    "does not fall back to the cookie when a Bearer %s request has no origin",
+    async (method) => {
+      for (const authorization of ["", "Bearer invalid"]) {
+        const app = createTestApp(
+          fakeBrowserAuth(),
+          createRequestAuthenticator(
+            async () => null,
+            async () => ({ userId: alice.id }),
+          ),
+        );
+        const response = await app.request(notesPath(method), {
+          method,
+          headers: {
+            Cookie: `${SESSION_COOKIE_NAME}=session_fixture`,
+            Authorization: authorization,
+          },
+        });
+        expect(response.status).toBe(401);
+        expect(response.headers.get("WWW-Authenticate")).toBe('Bearer realm="atlas"');
+      }
     },
   );
 
