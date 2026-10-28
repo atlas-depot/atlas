@@ -43,7 +43,12 @@ export type BrowserAuth = Readonly<{
     state: string;
     transaction: string | undefined;
   }) => Promise<CompleteLoginResult>;
-  clearLoginTransactionCookie: () => string;
+  cancelLogin: (input: {
+    state: string | undefined;
+    transaction: string | undefined;
+  }) =>
+    | Readonly<{ ok: true; clearTransactionCookie: string }>
+    | Readonly<{ ok: false; error: "invalid_transaction" }>;
   logout: (request: Request) => Promise<{ redirectTo: string; sessionCookie: string }>;
 }>;
 
@@ -99,6 +104,13 @@ export function createBrowserAuth(workos: WorkOS, options: BrowserAuthOptions): 
 
   function appendCookie(headers: Headers | undefined, cookie: string): void {
     headers?.append("Set-Cookie", cookie);
+  }
+
+  function validateTransaction(state: string | undefined, transaction: string | undefined) {
+    if (!state) return null;
+    const parsed = sealer.unseal(transaction, now());
+    if (!parsed || !statesMatch(state, parsed.state)) return null;
+    return parsed;
   }
 
   async function readSession(
@@ -162,8 +174,8 @@ export function createBrowserAuth(workos: WorkOS, options: BrowserAuthOptions): 
 
     completeLogin: async (input) => {
       const clearTransactionCookie = clearLoginTransactionCookie();
-      const transaction = sealer.unseal(input.transaction, now());
-      if (!transaction || !statesMatch(input.state, transaction.state)) {
+      const transaction = validateTransaction(input.state, input.transaction);
+      if (!transaction) {
         return { ok: false, error: "invalid_transaction", clearTransactionCookie };
       }
       try {
@@ -187,7 +199,12 @@ export function createBrowserAuth(workos: WorkOS, options: BrowserAuthOptions): 
       }
     },
 
-    clearLoginTransactionCookie,
+    cancelLogin: (input) => {
+      const clearTransactionCookie = clearLoginTransactionCookie();
+      return validateTransaction(input.state, input.transaction)
+        ? { ok: true, clearTransactionCookie }
+        : { ok: false, error: "invalid_transaction" };
+    },
 
     logout: async (request) => {
       const sealedSession = readCookie(request.headers.get("Cookie"), SESSION_COOKIE_NAME);

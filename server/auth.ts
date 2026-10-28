@@ -3,7 +3,9 @@ import { apiError } from "../shared/http.ts";
 import { SESSION_COOKIE_NAME, readCookie } from "./cookies.ts";
 
 export type AuthenticatedUser = Readonly<{ userId: string }>;
-export type AuthEnv = { Variables: { user: AuthenticatedUser } };
+export type AuthEnv = {
+  Variables: { user: AuthenticatedUser; authResponseHeaders?: Headers };
+};
 
 /**
  * Return null for invalid credentials; throw on authentication-service failures.
@@ -31,6 +33,7 @@ export function requireAuth(authenticateRequest: AuthenticateRequest) {
   return createMiddleware<AuthEnv>(async (c, next) => {
     const responseHeaders = new Headers();
     const user = await authenticateRequest(c.req.raw, responseHeaders);
+    c.set("authResponseHeaders", responseHeaders);
     applyResponseHeaders(c, responseHeaders);
     if (!user) {
       c.header("WWW-Authenticate", 'Bearer realm="atlas"');

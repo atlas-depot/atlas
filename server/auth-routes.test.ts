@@ -23,6 +23,7 @@ type FakeOptions = {
   authenticate?: AuthenticateRequest;
   startLogin?: BrowserAuth["startLogin"];
   completeLogin?: BrowserAuth["completeLogin"];
+  cancelLogin?: BrowserAuth["cancelLogin"];
   readSession?: BrowserAuth["readSession"];
   logout?: BrowserAuth["logout"];
 };
@@ -41,7 +42,12 @@ function fakeBrowserAuth(options: FakeOptions = {}): BrowserAuth {
     completeLogin:
       options.completeLogin ??
       (async () => ({ ok: true, user: alice, sessionCookie, clearTransactionCookie })),
-    clearLoginTransactionCookie: () => clearTransactionCookie,
+    cancelLogin:
+      options.cancelLogin ??
+      ((input) =>
+        input.state === "state_fixture" && input.transaction === "txn"
+          ? { ok: true, clearTransactionCookie }
+          : { ok: false, error: "invalid_transaction" }),
     logout:
       options.logout ??
       (async () => ({
@@ -114,11 +120,24 @@ describe("public authentication routes", () => {
       throw new Error("Callback must not be exchanged");
     });
     const response = await createTestApp(fakeBrowserAuth({ completeLogin })).request(
-      "/api/auth/callback?error=access_denied",
+      "/api/auth/callback?error=access_denied&state=state_fixture",
       { headers: { Cookie: `${LOGIN_TRANSACTION_COOKIE_NAME}=txn` } },
     );
     expect(response.status).toBe(401);
     expect(response.headers.getSetCookie()).toEqual([clearTransactionCookie]);
+    expect(completeLogin).not.toHaveBeenCalled();
+  });
+
+  it("does not clear a pending transaction when a cancelled login has an invalid state", async () => {
+    const completeLogin = vi.fn(async () => {
+      throw new Error("Callback must not be exchanged");
+    });
+    const response = await createTestApp(fakeBrowserAuth({ completeLogin })).request(
+      "/api/auth/callback?error=access_denied&state=wrong-state",
+      { headers: { Cookie: `${LOGIN_TRANSACTION_COOKIE_NAME}=txn` } },
+    );
+    expect(response.status).toBe(403);
+    expect(response.headers.getSetCookie()).toEqual([]);
     expect(completeLogin).not.toHaveBeenCalled();
   });
 
@@ -131,7 +150,7 @@ describe("public authentication routes", () => {
       { headers: { Cookie: `${LOGIN_TRANSACTION_COOKIE_NAME}=txn` } },
     );
     expect(response.status).toBe(400);
-    expect(response.headers.getSetCookie()).toEqual([clearTransactionCookie]);
+    expect(response.headers.getSetCookie()).toEqual([]);
     expect(completeLogin).not.toHaveBeenCalled();
   });
 

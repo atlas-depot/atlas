@@ -280,6 +280,26 @@ describe("WorkOS browser auth with a synthetic provider", () => {
     expect(provider.requests).toEqual([]);
   });
 
+  it("validates the transaction before cancelling a login", async () => {
+    const auth = createAuth();
+    const started = await startLogin(auth);
+    const cancelled = auth.cancelLogin({
+      state: started.state,
+      transaction: started.transaction,
+    });
+    expect(cancelled).toMatchObject({ ok: true });
+    if (!cancelled.ok) return;
+    expect(cancelled.clearTransactionCookie).toContain("Max-Age=0");
+    expect(
+      auth.cancelLogin({ state: "wrong-state", transaction: started.transaction }),
+    ).toMatchObject({ ok: false, error: "invalid_transaction" });
+    expect(auth.cancelLogin({ state: started.state, transaction: "v1.invalid" })).toMatchObject({
+      ok: false,
+      error: "invalid_transaction",
+    });
+    expect(provider.requests).toEqual([]);
+  });
+
   it("maps a rejected authorization code to invalid_code", async () => {
     provider.codeError = true;
     const auth = createAuth();

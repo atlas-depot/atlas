@@ -27,13 +27,21 @@ export function createAuthRoutes(browserAuth: BrowserAuth, options: { appOrigin:
   routes.get("/callback", async (c) => {
     const transaction = readCookie(c.req.header("Cookie") ?? null, LOGIN_TRANSACTION_COOKIE_NAME);
     if (c.req.query("error")) {
-      c.header("Set-Cookie", browserAuth.clearLoginTransactionCookie(), { append: true });
+      const state = c.req.query("state");
+      const canceled = browserAuth.cancelLogin({ state, transaction });
+      if (!canceled.ok) {
+        return c.json(apiError("FORBIDDEN", "Sign in state is invalid or expired."), 403);
+      }
+      c.header("Set-Cookie", canceled.clearTransactionCookie, { append: true });
       return c.json(apiError("UNAUTHENTICATED", "Sign in could not be completed."), 401);
     }
     const code = c.req.query("code");
     const state = c.req.query("state");
     if (!code || !state) {
-      c.header("Set-Cookie", browserAuth.clearLoginTransactionCookie(), { append: true });
+      const canceled = browserAuth.cancelLogin({ state, transaction });
+      if (canceled.ok) {
+        c.header("Set-Cookie", canceled.clearTransactionCookie, { append: true });
+      }
       return c.json(apiError("VALIDATION_ERROR", "Sign in callback is incomplete."), 400);
     }
 
