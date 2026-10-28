@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { describe, expect, it, onTestFinished, vi } from "vite-plus/test";
 import { createApp } from "./app.ts";
-import { requireAuth, type AuthEnv } from "./auth.ts";
+import { createRequestAuthenticator, requireAuth, type AuthEnv } from "./auth.ts";
 
 describe("Hono authentication boundary", () => {
   it.each([
@@ -73,5 +73,34 @@ describe("Hono authentication boundary", () => {
     app.get("/identity", (c) => c.json(c.get("user")));
     const response = await app.request("/identity?userId=forged");
     expect(await response.json()).toEqual({ userId: "verified-user" });
+  });
+
+  it("uses Bearer verification exclusively when Authorization is present", async () => {
+    const bearer = vi.fn(async () => null);
+    const browser = vi.fn(async () => ({ userId: "cookie-user" }));
+    const response = await createApp(createRequestAuthenticator(bearer, browser)).request(
+      "/api/notes",
+      {
+        headers: {
+          Authorization: "Bearer invalid",
+          Cookie: "atlas_session=valid-looking-cookie",
+        },
+      },
+    );
+    expect(response.status).toBe(401);
+    expect(bearer).toHaveBeenCalledTimes(1);
+    expect(browser).not.toHaveBeenCalled();
+  });
+
+  it("uses the browser session only when Authorization is absent", async () => {
+    const bearer = vi.fn(async () => ({ userId: "bearer-user" }));
+    const browser = vi.fn(async () => ({ userId: "cookie-user" }));
+    const response = await createApp(createRequestAuthenticator(bearer, browser)).request(
+      "/api/notes",
+      { headers: { Cookie: "atlas_session=valid-looking-cookie" } },
+    );
+    expect(response.status).toBe(501);
+    expect(browser).toHaveBeenCalledTimes(1);
+    expect(bearer).not.toHaveBeenCalled();
   });
 });

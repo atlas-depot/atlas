@@ -1,17 +1,30 @@
 import { Hono } from "hono";
 import { routePath } from "hono/route";
 import { apiError } from "../shared/http.ts";
-import { requireAuth, type AuthenticateRequest, type AuthEnv } from "./auth.ts";
+import {
+  requireAuth,
+  requireCookieRequestOrigin,
+  type AuthenticateRequest,
+  type AuthEnv,
+} from "./auth.ts";
 import { createNoteRoutes } from "./notes.ts";
 
-export function createApp(authenticateRequest: AuthenticateRequest) {
+export type AppOptions = Readonly<{
+  authRoutes?: Hono;
+  appOrigin?: string;
+}>;
+
+export function createApp(authenticateRequest: AuthenticateRequest, options: AppOptions = {}) {
   const app = new Hono();
 
   app.use("*", async (c, next) => {
     c.header("Cache-Control", "no-store");
     await next();
   });
+  if (options.appOrigin) app.use("/api/*", requireCookieRequestOrigin(options.appOrigin));
   app.get("/api/health", (c) => c.json({ status: "ok" }));
+
+  if (options.authRoutes) app.route("/api/auth", options.authRoutes);
 
   const api = new Hono<AuthEnv>();
   api.use("*", requireAuth(authenticateRequest));
