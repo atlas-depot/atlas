@@ -75,22 +75,25 @@ describe("Hono authentication boundary", () => {
     expect(await response.json()).toEqual({ userId: "verified-user" });
   });
 
-  it("uses Bearer verification exclusively when Authorization is present", async () => {
-    const bearer = vi.fn(async () => null);
-    const browser = vi.fn(async () => ({ userId: "cookie-user" }));
-    const response = await createApp(createRequestAuthenticator(bearer, browser)).request(
-      "/api/notes",
-      {
-        headers: {
-          Authorization: "Bearer invalid",
-          Cookie: "atlas_session=valid-looking-cookie",
+  it.each(["", "Bearer invalid"])(
+    "uses Bearer verification exclusively when Authorization is present: %s",
+    async (authorization) => {
+      const bearer = vi.fn(async () => null);
+      const browser = vi.fn(async () => ({ userId: "cookie-user" }));
+      const response = await createApp(createRequestAuthenticator(bearer, browser)).request(
+        "/api/notes",
+        {
+          headers: {
+            Authorization: authorization,
+            Cookie: "atlas_session=valid-looking-cookie",
+          },
         },
-      },
-    );
-    expect(response.status).toBe(401);
-    expect(bearer).toHaveBeenCalledTimes(1);
-    expect(browser).not.toHaveBeenCalled();
-  });
+      );
+      expect(response.status).toBe(401);
+      expect(bearer).toHaveBeenCalledTimes(1);
+      expect(browser).not.toHaveBeenCalled();
+    },
+  );
 
   it("uses the browser session only when Authorization is absent", async () => {
     const bearer = vi.fn(async () => ({ userId: "bearer-user" }));

@@ -172,20 +172,23 @@ describe("public authentication routes", () => {
     expect(await response.json()).toMatchObject({ error: { code: "UNAUTHENTICATED" } });
   });
 
-  it("never falls back to the cookie when session receives Bearer credentials", async () => {
-    const readSession = vi.fn(async () => alice);
-    const response = await createTestApp(fakeBrowserAuth({ readSession })).request(
-      "/api/auth/session",
-      {
-        headers: {
-          Cookie: `${SESSION_COOKIE_NAME}=session_fixture`,
-          Authorization: "Bearer fake",
+  it.each(["", "Bearer fake"])(
+    "never falls back to the cookie when session receives Bearer credentials: %s",
+    async (authorization) => {
+      const readSession = vi.fn(async () => alice);
+      const response = await createTestApp(fakeBrowserAuth({ readSession })).request(
+        "/api/auth/session",
+        {
+          headers: {
+            Cookie: `${SESSION_COOKIE_NAME}=session_fixture`,
+            Authorization: authorization,
+          },
         },
-      },
-    );
-    expect(response.status).toBe(401);
-    expect(readSession).not.toHaveBeenCalled();
-  });
+      );
+      expect(response.status).toBe(401);
+      expect(readSession).not.toHaveBeenCalled();
+    },
+  );
 
   it("applies a refreshed cookie from the session reader", async () => {
     const readSession: BrowserAuth["readSession"] = async (_request, headers) => {
@@ -237,23 +240,29 @@ describe("public authentication routes", () => {
     },
   );
 
-  it("does not use the cookie session for Bearer logout requests", async () => {
-    const logout = vi.fn(async () => ({
-      redirectTo: appOrigin,
-      sessionCookie: clearSessionCookie,
-    }));
-    const response = await createTestApp(fakeBrowserAuth({ logout })).request("/api/auth/logout", {
-      method: "POST",
-      headers: {
-        Origin: appOrigin,
-        Cookie: `${SESSION_COOKIE_NAME}=session_fixture`,
-        Authorization: "Bearer fake",
-      },
-    });
-    expect(response.status).toBe(401);
-    expect(response.headers.get("WWW-Authenticate")).toBe('Bearer realm="atlas"');
-    expect(logout).not.toHaveBeenCalled();
-  });
+  it.each(["", "Bearer fake"])(
+    "does not use the cookie session for Bearer logout requests: %s",
+    async (authorization) => {
+      const logout = vi.fn(async () => ({
+        redirectTo: appOrigin,
+        sessionCookie: clearSessionCookie,
+      }));
+      const response = await createTestApp(fakeBrowserAuth({ logout })).request(
+        "/api/auth/logout",
+        {
+          method: "POST",
+          headers: {
+            Origin: appOrigin,
+            Cookie: `${SESSION_COOKIE_NAME}=session_fixture`,
+            Authorization: authorization,
+          },
+        },
+      );
+      expect(response.status).toBe(401);
+      expect(response.headers.get("WWW-Authenticate")).toBe('Bearer realm="atlas"');
+      expect(logout).not.toHaveBeenCalled();
+    },
+  );
 });
 
 describe("protected API origin boundary", () => {
@@ -317,24 +326,27 @@ describe("protected API origin boundary", () => {
     expect(authenticateRequest).toHaveBeenCalledTimes(1);
   });
 
-  it("does not fall back to the cookie when an invalid Bearer request has no origin", async () => {
-    const app = createTestApp(
-      fakeBrowserAuth(),
-      createRequestAuthenticator(
-        async () => null,
-        async () => ({ userId: alice.id }),
-      ),
-    );
-    const response = await app.request("/api/notes", {
-      method: "POST",
-      headers: {
-        Cookie: `${SESSION_COOKIE_NAME}=session_fixture`,
-        Authorization: "Bearer invalid",
-      },
-    });
-    expect(response.status).toBe(401);
-    expect(response.headers.get("WWW-Authenticate")).toBe('Bearer realm="atlas"');
-  });
+  it.each(["", "Bearer invalid"])(
+    "does not fall back to the cookie when a Bearer request has no origin: %s",
+    async (authorization) => {
+      const app = createTestApp(
+        fakeBrowserAuth(),
+        createRequestAuthenticator(
+          async () => null,
+          async () => ({ userId: alice.id }),
+        ),
+      );
+      const response = await app.request("/api/notes", {
+        method: "POST",
+        headers: {
+          Cookie: `${SESSION_COOKIE_NAME}=session_fixture`,
+          Authorization: authorization,
+        },
+      });
+      expect(response.status).toBe(401);
+      expect(response.headers.get("WWW-Authenticate")).toBe('Bearer realm="atlas"');
+    },
+  );
 
   it("applies refreshed cookies from the authenticator to protected responses", async () => {
     const authenticateRequest: AuthenticateRequest = async (_request, headers) => {

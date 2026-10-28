@@ -265,6 +265,12 @@ describe("WorkOS browser auth with a synthetic provider", () => {
       ok: false,
       error: "invalid_transaction",
     });
+    const shortTag = started.transaction.split(".");
+    shortTag[3] = Buffer.from([1, 2, 3, 4]).toString("base64url");
+    expect(await complete(auth, started, { transaction: shortTag.join(".") })).toMatchObject({
+      ok: false,
+      error: "invalid_transaction",
+    });
     const expiredAuth = createAuth({ transactionTtlSeconds: -1 });
     const expired = await startLogin(expiredAuth);
     expect(await complete(expiredAuth, expired)).toMatchObject({

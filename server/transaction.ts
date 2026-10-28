@@ -52,9 +52,12 @@ export function createTransactionSealer(password: string) {
       const [version, iv, ciphertext, tag, ...extra] = value.split(".");
       if (version !== VERSION || !iv || !ciphertext || !tag || extra.length > 0) return null;
       try {
-        const decipher = createDecipheriv("aes-256-gcm", key, Buffer.from(iv, "base64url"));
+        const ivBytes = Buffer.from(iv, "base64url");
+        const tagBytes = Buffer.from(tag, "base64url");
+        if (ivBytes.length !== 12 || tagBytes.length !== 16) return null;
+        const decipher = createDecipheriv("aes-256-gcm", key, ivBytes);
         decipher.setAAD(AAD);
-        decipher.setAuthTag(Buffer.from(tag, "base64url"));
+        decipher.setAuthTag(tagBytes);
         const plaintext = Buffer.concat([
           decipher.update(Buffer.from(ciphertext, "base64url")),
           decipher.final(),

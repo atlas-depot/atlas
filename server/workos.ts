@@ -1,7 +1,7 @@
 import type { WorkOS } from "@workos-inc/node";
 import type { AuthenticateRequest } from "./auth.ts";
 
-/** Verifies access tokens offline; session revocation takes effect at token expiry. */
+/** Verifies signatures locally against the client JWKS fetched over HTTPS; revocation takes effect at token expiry. */
 export function createBearerAuthenticator(workos: WorkOS): AuthenticateRequest {
   return async (request) => {
     const authorization = request.headers.get("Authorization");

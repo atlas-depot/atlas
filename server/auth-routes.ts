@@ -52,7 +52,7 @@ export function createAuthRoutes(browserAuth: BrowserAuth, options: { appOrigin:
 
   routes.get("/session", async (c) => {
     // Bearer credentials never fall back to the ambient cookie on this route.
-    if (c.req.header("Authorization")) return unauthorized(c);
+    if (c.req.raw.headers.has("Authorization")) return unauthorized(c);
     const responseHeaders = new Headers();
     const user = await browserAuth.readSession(c.req.raw, responseHeaders);
     applyResponseHeaders(c, responseHeaders);
@@ -63,7 +63,7 @@ export function createAuthRoutes(browserAuth: BrowserAuth, options: { appOrigin:
   routes.post("/logout", async (c) => {
     // Logout is a browser-session operation; Bearer credentials never fall
     // back to the ambient cookie on this route.
-    if (c.req.header("Authorization")) return unauthorized(c);
+    if (c.req.raw.headers.has("Authorization")) return unauthorized(c);
     const { redirectTo, sessionCookie } = await browserAuth.logout(c.req.raw);
     c.header("Set-Cookie", sessionCookie, { append: true });
     return c.redirect(redirectTo, 303);

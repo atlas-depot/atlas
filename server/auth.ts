@@ -66,9 +66,10 @@ export function requireCookieRequestOrigin(appOrigin: string) {
   return createMiddleware(async (c, next) => {
     const method = c.req.method.toUpperCase();
     const unsafe = method !== "GET" && method !== "HEAD" && method !== "OPTIONS";
+    const authorizationPresent = c.req.raw.headers.has("Authorization");
     const cookiePresent =
       readCookie(c.req.header("Cookie") ?? null, SESSION_COOKIE_NAME) !== undefined;
-    if (unsafe && !c.req.header("Authorization") && cookiePresent) {
+    if (unsafe && !authorizationPresent && cookiePresent) {
       if (c.req.header("Origin") !== appOrigin) {
         return c.json(apiError("FORBIDDEN", "Request origin is not allowed."), 403);
       }
