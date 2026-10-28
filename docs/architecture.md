@@ -1,6 +1,6 @@
 # Architecture
 
-Atlas has a React/TypeScript source viewer and a local Hono API. Health, the public authentication routes and the protected API boundary run. WorkOS browser sign-in stores only a sealed HttpOnly session cookie; note persistence and the agent-backed product flow are not connected yet.
+Atlas has a React/TypeScript source viewer and a local Hono API. Health, the public authentication routes and the protected API boundary run. WorkOS browser sign-in uses a short-lived sealed `atlas_login_transaction` cookie during login and stores only the sealed HttpOnly `atlas_session` cookie after the callback; note persistence and the agent-backed product flow are not connected yet.
 
 ## Accepted decisions
 
@@ -21,7 +21,7 @@ File storage, connector adapters, memory storage and the product model remain op
 
 The notes sprint covers online personal notes, explicit Save, Markdown source and preview, followed by a user-triggered AI draft kept separate from the original. Offline synchronization, live collaboration, PDF import, connectors, search and richer generated views are outside this batch.
 
-The executable provides public health and authentication routes plus a protected API boundary. Requests without a verified Bearer token or browser session are rejected. Tests inject a trusted identity; authenticated note operations return `501` until persistence is connected. Terminal invalid or expired sessions return `401`; a successful browser refresh returns `200` with a resealed cookie. Rejected cookie-origin checks return `403`. Provider outages during verification or refresh return `500`; logout falls back to clearing the local cookie and redirecting to `APP_ORIGIN` when WorkOS cannot confirm the session.
+The executable provides public health and authentication routes plus a protected API boundary. Protected API requests without a verified Bearer token or browser session are rejected. Tests inject a trusted identity; authenticated note operations return `501` until persistence is connected. Terminal invalid or expired sessions return `401`; a successful browser refresh returns `200` with a resealed cookie. Rejected cookie-origin checks return `403`. Provider outages during verification or refresh return `500`; logout falls back to clearing the local cookie and redirecting to `APP_ORIGIN` when WorkOS cannot confirm the session.
 
 `server/browser-auth.ts` owns hosted AuthKit PKCE, the sealed `atlas_session` cookie, refresh and WorkOS logout. `server/workos.ts` verifies Bearer signatures locally against the client JWKS fetched and cached over HTTPS; a JWKS outage is a server failure. `server/auth.ts` keeps one protected boundary and enforces Bearer-versus-cookie precedence; an `Authorization` header never falls back to the cookie. Browser tokens stay inside the HttpOnly cookie and are never returned by the session route.
 
