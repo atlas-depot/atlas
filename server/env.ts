@@ -15,7 +15,15 @@ const workosSchema = z.object({
 });
 
 const browserAuthSchema = workosSchema.extend({
-  APP_ORIGIN: z.url({ protocol: /^https?$/ }).refine((value) => new URL(value).origin === value),
+  APP_ORIGIN: z
+    .url({ protocol: /^https?$/ })
+    .refine((value) => new URL(value).origin === value)
+    .refine((value) => {
+      const url = new URL(value);
+      return (
+        url.protocol === "https:" || ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname)
+      );
+    }),
   WORKOS_API_KEY: z.string().min(1).max(512).regex(/^\S+$/),
   WORKOS_COOKIE_PASSWORD: z.string().min(32).max(512),
 });

@@ -61,6 +61,30 @@ it("accepts the complete browser sign-in configuration", () => {
   });
 });
 
+it.each([
+  "https://app.example.test",
+  "http://localhost:5173",
+  "http://127.0.0.1:5173",
+  "http://[::1]:5173",
+])("accepts HTTPS or a local development origin: %s", (appOrigin) => {
+  expect(readServerEnv({ ...browserSettings, APP_ORIGIN: appOrigin })).toMatchObject({
+    browserAuth: { appOrigin },
+  });
+});
+
+it.each([
+  "http://app.example.test",
+  "http://192.168.1.10:5173",
+  "http://0.0.0.0:5173",
+  "http://localhost.example.test:5173",
+  "http://127.0.0.1.example.test:5173",
+  "http://[::]:5173",
+])("rejects non-loopback HTTP browser origins: %s", (appOrigin) => {
+  expect(() => readServerEnv({ ...browserSettings, APP_ORIGIN: appOrigin })).toThrow(
+    /^Set APP_ORIGIN, WORKOS_API_KEY, WORKOS_CLIENT_ID, WORKOS_COOKIE_PASSWORD and WORKOS_ISSUER to valid WorkOS browser sign-in values\.$/,
+  );
+});
+
 it("rejects incomplete or non-canonical browser sign-in settings without echoing values", () => {
   const settings = [
     { APP_ORIGIN: "https://app.example.test" },
