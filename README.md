@@ -1,40 +1,28 @@
 # Atlas
 
-A personal assistant for scattered context: user-written notes, connected sources, useful memory, and approved actions through chat.
+A personal assistant for scattered context: notes, connected sources and useful memory.
 
-## Current status
-
-Atlas has a minimal React/TypeScript web scaffold.
-The app currently renders the Atlas heading and introduction. Agent and provider integrations are not implemented.
-Vite+ provides development tooling. Eve is the agent-runtime direction to validate.
-UI direction and remaining backend choices will be reviewed with the team before they become implementation contracts.
-
-## Read what you need
-
-- [Product](docs/product.md): intended use, scope, and decisions still open.
-- [Architecture](docs/architecture.md): responsibility boundaries and candidate implementation.
-- [Development](docs/development.md): local setup, environments, and current infrastructure gaps.
-- [Contributing](docs/contributing.md): small PRs, human review, and parallel work that integrates into main.
-- [Security](docs/security.md): identity, connected accounts, memory, and external actions.
-- [Project log](docs/project-log.md): optional template for contribution and academic evidence.
-
-Older design prototypes under `docs/prototypes/` are historical experiments, not the selected UI.
-Use Git history for superseded plans rather than treating them as current requirements.
+Atlas currently has a React/TypeScript source viewer and a local Hono API scaffold. WorkOS sign-in and Neon persistence are not connected yet. The [architecture](docs/architecture.md) separates accepted decisions from implemented behavior.
 
 ## Start development
 
-Use Node `24.22.0` LTS and pnpm `11.23.0`, pinned in `.node-version` and `package.json`.
+Use Node `24.22.0` and pnpm `11.23.0`:
 
 ```sh
 pnpm install --frozen-lockfile
+pnpm --dir experiments/eve-openrouter install --frozen-lockfile
 pnpm dev
 ```
 
-Run `pnpm check` for formatting, lint and type checks, and `pnpm build` for the production bundle. See [development setup](docs/development.md) for all commands and dependency notes.
+For the API, run `cp -n .env.example .env` once and `pnpm dev:api` in another terminal. See [local API setup](docs/development.md#local-api) for ports and authentication status.
 
-`pnpm test` runs the fixture parser tests in `src/fixtures/parse-fixtures.test.ts` with Vite+'s bundled Vitest runner ([#22](https://github.com/atlas-depot/atlas/issues/22)). A run that finds no test files is not passing evidence.
+Run `pnpm check`, `pnpm test` and `pnpm build` before review. See [development](docs/development.md) for browser tests, coverage and CI boundaries. Independent PRs target `main`, need human review and require Efe's merge decision under [contributing](docs/contributing.md).
 
-CI runs format, lint, typecheck and build checks on pull requests through the `verify` check in `.github/workflows/ci.yml`. There is no test job yet. Deployment setup remains separate work.
-Independent PRs target `main`. Dependent PRs can target their parent branch for development and review. Follow [the parallel-work procedure](docs/process/parallel-work.md) before integrating each PR into `main`. A human teammate reviews and Efe decides whether to merge. Vercel project linkage and deployments still need separate configuration and verification.
+## Project references
 
-Agents start with [AGENTS.md](AGENTS.md).
+- [Product](docs/product.md): intended use and open product decisions.
+- [Architecture](docs/architecture.md): stack, responsibilities and current scope.
+- [Note schemas](shared/notes.ts): field contracts and API semantics.
+- [Security](docs/security.md): identity, sources, credentials and action policy.
+
+Older UI prototypes are historical references, not the selected design. Agents start with [AGENTS.md](AGENTS.md).
