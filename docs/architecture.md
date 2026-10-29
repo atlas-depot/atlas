@@ -1,6 +1,6 @@
 # Architecture
 
-Atlas has a React/TypeScript source viewer and a local Hono API. Health, the public authentication routes and the protected API boundary run. WorkOS browser sign-in uses a short-lived sealed `atlas_login_transaction` cookie during login and stores only the sealed HttpOnly `atlas_session` cookie after the callback; note persistence and the agent-backed product flow are not connected yet.
+Atlas has a React/TypeScript notes editor development preview and a local Hono API. Health, the public authentication routes and the protected API boundary run. WorkOS browser sign-in uses a short-lived sealed `atlas_login_transaction` cookie during login and stores only the sealed HttpOnly `atlas_session` cookie after the callback; note persistence and the agent-backed product flow are not connected yet.
 
 ## Accepted decisions
 
@@ -25,14 +25,14 @@ The executable provides public health and authentication routes plus a protected
 
 `server/browser-auth.ts` owns hosted AuthKit PKCE, the sealed `atlas_session` cookie, refresh and WorkOS logout. `server/workos.ts` verifies Bearer signatures locally against the client JWKS fetched and cached over HTTPS; a JWKS outage is a server failure. `server/auth.ts` keeps one protected boundary and enforces Bearer-versus-cookie precedence; an `Authorization` header never falls back to the cookie. Browser tokens stay inside the HttpOnly cookie and are never returned by the session route.
 
-Deterministic tests use a synthetic provider and a local fake WorkOS API; they cover state, PKCE, refresh outcomes, logout, account replacement, CSRF and Bearer precedence. Live Google and email/password verification, five-person dashboard access, failed/cancelled login and provider recovery succeeded against WorkOS Staging; the notes UI remains pending.
+Deterministic tests use a synthetic provider and a local fake WorkOS API; they cover state, PKCE, refresh outcomes, logout, account replacement, CSRF and Bearer precedence. Live Google and email/password verification, five-person dashboard access, failed/cancelled login and provider recovery succeeded against WorkOS Staging; the notes API connection remains pending. The #48 editor has a development/test preview with a note list, Markdown editing, safe preview and explicit Save. Its normal production state reports that notes are not connected; #52 owns persistence integration.
 
 The [note schemas](../shared/notes.ts) own the payload and timestamp contract. [HTTP schemas](../shared/http.ts) own errors and conditional-write headers. [Session schemas](../shared/auth.ts) own the browser-safe identity returned by `GET /api/auth/session`.
 
 ## Responsibility boundaries
 
 ```text
-src/            React application and source viewer
+src/            React notes workspace and development-only source viewer
 server/         HTTP routing, authentication and backend operations
 shared/         Browser-safe schemas and types
 experiments/    Isolated experiments with separate setup

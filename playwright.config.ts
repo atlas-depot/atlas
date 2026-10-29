@@ -12,12 +12,14 @@ export default defineConfig({
   reporter: process.env.CI ? "github" : "list",
   use: {
     baseURL,
+    channel: process.env.PLAYWRIGHT_CHANNEL,
     trace: "retain-on-failure",
   },
   projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
   webServer: {
     command: `npm run build && npm run preview -- --host ${host} --port ${port} --strictPort`,
     url: baseURL,
+    env: { VITE_NOTES_DEMO: "true" },
     // Never reuse a server: a leftover preview serves an older build, so the test
     // would pass against stale output. An occupied port must fail explicitly.
     reuseExistingServer: false,

@@ -19,10 +19,13 @@
   },
   "dependencies": {
     "@hono/node-server": "2.1.5",
+    "@radix-ui/themes": "3.3.0",
     "@workos-inc/node": "12.0.0",
     "hono": "4.13.14",
     "react": "19.2.8",
     "react-dom": "19.2.8",
+    "react-markdown": "10.1.0",
+    "remark-gfm": "4.0.1",
     "zod": "4.6.7"
   },
   "devDependencies": {

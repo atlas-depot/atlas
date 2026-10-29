@@ -12,7 +12,7 @@ const messageSource = {
 const noteSourceContent = "Prepare the budget summary before the project review.";
 
 test("a source reference opens the external message it targets", async ({ page }) => {
-  await page.goto("/");
+  await page.goto("/?example=briefing");
 
   await expect(page.getByText("Select a source link to see where this came from.")).toBeVisible();
 

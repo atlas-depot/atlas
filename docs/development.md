@@ -100,6 +100,19 @@ Staging configuration recorded on 2026-10-28:
 
 Install Chromium once with `pnpm exec playwright install chromium`. Playwright builds the frontend and serves it on `127.0.0.1:4177` without reusing an existing server. An occupied port fails the run. CI retains a trace on failure. For visible UI changes, also verify mobile width, desktop and keyboard behavior.
 
+### Notes editor development preview
+
+The notes workspace uses Radix Themes components with their default styling. This is a functional composition for #48, not a settled product visual identity. The Markdown preview uses pinned react-markdown 10.1.0 and remark-gfm 4.0.1, following the [renderer security guidance](https://github.com/remarkjs/react-markdown#security) and [GFM plugin guidance](https://github.com/remarkjs/remark-gfm). Raw HTML is skipped, safe URL defaults remain enabled, and images are omitted to prevent unsolicited remote image requests.
+
+Run `pnpm dev` for synthetic notes stored only in tab memory. Saves are explicit (Save or Ctrl/Cmd+S); reload resets the examples. The screen labels this limitation. `?notesExample=empty`, `load-failure`, `save-failure` and `slow-save` provide development/test states. The older source-link example remains at `?example=briefing` for its regression test.
+
+A normal production build excludes these example entrypoints and displays the connection-pending state. No note persistence, browser storage or authentication UI is introduced here. #52 supplies the real API adapter through `NotesStore` in `src/notes/notes-store.ts`: `list()` returns validated notes and `save()` acknowledges only its submitted snapshot. That adapter must distinguish create/update, use the shared payload schemas, retain response ETags for If-Match and handle authentication, not-found and conflict errors without overwriting unsaved input. The interface does not replace server ownership enforcement.
+
+Playwright explicitly enables `VITE_NOTES_DEMO=true` for its own build. Its tests cover load recovery, an empty list/new note, literal Markdown, safe rendering, Save and both shortcuts, save failure/retry, edits during save, dirty-note navigation, beforeunload, desktop and a 375px mobile viewport. Screenshots are written to the relevant `test-results/` test directory. This is simulated storage, not API or database evidence.
+
+If the managed Chromium download is unavailable, set `PLAYWRIGHT_CHANNEL=msedge` or `chrome` to test an already-installed browser, then run `pnpm test:e2e`. Leave the variable unset for the default Playwright Chromium and CI. The browser channel is a local verification choice, not a change to the supported product browsers.
+
+
 ### Optional pre-push hook
 
 Enable the repository hook with `git config --local core.hooksPath .githooks`. This replaces any existing hook path in the clone; integrate it manually if another hook manager is in use. Disable it with `git config --local --unset core.hooksPath`.
