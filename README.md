@@ -2,7 +2,7 @@
 
 A personal assistant for scattered context: notes, connected sources and useful memory.
 
-Atlas currently has a React/TypeScript source viewer and a local Hono API. The WorkOS browser sign-in routes and protected API boundary are implemented and were verified live against the WorkOS Staging environment; five-person dashboard access and Neon persistence remain pending. The [architecture](docs/architecture.md) separates accepted decisions from implemented behavior.
+Atlas currently has a React/TypeScript source viewer and a local Hono API. The WorkOS browser sign-in routes and protected API boundary are implemented and were verified live against the WorkOS Staging environment, including five-person dashboard access; Neon persistence remains pending. The [architecture](docs/architecture.md) separates accepted decisions from implemented behavior.
 
 ## Start development
 

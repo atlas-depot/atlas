@@ -58,7 +58,7 @@ The public browser routes are `GET /api/auth/login`, `GET /api/auth/callback`, `
 
 Cookie-authenticated unsafe requests, including logout, require an exact `Origin` match with `APP_ORIGIN`; a missing or mismatched origin returns `403`. Bearer requests are exempt because they do not use ambient cookie identity, and an `Authorization` header never falls back to the cookie. Do not add credentialed cross-origin CORS for this same-origin application.
 
-Deterministic tests use a synthetic provider and never call WorkOS. A separate live development-provider smoke must record Google and email/password sign-in, signup/email verification as configured, cancelled login, the provider recovery path, session refresh, logout and account switching. Do not record keys, cookies or passwords. Each teammate needs their own WorkOS dashboard account; confirm that access and any paid requirement before treating browser sign-in as accepted.
+Deterministic tests use a synthetic provider and never call WorkOS. A separate live development-provider smoke must record Google and email/password sign-in, signup/email verification as configured, cancelled login, the provider recovery path, session refresh, logout and account switching. Do not record keys, cookies or passwords. All five teammates accepted their WorkOS dashboard accounts in Staging on 2026-10-29; no paid seat requirement appeared.
 
 For concurrent worktrees, set different `API_PORT` values and frontend ports, for example `pnpm dev --host 127.0.0.1 --port 5177 --strictPort`. Stop both processes with Ctrl-C. Production routing is separate configuration.
 
@@ -79,6 +79,7 @@ Run against the WorkOS Staging environment with the environment client ID on 202
 - Logout followed the WorkOS logout flow, returned to the application origin, and `/api/auth/session` then returned `401`.
 - After the five-minute access token expired, a session request returned `200` with a new `Set-Cookie`, exercising refresh and resealing.
 - Account switching replaced the Google session with the email/password session.
+- All five teammates accepted the WorkOS dashboard invite and show as active in Staging; no paid seat requirement appeared.
 - Cancelled login, a failed credential attempt and the provider recovery path remain pending; this section does not claim them.
 - CSRF rejection and Bearer-versus-cookie precedence remain covered by deterministic tests because a browser cannot set the `Origin` header or a forged Bearer token for a live check.
 
