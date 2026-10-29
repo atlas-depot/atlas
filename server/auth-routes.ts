@@ -46,14 +46,15 @@ export function createAuthRoutes(browserAuth: BrowserAuth, options: { appOrigin:
     }
 
     const result = await browserAuth.completeLogin({ code, state, transaction });
-    c.header("Set-Cookie", result.clearTransactionCookie, { append: true });
     if (!result.ok) {
       if (result.error === "invalid_transaction") {
         return c.json(apiError("FORBIDDEN", "Sign in state is invalid or expired."), 403);
       }
+      c.header("Set-Cookie", result.clearTransactionCookie, { append: true });
       return c.json(apiError("UNAUTHENTICATED", "Sign in could not be completed."), 401);
     }
 
+    c.header("Set-Cookie", result.clearTransactionCookie, { append: true });
     c.header("Set-Cookie", result.sessionCookie, { append: true });
     return c.redirect(home, 303);
   });

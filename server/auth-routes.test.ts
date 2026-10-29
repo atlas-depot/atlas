@@ -163,7 +163,7 @@ describe("public authentication routes", () => {
     async (error) => {
       const result =
         error === "invalid_transaction"
-          ? { ok: false as const, error: "invalid_transaction" as const, clearTransactionCookie }
+          ? { ok: false as const, error: "invalid_transaction" as const }
           : { ok: false as const, error: "invalid_code" as const, clearTransactionCookie };
       const response = await createTestApp(
         fakeBrowserAuth({ completeLogin: async () => result }),
@@ -171,10 +171,34 @@ describe("public authentication routes", () => {
         headers: { Cookie: `${LOGIN_TRANSACTION_COOKIE_NAME}=txn` },
       });
       expect(response.status).toBe(error === "invalid_transaction" ? 403 : 401);
-      expect(response.headers.getSetCookie()).toEqual([clearTransactionCookie]);
+      expect(response.headers.getSetCookie()).toEqual(
+        error === "invalid_transaction" ? [] : [clearTransactionCookie],
+      );
       expect(await response.text()).not.toContain("provider");
     },
   );
+
+  it("preserves the transaction after a wrong-state callback and completes the valid callback", async () => {
+    const completeLogin: BrowserAuth["completeLogin"] = vi.fn(async (input) => {
+      if (input.state !== "state_fixture") {
+        return { ok: false as const, error: "invalid_transaction" as const };
+      }
+      return { ok: true as const, user: alice, sessionCookie, clearTransactionCookie };
+    });
+    const app = createTestApp(fakeBrowserAuth({ completeLogin }));
+    const headers = { Cookie: `${LOGIN_TRANSACTION_COOKIE_NAME}=txn` };
+    const wrong = await app.request("/api/auth/callback?code=anything&state=wrong", {
+      headers,
+    });
+    expect(wrong.status).toBe(403);
+    expect(wrong.headers.getSetCookie()).toEqual([]);
+    const valid = await app.request("/api/auth/callback?code=code_fixture&state=state_fixture", {
+      headers,
+    });
+    expect(valid.status).toBe(303);
+    expect(valid.headers.getSetCookie()).toEqual([clearTransactionCookie, sessionCookie]);
+    expect(completeLogin).toHaveBeenCalledTimes(2);
+  });
 
   it("returns the browser session without tokens", async () => {
     const response = await createTestApp(fakeBrowserAuth()).request("/api/auth/session", {

@@ -30,7 +30,11 @@ export type CompleteLoginResult =
     }>
   | Readonly<{
       ok: false;
-      error: "invalid_transaction" | "invalid_code";
+      error: "invalid_transaction";
+    }>
+  | Readonly<{
+      ok: false;
+      error: "invalid_code";
       clearTransactionCookie: string;
     }>;
 
@@ -176,7 +180,8 @@ export function createBrowserAuth(workos: WorkOS, options: BrowserAuthOptions): 
       const clearTransactionCookie = clearLoginTransactionCookie();
       const transaction = validateTransaction(input.state, input.transaction);
       if (!transaction) {
-        return { ok: false, error: "invalid_transaction", clearTransactionCookie };
+        // Preserve the pending transaction so a valid callback can still complete.
+        return { ok: false, error: "invalid_transaction" };
       }
       try {
         const response = await workos.userManagement.authenticateWithCode({
