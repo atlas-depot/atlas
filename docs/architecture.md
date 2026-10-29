@@ -25,7 +25,7 @@ The executable provides public health and authentication routes plus a protected
 
 `server/browser-auth.ts` owns hosted AuthKit PKCE, the sealed `atlas_session` cookie, refresh and WorkOS logout. `server/workos.ts` verifies Bearer signatures locally against the client JWKS fetched and cached over HTTPS; a JWKS outage is a server failure. `server/auth.ts` keeps one protected boundary and enforces Bearer-versus-cookie precedence; an `Authorization` header never falls back to the cookie. Browser tokens stay inside the HttpOnly cookie and are never returned by the session route.
 
-Deterministic tests use a synthetic provider and a local fake WorkOS API; they cover state, PKCE, refresh outcomes, logout, account replacement, CSRF and Bearer precedence. Live Google and email/password verification and five-person dashboard access succeeded against WorkOS Staging; cancelled login, provider recovery and the notes UI remain pending.
+Deterministic tests use a synthetic provider and a local fake WorkOS API; they cover state, PKCE, refresh outcomes, logout, account replacement, CSRF and Bearer precedence. Live Google and email/password verification, five-person dashboard access, failed/cancelled login and provider recovery succeeded against WorkOS Staging; the notes UI remains pending.
 
 The [note schemas](../shared/notes.ts) own the payload and timestamp contract. [HTTP schemas](../shared/http.ts) own errors and conditional-write headers. [Session schemas](../shared/auth.ts) own the browser-safe identity returned by `GET /api/auth/session`.
 

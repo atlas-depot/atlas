@@ -80,7 +80,9 @@ Run against the WorkOS Staging environment with the environment client ID on 202
 - After the five-minute access token expired, a session request returned `200` with a new `Set-Cookie`, exercising refresh and resealing.
 - Account switching replaced the Google session with the email/password session.
 - All five teammates accepted the WorkOS dashboard invite and show as active in Staging; no paid seat requirement appeared.
-- Cancelled login, a failed credential attempt and the provider recovery path remain pending; this section does not claim them.
+- A wrong password was rejected on the hosted AuthKit page with an invalid-credentials message; no session was created.
+- A valid `error=access_denied` callback returned `401` and cleared the transaction. A wrong-state callback returned `403` without clearing it, and the following valid cancellation was processed.
+- The hosted reset-password flow accepted the request and the reset email arrived; the link was not used to change the password.
 - CSRF rejection and Bearer-versus-cookie precedence remain covered by deterministic tests because a browser cannot set the `Origin` header or a forged Bearer token for a live check.
 
 The live check used the Staging environment, which allows `http://localhost` redirects. Production is a separate environment, requires billing activation and HTTPS redirects, and must use its own client ID, API key and cookie password. Do not copy Staging credentials into Production or vice versa.
