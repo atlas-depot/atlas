@@ -48,7 +48,17 @@ The development commands read root `.env`. `API_PORT` defaults to `3001` and acc
 
 Vite proxies `/api` and `/api/...` to the backend without changing the path. Browser callers use relative URLs such as `fetch('/api/health')`. Health returns `200`; authenticated notes currently return `501` until storage is connected. Health is process liveness, not database or provider readiness. The Node entrypoint runs TypeScript directly, without a separate transpiler.
 
-For WorkOS Bearer authentication, set both `WORKOS_CLIENT_ID` and `WORKOS_ISSUER` to your development environment's values. The issuer must match exactly; do not infer it from the client ID. The SDK verifies signed user access tokens against WorkOS's client-specific JWKS. No API key is needed for verification. Omit both settings to keep private routes denied during scaffold work; partial or malformed configuration prevents startup. Invalid credentials return `401` with a Bearer challenge, while verification-service failures return `500`. Token verification is offline and does not immediately detect revoked sessions. Browser login, sealed cookies and refresh remain pending; never put tokens in browser storage to work around this.
+For WorkOS Bearer authentication, set both `WORKOS_CLIENT_ID` and `WORKOS_ISSUER` to your development environment's values. The issuer must match exactly; do not infer it from the client ID. The SDK verifies signed user access tokens against WorkOS's client-specific JWKS. No API key is needed for verification. Omit both settings to keep private routes denied during scaffold work; partial or malformed configuration prevents startup. Invalid credentials return `401` with a Bearer challenge, while verification-service failures return `500`. Signature verification runs locally against the client JWKS fetched over HTTPS; a JWKS outage is a server failure. Revocation is not detected immediately and takes effect at token expiry.
+
+For browser sign-in, also set `APP_ORIGIN`, `WORKOS_API_KEY` and `WORKOS_COOKIE_PASSWORD` (at least 32 characters). `APP_ORIGIN` is the exact origin opened in the browser, without a trailing slash; local development normally uses `http://localhost:5173`. HTTPS is required except for HTTP on `localhost`, `127.0.0.1` or `[::1]` during local development. Other HTTP origins fail startup. Add `APP_ORIGIN` plus `/api/auth/callback` to the redirect list for the matching WorkOS environment. Use separate WorkOS environments, redirect URIs and cookie passwords for local, staging and production. The API key and cookie password stay server-side and must never enter a `VITE_*` value, browser bundle, log or screenshot.
+
+Use the **environment** client ID returned by `npx workos@latest whoami --json` (`environment.clientId`) as `WORKOS_CLIENT_ID`. The client ID shown under Applications is an application-level ID and can differ; in a live staging check the application ID produced `invalid_client` at the hosted AuthKit page. For the default hosted AuthKit domain, `WORKOS_ISSUER` is `https://api.workos.com/user_management/`, not the `*.authkit.app` OAuth issuer. Verify it against the access token `iss` claim when the environment or auth domain changes.
+
+The public browser routes are `GET /api/auth/login`, `GET /api/auth/callback`, `GET /api/auth/session` and `POST /api/auth/logout`. Login uses hosted AuthKit with PKCE and a short-lived sealed transaction cookie. The callback validates state and expiry, exchanges the code, and stores only the WorkOS sealed session in the `atlas_session` cookie (`HttpOnly`, `SameSite=Lax`, `Secure` on HTTPS). The session route returns `{ user: { id, email, firstName, lastName } }`; names remain `null` when WorkOS has none. Logout clears the local cookie and redirects through WorkOS's session logout flow when the session can be authenticated. If the session is invalid or WorkOS is unreachable, logout still clears the local cookie and redirects to `APP_ORIGIN`. Expired browser sessions refresh once; terminal failures clear the cookie and return `401`, while retryable provider failures return `500` and preserve it.
+
+Cookie-authenticated unsafe requests, including logout, require an exact `Origin` match with `APP_ORIGIN`; a missing or mismatched origin returns `403`. Bearer requests are exempt because they do not use ambient cookie identity, and an `Authorization` header never falls back to the cookie. Do not add credentialed cross-origin CORS for this same-origin application.
+
+Deterministic tests use a synthetic provider and never call WorkOS. A separate live development-provider smoke must record Google and email/password sign-in, signup/email verification as configured, cancelled login, the provider recovery path, session refresh, logout and account switching. Do not record keys, cookies or passwords. All five teammates accepted their WorkOS dashboard accounts in Staging on 2026-10-29; no paid seat requirement appeared.
 
 For concurrent worktrees, set different `API_PORT` values and frontend ports, for example `pnpm dev --host 127.0.0.1 --port 5177 --strictPort`. Stop both processes with Ctrl-C. Production routing is separate configuration.
 
@@ -59,6 +69,32 @@ Import test APIs from `vite-plus/test`. The existing runner discovers tests unde
 Coverage includes those source directories and excludes tests, declarations, configuration, generated output, `e2e/` and `experiments/`. It prints file-level coverage and writes totals to `coverage/summary.txt`. Percentages are informational, with no threshold; assert behavior rather than aiming only to execute lines.
 
 Test session injection does not prove WorkOS sign-in or database isolation. Keep mocked provider checks separate from live verification, and run paid model tests only with an explicit budget. See [atlas-test](../.agents/skills/atlas-test/SKILL.md) for boundary selection and regression checks.
+
+### Live development-provider smoke
+
+Run against the WorkOS Staging environment with the environment client ID on 2026-10-28:
+
+- Google sign-in and email/password signup with email verification both completed; each callback set `atlas_session` and `/api/auth/session` returned the matching profile without tokens.
+- `document.cookie` did not expose `atlas_session`, confirming the `HttpOnly` boundary in the browser.
+- Logout followed the WorkOS logout flow, returned to the application origin, and `/api/auth/session` then returned `401`.
+- After the five-minute access token expired, a session request returned `200` with a new `Set-Cookie`, exercising refresh and resealing.
+- Account switching replaced the Google session with the email/password session.
+- All five teammates accepted the WorkOS dashboard invite and show as active in Staging; no paid seat requirement appeared.
+- A wrong password was rejected on the hosted AuthKit page with an invalid-credentials message; no session was created.
+- A valid `error=access_denied` callback returned `401` and cleared the transaction. A wrong-state callback returned `403` without clearing it, and the following valid cancellation was processed.
+- The hosted reset-password flow accepted the request and the reset email arrived; the link was not used to change the password.
+- CSRF rejection and Bearer-versus-cookie precedence remain covered by deterministic tests because a browser cannot set the `Origin` header or a forged Bearer token for a live check.
+
+The live check used the Staging environment, which allows `http://localhost` redirects. Production is a separate environment, requires billing activation and HTTPS redirects, and must use its own client ID, API key and cookie password. Do not copy Staging credentials into Production or vice versa.
+
+Staging configuration recorded on 2026-10-28:
+
+- Redirect URI: `http://localhost:5173/api/auth/callback`
+- Initiate login URI: `http://localhost:5173/api/auth/login`
+- Sign-out URI: `http://localhost:5173/`
+- Methods: Google with WorkOS demo credentials and Email + Password. Passkeys, Magic Auth and Enterprise SSO are disabled.
+- Sessions: five-minute access tokens, two-day inactivity timeout, 365-day maximum session length. CORS remains empty because WorkOS is called server-side.
+- The environment client ID is in the local `.env` only; the repository contains placeholders.
 
 ### Browser regression
 

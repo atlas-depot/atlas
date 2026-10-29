@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { describe, expect, it, onTestFinished, vi } from "vite-plus/test";
 import { createApp } from "./app.ts";
-import { requireAuth, type AuthEnv } from "./auth.ts";
+import { createRequestAuthenticator, requireAuth, type AuthEnv } from "./auth.ts";
 
 describe("Hono authentication boundary", () => {
   it.each([
@@ -56,6 +56,29 @@ describe("Hono authentication boundary", () => {
     expect(JSON.stringify(log.mock.calls)).not.toContain(secret);
   });
 
+  it("keeps refreshed session headers when a protected handler fails", async () => {
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    onTestFinished(() => log.mockRestore());
+    const protectedRoutes = new Hono<AuthEnv>();
+    protectedRoutes.get("/fail", () => {
+      throw new Error("SYNTHETIC_FAILURE");
+    });
+    const app = createApp(
+      async (_request, headers) => {
+        headers?.append("Set-Cookie", "atlas_session=refreshed; Path=/; HttpOnly");
+        return { userId: "user_alice" };
+      },
+      { protectedRoutes },
+    );
+    const response = await app.request("/api/fail");
+    expect(response.status).toBe(500);
+    expect(response.headers.getSetCookie()).toEqual(["atlas_session=refreshed; Path=/; HttpOnly"]);
+    expect(response.headers.get("Cache-Control")).toBe("no-store");
+    expect(await response.json()).toEqual({
+      error: { code: "INTERNAL_ERROR", message: "Request failed." },
+    });
+  });
+
   it("returns JSON for unknown routes", async () => {
     const response = await createApp(async () => null).request("/missing");
     expect(response.status).toBe(404);
@@ -73,5 +96,37 @@ describe("Hono authentication boundary", () => {
     app.get("/identity", (c) => c.json(c.get("user")));
     const response = await app.request("/identity?userId=forged");
     expect(await response.json()).toEqual({ userId: "verified-user" });
+  });
+
+  it.each(["", "Bearer invalid"])(
+    "uses Bearer verification exclusively when Authorization is present: %s",
+    async (authorization) => {
+      const bearer = vi.fn(async () => null);
+      const browser = vi.fn(async () => ({ userId: "cookie-user" }));
+      const response = await createApp(createRequestAuthenticator(bearer, browser)).request(
+        "/api/notes",
+        {
+          headers: {
+            Authorization: authorization,
+            Cookie: "atlas_session=valid-looking-cookie",
+          },
+        },
+      );
+      expect(response.status).toBe(401);
+      expect(bearer).toHaveBeenCalledTimes(1);
+      expect(browser).not.toHaveBeenCalled();
+    },
+  );
+
+  it("uses the browser session only when Authorization is absent", async () => {
+    const bearer = vi.fn(async () => ({ userId: "bearer-user" }));
+    const browser = vi.fn(async () => ({ userId: "cookie-user" }));
+    const response = await createApp(createRequestAuthenticator(bearer, browser)).request(
+      "/api/notes",
+      { headers: { Cookie: "atlas_session=valid-looking-cookie" } },
+    );
+    expect(response.status).toBe(501);
+    expect(browser).toHaveBeenCalledTimes(1);
+    expect(bearer).not.toHaveBeenCalled();
   });
 });

@@ -10,10 +10,19 @@ import { expect, it, onTestFinished, vi } from "vite-plus/test";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
 
-async function startApi() {
+async function startApi(overrides: Record<string, string | undefined> = {}) {
   const child = spawn(process.execPath, ["server/index.ts"], {
     cwd: root,
-    env: { ...process.env, API_PORT: "0", WORKOS_CLIENT_ID: undefined, WORKOS_ISSUER: undefined },
+    env: {
+      ...process.env,
+      API_PORT: "0",
+      APP_ORIGIN: undefined,
+      WORKOS_API_KEY: undefined,
+      WORKOS_CLIENT_ID: undefined,
+      WORKOS_COOKIE_PASSWORD: undefined,
+      WORKOS_ISSUER: undefined,
+      ...overrides,
+    },
     stdio: ["ignore", "pipe", "pipe"],
   });
   onTestFinished(async () => {
@@ -76,6 +85,53 @@ it("serves health and protects API routes through the real Node entrypoint and V
     expect(response.headers.get("WWW-Authenticate")).toBe('Bearer realm="atlas"');
     expect(await response.json()).toMatchObject({ error: { code: "UNAUTHENTICATED" } });
   }
+}, 20_000);
+
+it("serves browser login and session routes through the real Node entrypoint", async () => {
+  const appOrigin = "http://127.0.0.1:5177";
+  const api = await startApi({
+    APP_ORIGIN: appOrigin,
+    WORKOS_API_KEY: "sk_test_fixture",
+    WORKOS_CLIENT_ID: "client_fixture",
+    WORKOS_COOKIE_PASSWORD: "c".repeat(32),
+    WORKOS_ISSUER: "https://auth.example.test/",
+  });
+  const login = await fetch(`${api}/api/auth/login`, {
+    redirect: "manual",
+    signal: AbortSignal.timeout(3_000),
+  });
+  expect(login.status).toBe(302);
+  const location = login.headers.get("Location") ?? "";
+  expect(location).toContain("/user_management/authorize");
+  expect(location).toContain("provider=authkit");
+  expect(location).toContain(
+    `redirect_uri=${encodeURIComponent(`${appOrigin}/api/auth/callback`)}`,
+  );
+  const cookies = login.headers.getSetCookie();
+  expect(cookies).toHaveLength(1);
+  expect(cookies[0]).toContain("atlas_login_transaction=");
+  expect(cookies[0]).toContain("HttpOnly");
+  expect(cookies[0]).toContain("Path=/api/auth");
+  expect(cookies[0]).toContain("SameSite=Lax");
+  expect(cookies[0]).not.toContain("Secure");
+  expect(cookies[0]).toContain("Max-Age=600");
+  await login.arrayBuffer();
+
+  const session = await fetch(`${api}/api/auth/session`, {
+    signal: AbortSignal.timeout(3_000),
+  });
+  expect(session.status).toBe(401);
+  expect(session.headers.get("WWW-Authenticate")).toBe('Bearer realm="atlas"');
+  await session.arrayBuffer();
+
+  const missingOrigin = await fetch(`${api}/api/auth/logout`, {
+    method: "POST",
+    headers: { Cookie: "atlas_session=fake" },
+    redirect: "manual",
+    signal: AbortSignal.timeout(3_000),
+  });
+  expect(missingOrigin.status).toBe(403);
+  await missingOrigin.arrayBuffer();
 }, 20_000);
 
 it("rejects invalid startup configuration with safe diagnostics", async () => {

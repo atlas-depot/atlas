@@ -1,6 +1,9 @@
 import { serve } from "@hono/node-server";
 import { WorkOS } from "@workos-inc/node";
 import { createApp } from "./app.ts";
+import { createAuthRoutes } from "./auth-routes.ts";
+import { createRequestAuthenticator } from "./auth.ts";
+import { createBrowserAuth } from "./browser-auth.ts";
 import { readServerEnv } from "./env.ts";
 import { createBearerAuthenticator } from "./workos.ts";
 
@@ -9,12 +12,33 @@ function main() {
   try {
     configuration = readServerEnv(process.env);
   } catch {
-    console.error("Atlas API could not start. Check API_PORT and WorkOS configuration.");
+    console.error(
+      "Atlas API could not start. Check API_PORT, APP_ORIGIN and WorkOS configuration.",
+    );
     process.exitCode = 1;
     return;
   }
-  const { port, workos } = configuration;
-  const app = createApp(workos ? createBearerAuthenticator(new WorkOS(workos)) : async () => null);
+  const { port, workos, browserAuth } = configuration;
+  const workosClient = workos
+    ? new WorkOS({
+        clientId: workos.clientId,
+        issuer: workos.issuer,
+        ...(browserAuth ? { apiKey: browserAuth.apiKey } : {}),
+      })
+    : undefined;
+  const browser =
+    workosClient && browserAuth ? createBrowserAuth(workosClient, browserAuth) : undefined;
+  const authenticateRequest = createRequestAuthenticator(
+    workosClient ? createBearerAuthenticator(workosClient) : undefined,
+    browser?.authenticate,
+  );
+  const app = createApp(authenticateRequest, {
+    appOrigin: browserAuth?.appOrigin,
+    authRoutes:
+      browser && browserAuth
+        ? createAuthRoutes(browser, { appOrigin: browserAuth.appOrigin })
+        : undefined,
+  });
   const server = serve(
     { fetch: app.fetch, hostname: "127.0.0.1", port, overrideGlobalObjects: false },
     (address) => console.log(`Atlas API listening on http://127.0.0.1:${address.port}`),
