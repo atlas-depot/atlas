@@ -1,4 +1,6 @@
 import react from "@vitejs/plugin-react";
+import tailwindcss from "@tailwindcss/vite";
+import { fileURLToPath } from "node:url";
 import { defineConfig, lazyPlugins } from "vite-plus";
 import { readServerEnv } from "./server/env.ts";
 
@@ -35,7 +37,8 @@ export default defineConfig(({ command, isPreview }) => {
         },
       ],
     },
-    plugins: lazyPlugins(() => [react()]),
+    plugins: lazyPlugins(() => [react(), tailwindcss()]),
+    resolve: { alias: { "@": fileURLToPath(new URL("./src", import.meta.url)) } },
     server: {
       proxy: {
         ...(apiPort === undefined

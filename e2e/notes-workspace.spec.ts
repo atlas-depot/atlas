@@ -127,6 +127,76 @@ test("malicious Markdown cannot execute or load remote images", async ({ page })
   expect(remoteRequests).toBe(0);
 });
 
+test("individual-note opening supplies content and successive saves retain updated ETags", async ({
+  page,
+}) => {
+  await page.goto("/");
+  const source = page.getByRole("textbox", { name: "Markdown source" });
+  await expect(source).toHaveValue(/Prepare the \*\*budget summary\*\*/);
+  for (const content of ["First save", "Second save with the returned ETag"]) {
+    await source.fill(content);
+    await page.getByRole("button", { name: "Save", exact: true }).click();
+    await expect(page.getByRole("status")).toHaveText("Saved for this preview session");
+  }
+  await page.getByRole("button", { name: "Reading notes", exact: true }).click();
+  await expect(source).toHaveValue(/Next steps/);
+  await page.getByRole("button", { name: "Project review", exact: true }).click();
+  await expect(source).toHaveValue("Second save with the returned ETag");
+});
+
+test("a server-assigned note identity is used for subsequent updates, without duplicate creates", async ({
+  page,
+}) => {
+  await page.goto("/?notesExample=empty");
+  await expect(page.getByText("No notes yet. Create a new note to get started.")).toBeVisible();
+  await page.getByRole("button", { name: "New note", exact: true }).click();
+  await page.getByRole("textbox", { name: "Title", exact: true }).fill("New server note");
+  await page.getByRole("button", { name: "Save", exact: true }).click();
+  await expect(page.getByRole("status")).toHaveText("Saved for this preview session");
+  await page.getByRole("textbox", { name: "Markdown source" }).fill("Edited after creation");
+  await page.getByRole("button", { name: "Save", exact: true }).click();
+  await expect(page.getByRole("status")).toHaveText("Saved for this preview session");
+  await expect(page.getByRole("navigation", { name: "Notes" }).getByRole("button")).toHaveCount(1);
+});
+
+test("failed individual-note opening is recoverable without using a list record as editor content", async ({
+  page,
+}) => {
+  await page.goto("/?notesExample=read-failure");
+  await expect(page.getByRole("alert")).toHaveText(
+    "Could not open note. Your current changes are still here. Try again.",
+  );
+  await expect(page.getByRole("textbox", { name: "Markdown source" })).toHaveCount(0);
+  await page.getByRole("button", { name: "Retry opening" }).click();
+  await expect(page.getByRole("textbox", { name: "Markdown source" })).toHaveValue(/Prepare the/);
+});
+
+test("conflict preserves local text and explicit comparison/adoption obtains a usable new ETag", async ({
+  page,
+}) => {
+  await page.goto("/?notesExample=conflict");
+  const source = page.getByRole("textbox", { name: "Markdown source" });
+  await source.fill("My unsaved local edit");
+  await page.getByRole("button", { name: "Save", exact: true }).click();
+  await expect(page.getByRole("alert")).toContainText("This note changed on the server.");
+  await expect(source).toHaveValue("My unsaved local edit");
+  await page.getByRole("button", { name: "Compare latest" }).click();
+  await expect(
+    page.getByText("A newer version saved by another client.", { exact: true }),
+  ).toBeVisible();
+  await expect(source).toHaveValue("My unsaved local edit");
+  await page.getByRole("button", { name: "Use latest version" }).click();
+  await expect(page.getByRole("alertdialog")).toBeVisible();
+  await page.getByRole("button", { name: "Keep editing" }).click();
+  await expect(source).toHaveValue("My unsaved local edit");
+  await page.getByRole("button", { name: "Use latest version" }).click();
+  await page.getByRole("button", { name: "Discard changes", exact: true }).click();
+  await expect(source).toHaveValue("A newer version saved by another client.");
+  await source.fill("Edit based on the latest version");
+  await page.getByRole("button", { name: "Save", exact: true }).click();
+  await expect(page.getByRole("status")).toHaveText("Saved for this preview session");
+});
+
 test("notes workspace fits desktop and mobile and supports keyboard editing", async ({
   page,
 }, testInfo) => {

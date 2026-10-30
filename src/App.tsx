@@ -1,7 +1,8 @@
 import { lazy, Suspense } from "react";
-import { Theme } from "@radix-ui/themes";
 import { NotesWorkspace } from "./notes/NotesWorkspace";
-import { disconnectedNotesStore } from "./notes/notes-store";
+import { createNotesClient } from "./notes/notes-store";
+
+const notesClient = createNotesClient();
 
 const exampleEnabled = import.meta.env.DEV || import.meta.env.VITE_NOTES_DEMO === "true";
 const ExampleNotes = exampleEnabled
@@ -23,14 +24,14 @@ export function App() {
     );
   }
   return (
-    <Theme>
+    <>
       {ExampleNotes ? (
         <Suspense fallback={<p role="status">Loading notes...</p>}>
           <ExampleNotes />
         </Suspense>
       ) : (
-        <NotesWorkspace store={disconnectedNotesStore} />
+        <NotesWorkspace store={notesClient} />
       )}
-    </Theme>
+    </>
   );
 }

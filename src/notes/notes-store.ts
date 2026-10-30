@@ -1,35 +1,89 @@
-import { noteListSchema, noteSchema, type Note } from "../../shared/notes";
+import { apiErrorSchema, ifMatchSchema } from "../../shared/http";
+import {
+  createNoteSchema,
+  noteIdSchema,
+  noteListSchema,
+  noteSchema,
+  updateNoteSchema,
+  type CreateNote,
+  type Note,
+  type UpdateNote,
+} from "../../shared/notes";
 
-/** UI seam for #52. Implementations must return validated server results when connected. */
-export interface NotesStore {
-  list(): Promise<Note[]>;
-  save(note: Note): Promise<Note>;
+export interface NoteSnapshot {
+  note: Note;
+  etag: string;
 }
 
-export const disconnectedNotesStore: NotesStore = {
-  async list() {
-    throw new Error("Notes are not connected yet.");
-  },
-  async save() {
-    throw new Error("Notes are not connected yet.");
-  },
-};
+/** Matches #45/#56. Open list records individually to obtain their authoritative content and ETag. */
+export interface NotesStore {
+  list(): Promise<Note[]>;
+  read(id: string): Promise<NoteSnapshot>;
+  create(input: CreateNote): Promise<NoteSnapshot>;
+  update(id: string, input: UpdateNote, etag: string): Promise<NoteSnapshot>;
+}
 
-/** Synthetic, tab-memory-only storage. Used exclusively by the development/test preview. */
-export function createExampleNotesStore(initial: Note[]): NotesStore {
-  let notes = noteListSchema.parse({ notes: initial }).notes;
+export class NotesRequestError extends Error {
+  readonly status: number;
+  readonly code: string;
+  constructor(status: number, code: string) {
+    super("The notes request did not succeed.");
+    this.name = "NotesRequestError";
+    this.status = status;
+    this.code = code;
+  }
+}
+
+/** Same-origin transport; credentials stay in the browser's HttpOnly cookie. */
+export function createNotesClient(request: typeof fetch = globalThis.fetch): NotesStore {
+  async function response(path: string, init: RequestInit = {}, expectedStatus = 200) {
+    const result = await request(`/api/notes${path}`, { ...init, credentials: "same-origin" });
+    if (!result.ok) {
+      const error = apiErrorSchema.safeParse(await result.json().catch(() => null));
+      throw new NotesRequestError(
+        result.status,
+        error.success ? error.data.error.code : "INVALID_RESPONSE",
+      );
+    }
+    if (result.status !== expectedStatus) throw new Error("Unexpected notes response.");
+    return result;
+  }
+  async function snapshot(result: Response, expectedId?: string): Promise<NoteSnapshot> {
+    const note = noteSchema.parse(await result.json());
+    const etag = ifMatchSchema.parse(result.headers.get("ETag"));
+    if (expectedId !== undefined && note.id !== expectedId)
+      throw new Error("Unexpected note identity.");
+    return { note, etag };
+  }
   return {
     async list() {
-      return notes.map((note) => ({ ...note }));
+      return noteListSchema.parse(await (await response("")).json()).notes;
     },
-    async save(input) {
-      const exists = notes.some((note) => note.id === input.id);
-      const note = noteSchema.parse({
-        ...input,
-        updatedAt: exists ? new Date().toISOString() : input.createdAt,
-      });
-      notes = [note, ...notes.filter((existing) => existing.id !== note.id)];
-      return { ...note };
+    async read(id) {
+      return snapshot(await response(`/${noteIdSchema.parse(id)}`), id);
+    },
+    async create(input) {
+      return snapshot(
+        await response(
+          "",
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(createNoteSchema.parse(input)),
+          },
+          201,
+        ),
+      );
+    },
+    async update(id, input, etag) {
+      return snapshot(
+        await response(`/${noteIdSchema.parse(id)}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json", "If-Match": ifMatchSchema.parse(etag) },
+          body: JSON.stringify(updateNoteSchema.parse(input)),
+        }),
+        id,
+      );
     },
   };
 }

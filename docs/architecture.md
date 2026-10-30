@@ -9,6 +9,7 @@ The [agreed sprint scope](https://github.com/atlas-depot/atlas/issues/45) record
 | Area | Decision |
 | --- | --- |
 | Client | React/TypeScript with Vite+. Web/PWA first; PWA setup remains unimplemented |
+| UI components | shadcn components built on Base UI; react-markdown with remark-gfm for safe note preview |
 | API | Hono on Node 24, REST and shared Zod schemas |
 | Authentication | WorkOS AuthKit with hosted Google and email/password sign-in, server callback and HttpOnly session cookie; the API also accepts verified WorkOS Bearer access tokens |
 | Database | Neon PostgreSQL with Drizzle, one remote branch per developer, shared staging and separate production |
@@ -25,7 +26,7 @@ The executable provides public health and authentication routes plus a protected
 
 `server/browser-auth.ts` owns hosted AuthKit PKCE, the sealed `atlas_session` cookie, refresh and WorkOS logout. `server/workos.ts` verifies Bearer signatures locally against the client JWKS fetched and cached over HTTPS; a JWKS outage is a server failure. `server/auth.ts` keeps one protected boundary and enforces Bearer-versus-cookie precedence; an `Authorization` header never falls back to the cookie. Browser tokens stay inside the HttpOnly cookie and are never returned by the session route.
 
-Deterministic tests use a synthetic provider and a local fake WorkOS API; they cover state, PKCE, refresh outcomes, logout, account replacement, CSRF and Bearer precedence. Live Google and email/password verification, five-person dashboard access, failed/cancelled login and provider recovery succeeded against WorkOS Staging; the notes API connection remains pending. The #48 editor has a development/test preview with a note list, Markdown editing, safe preview and explicit Save. Its normal production state reports that notes are not connected; #52 owns persistence integration.
+Deterministic tests use a synthetic provider and a local fake WorkOS API; they cover state, PKCE, refresh outcomes, logout, account replacement, CSRF and Bearer precedence. Live Google and email/password verification, five-person dashboard access, failed/cancelled login and provider recovery succeeded against WorkOS Staging. The #48 editor uses shadcn/Base UI, safe Markdown preview and explicit Save. Its HTTP client follows the accepted REST/Zod contract, including individual-note reads and exact ETag/If-Match handling. Development fixtures use that same client and screen. Actual note persistence, authentication UI and account lifecycle integration remain in #52 and its dependencies.
 
 The [note schemas](../shared/notes.ts) own the payload and timestamp contract. [HTTP schemas](../shared/http.ts) own errors and conditional-write headers. [Session schemas](../shared/auth.ts) own the browser-safe identity returned by `GET /api/auth/session`.
 
