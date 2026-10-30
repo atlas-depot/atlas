@@ -15,14 +15,35 @@ export default defineConfig({
     channel: process.env.PLAYWRIGHT_CHANNEL,
     trace: "retain-on-failure",
   },
-  projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
-  webServer: {
-    command: `npm run build && npm run preview -- --host ${host} --port ${port} --strictPort`,
-    url: baseURL,
-    env: { VITE_NOTES_DEMO: "true" },
-    // Never reuse a server: a leftover preview serves an older build, so the test
-    // would pass against stale output. An occupied port must fail explicitly.
-    reuseExistingServer: false,
-    timeout: 120_000,
-  },
+  projects: [
+    {
+      name: "chromium",
+      testIgnore: "**/notes-production.spec.ts",
+      use: { ...devices["Desktop Chrome"] },
+    },
+    {
+      name: "production",
+      testMatch: "**/notes-production.spec.ts",
+      use: { ...devices["Desktop Chrome"], baseURL: "http://127.0.0.1:4178" },
+    },
+  ],
+  webServer: [
+    {
+      command: `npm run build && npm run preview -- --host ${host} --port ${port} --strictPort`,
+      url: baseURL,
+      env: { VITE_NOTES_DEMO: "true" },
+      // Never reuse a server: a leftover preview serves an older build, so the test
+      // would pass against stale output. An occupied port must fail explicitly.
+      reuseExistingServer: false,
+      timeout: 120_000,
+    },
+    {
+      command:
+        "npm run build -- --outDir .cache/production-build && npm run preview -- --outDir .cache/production-build --host 127.0.0.1 --port 4178 --strictPort",
+      url: "http://127.0.0.1:4178",
+      env: { VITE_NOTES_DEMO: "false" },
+      reuseExistingServer: false,
+      timeout: 120_000,
+    },
+  ],
 });

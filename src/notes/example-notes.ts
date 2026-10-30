@@ -48,6 +48,8 @@ export function createPreviewStore(scenario: string | null) {
       setTimeout(resolve, scenario === "slow-save" && method !== "GET" ? 1500 : 150),
     );
     if (method === "GET" && id === null) {
+      if (scenario === "unavailable") return fail(501, "NOT_IMPLEMENTED");
+      if (scenario === "unauthenticated") return fail(401, "UNAUTHENTICATED");
       if (failLoad) {
         failLoad = false;
         return fail(500, "INTERNAL_ERROR");
@@ -60,12 +62,19 @@ export function createPreviewStore(scenario: string | null) {
       });
     }
     if (method === "GET" && id !== null) {
+      if (scenario === "missing-read") return fail(404, "NOT_FOUND");
       if (failRead) {
         failRead = false;
         return fail(500, "INTERNAL_ERROR");
       }
       const note = notes.get(id);
       return note ? noteResponse(note) : fail(404, "NOT_FOUND");
+    }
+    if (scenario === "expired-save") return fail(401, "UNAUTHENTICATED");
+    if (scenario === "forbidden-save") return fail(403, "FORBIDDEN");
+    if (scenario === "missing-save" && id !== null && notes.has(id)) {
+      notes.delete(id);
+      return fail(404, "NOT_FOUND");
     }
     if (failSave) {
       failSave = false;

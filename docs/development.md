@@ -98,7 +98,7 @@ Staging configuration recorded on 2026-10-28:
 
 ### Browser regression
 
-Install Chromium once with `pnpm exec playwright install chromium`. Playwright builds the frontend and serves it on `127.0.0.1:4177` without reusing an existing server. An occupied port fails the run. CI retains a trace on failure. For visible UI changes, also verify mobile width, desktop and keyboard behavior.
+Install Chromium once with `pnpm exec playwright install chromium`. Playwright builds both the demo and normal production frontend. The demo is served on `127.0.0.1:4177`; the production build is stored under `.cache/production-build` and served on `127.0.0.1:4178`. Neither reuses an existing server. Occupied ports fail the run. CI retains before/after screenshots and failure traces. For visible UI changes, also verify mobile width, desktop and keyboard behavior.
 
 ### Notes editor development preview
 
@@ -109,6 +109,12 @@ Run `pnpm dev` for synthetic HTTP responses stored only in tab memory. Saves are
 A normal production build excludes the fixtures and uses the same editor with the same-origin HTTP client. `NotesStore` in `src/notes/notes-store.ts` matches #45/#56: `list()`, `read(id)`, `create(CreateNote)` and `update(id, UpdateNote, etag)`. Opening always reads the individual-note endpoint; list content is never treated as an editable snapshot. The client validates JSON with shared Zod schemas, retains the exact response ETag on read/create/update and sends it as If-Match on PUT. New notes have no invented client-side server ID. #52 connects authentication, actual persisted state, deletion and account lifecycle behavior to this screen. Server ownership enforcement remains mandatory; production notes endpoints still return 501 until persistence is implemented.
 
 Failures preserve local text. A 412 conflict leaves the original ETag intact and blocks blind resubmission. Compare latest reads the current server version without replacing edits; adopting it requires explicit discard confirmation. Successful saves advance the server ID/ETag while newer edits typed during the request remain unsaved.
+
+The editor distinguishes 401, 403, 404, 412, 501 and transport/server failures. A 501 is a neutral unavailable state without a retry loop. A 401 clears the list, saved identity and comparison, blocks writes and offers the existing sign-in route; current unsaved text stays visible for copying before full-page sign-in navigation. A 404 offers a list refresh that preserves local text, or an explicit transition to a new unsaved note. Full sign-out/account replacement handling remains in #52. These client states do not replace backend ownership checks.
+
+Untouched empty notes do not warn when discarded, while explicit Save can still create an empty draft. During a save the status distinguishes the submitted snapshot from newer unsaved edits. Pure state tests cover these rules and failure classification. Browser cases cover recovery and the real production bundle with HTTP responses intercepted by Playwright, not a live database or provider. Production asset checks guard against shipping synthetic note data.
+
+Primary controls and discard-dialog actions have at least 44px touch targets. Input text stays at 16px or larger, the sidebar starts at 1024px, and edit/preview panes split from 1200px. Narrow screens use a shorter source pane. Responsive checks cover 1440, 1280, 1024, 768, 767, 375 and 320px; preview headings remain below the app heading's type scale.
 
 Playwright explicitly enables `VITE_NOTES_DEMO=true` for its own build. The fixtures implement POST creation, individual GET with ETag, and conditional PUT with 412/428/400 errors using the same validating client as production. Tests cover list/open recovery, create versus update, successive ETags, conflicts/comparison, literal Markdown, safe rendering, explicit saves, save failure/retry, edits during save, dirty navigation, beforeunload, desktop and a 375px mobile viewport. CI uploads `playwright-evidence` with before/after screenshots and failure traces from `test-results/`. This is simulated HTTP/storage, not live API or database evidence.
 

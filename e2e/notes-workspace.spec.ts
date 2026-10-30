@@ -46,6 +46,9 @@ test("typing during save stays unsaved and repeated shortcuts do not acknowledge
   await page.keyboard.press("Control+s");
   await expect(page.getByRole("status")).toHaveText("Saving...");
   await source.fill("A newer edit");
+  await expect(page.getByRole("status")).toHaveText(
+    "Saving earlier edits. Newer changes are unsaved.",
+  );
   await page.keyboard.press("Control+s");
   await expect(page.getByRole("status")).toHaveText("Unsaved changes");
   await expect(source).toHaveValue("A newer edit");
@@ -68,7 +71,7 @@ test("dirty navigation can be cancelled or explicitly discarded, including with 
   await page.getByRole("button", { name: "Discard changes", exact: true }).click();
   await expect(title).toHaveValue("");
   await expect(title).toBeFocused();
-  await expect(page.getByRole("status")).toHaveText("Unsaved changes");
+  await expect(page.getByRole("status")).toHaveText("New note");
 });
 
 test("browser navigation warns about unsaved input", async ({ page }) => {
@@ -207,6 +210,7 @@ test("notes workspace fits desktop and mobile and supports keyboard editing", as
   await expect(page.getByRole("textbox", { name: "Title", exact: true })).toBeVisible();
   await page.screenshot({ path: testInfo.outputPath("after-notes-desktop.png"), fullPage: true });
   await page.setViewportSize({ width: 375, height: 812 });
+  await page.screenshot({ path: testInfo.outputPath("after-notes-mobile.png"), fullPage: true });
   await page
     .getByRole("textbox", { name: "Markdown source" })
     .fill("# Mobile\n\n" + "longword".repeat(100));
@@ -217,5 +221,112 @@ test("notes workspace fits desktop and mobile and supports keyboard editing", as
   await expect(page.getByRole("button", { name: "Save", exact: true })).toBeFocused();
   await page.keyboard.press("Enter");
   await expect(page.getByRole("status")).toHaveText("Saved for this preview session");
-  await page.screenshot({ path: testInfo.outputPath("after-notes-mobile.png"), fullPage: true });
+  await page.screenshot({ path: testInfo.outputPath("mobile-long-content.png"), fullPage: true });
+});
+
+test("an untouched new note can be left without a warning or explicitly saved empty", async ({
+  page,
+}) => {
+  await page.goto("/");
+  await expect(page.getByRole("textbox", { name: "Title", exact: true })).toHaveValue(
+    "Project review",
+  );
+  await page.getByRole("button", { name: "New note", exact: true }).click();
+  await expect(page.getByRole("status")).toHaveText("New note");
+  await page.getByRole("button", { name: "Reading notes", exact: true }).click();
+  await expect(page.getByRole("textbox", { name: "Title", exact: true })).toHaveValue(
+    "Reading notes",
+  );
+  await expect(page.getByRole("alertdialog")).toHaveCount(0);
+  await page.getByRole("button", { name: "New note", exact: true }).click();
+  await page.getByRole("button", { name: "Save", exact: true }).click();
+  await expect(page.getByRole("status")).toHaveText("Saved for this preview session");
+  await expect(page.getByRole("button", { name: "Untitled note", exact: true })).toBeVisible();
+});
+
+test("expired-session save preserves the current text and removes other cached notes", async ({
+  page,
+}) => {
+  await page.goto("/?notesExample=expired-save");
+  const source = page.getByRole("textbox", { name: "Markdown source" });
+  await source.fill("Copy this text before signing in again.");
+  await page.getByRole("button", { name: "Save", exact: true }).click();
+  await expect(page.getByRole("alert")).toContainText("Your session has ended.");
+  await expect(source).toHaveValue("Copy this text before signing in again.");
+  await expect(page.getByRole("link", { name: "Sign in again" })).toHaveAttribute(
+    "href",
+    "/api/auth/login",
+  );
+  await expect(page.getByRole("navigation", { name: "Notes" }).getByRole("button")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Save", exact: true })).toBeDisabled();
+});
+
+test("a forbidden save keeps input and blocks further writes", async ({ page }) => {
+  await page.goto("/?notesExample=forbidden-save");
+  const source = page.getByRole("textbox", { name: "Markdown source" });
+  await source.fill("Preserve denied edit");
+  await page.getByRole("button", { name: "Save", exact: true }).click();
+  await expect(page.getByRole("alert")).toContainText("You do not have access");
+  await expect(source).toHaveValue("Preserve denied edit");
+  await expect(page.getByRole("button", { name: "Save", exact: true })).toBeDisabled();
+});
+
+test("a missing note offers refresh without discarding text, then explicit creation of a new note", async ({
+  page,
+}) => {
+  await page.goto("/?notesExample=missing-save");
+  const source = page.getByRole("textbox", { name: "Markdown source" });
+  await source.fill("Keep this orphaned local edit");
+  await page.getByRole("button", { name: "Save", exact: true }).click();
+  await expect(page.getByRole("alert")).toContainText("This note is no longer available.");
+  await page.getByRole("button", { name: "Refresh notes", exact: true }).click();
+  await expect(
+    page
+      .getByRole("navigation", { name: "Notes" })
+      .getByRole("button", { name: "Project review", exact: true }),
+  ).toHaveCount(0);
+  await expect(source).toHaveValue("Keep this orphaned local edit");
+  await page.getByRole("button", { name: "Keep as new note", exact: true }).click();
+  await page.getByRole("button", { name: "Save", exact: true }).click();
+  await expect(page.getByRole("status")).toHaveText("Saved for this preview session");
+  await expect(source).toHaveValue("Keep this orphaned local edit");
+});
+
+test("controls and preview remain usable across laptop, tablet and narrow touch widths", async ({
+  page,
+}) => {
+  await page.goto("/");
+  await expect(page.getByRole("textbox", { name: "Title", exact: true })).toHaveValue(
+    "Project review",
+  );
+  const previewHeading = page.getByRole("heading", { name: "Preview", exact: true });
+  for (const width of [1440, 1280, 1024, 768, 767, 375, 320]) {
+    await page.setViewportSize({ width, height: 812 });
+    await page.evaluate("window.scrollTo(0, 0)");
+    expect(await page.evaluate("document.documentElement.scrollWidth <= innerWidth")).toBe(true);
+    expect(
+      await page.evaluate(
+        "parseFloat(getComputedStyle(document.querySelector('#note-title')).fontSize)",
+      ),
+    ).toBeGreaterThanOrEqual(16);
+    expect(
+      await page.evaluate(
+        "parseFloat(getComputedStyle(document.querySelector('#note-content')).fontSize)",
+      ),
+    ).toBeGreaterThanOrEqual(16);
+    const buttons = page.getByRole("button");
+    for (const button of await buttons.all())
+      expect((await button.boundingBox())?.height).toBeGreaterThanOrEqual(44);
+    if (width >= 1200 || width <= 375)
+      expect((await previewHeading.boundingBox())?.y).toBeLessThan(812);
+  }
+  await page.getByRole("textbox", { name: "Title", exact: true }).fill("Unsaved mobile edit");
+  await page.getByRole("button", { name: "New note", exact: true }).click();
+  const dialog = page.getByRole("alertdialog");
+  await expect(dialog).toBeVisible();
+  for (const button of await dialog.getByRole("button").all())
+    await expect
+      .poll(async () => (await button.boundingBox())?.height ?? 0)
+      .toBeGreaterThanOrEqual(44);
+  await page.getByRole("button", { name: "Keep editing" }).click();
 });

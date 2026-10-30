@@ -19,6 +19,30 @@ body {
   overflow-wrap: anywhere;
 }
 
+.notes-workspace [data-slot="button"],
+.notes-dialog button {
+  min-height: 44px;
+}
+
+.notes-workspace :is(input, textarea) {
+  font-size: 1rem;
+}
+
+.note-detail {
+  display: grid;
+  align-items: start;
+  gap: 1.25rem;
+}
+
+@media (min-width: 1200px) {
+  .note-detail {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
+  .note-comparison {
+    grid-column: 1 / -1;
+  }
+}
+
 .note-list-button {
   height: auto;
   min-height: 44px;
@@ -40,12 +64,12 @@ body {
   margin-block: 1rem;
 }
 .markdown-preview h1 {
-  font-size: 1.75rem;
+  font-size: 1.25rem;
   font-weight: 600;
   margin-block: 1rem;
 }
 .markdown-preview h2 {
-  font-size: 1.4rem;
+  font-size: 1.125rem;
   font-weight: 600;
   margin-block: 1rem;
 }
@@ -70,13 +94,27 @@ body {
   text-underline-offset: 3px;
 }
 .note-source {
-  min-height: 20rem;
-  max-height: 60vh;
+  min-height: 8rem;
+  height: 10rem;
+  max-height: 45vh;
+  field-sizing: fixed;
+  resize: vertical;
+}
+
+@media (min-width: 1200px) {
+  .note-source {
+    min-height: 18rem;
+    height: 20rem;
+    max-height: 55vh;
+  }
 }
 
 .markdown-preview pre {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
+  padding: 0.75rem;
+  border-radius: 0.375rem;
+  background: var(--muted);
 }
 
 .markdown-preview table {
