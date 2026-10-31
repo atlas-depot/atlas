@@ -59,3 +59,12 @@ it("does not misreport a forbidden request as resource ownership denial", () => 
     "This request was blocked. Saving is unavailable until request access is restored. Your unsaved text is preserved.",
   );
 });
+
+it("gives list failures their own recovery messages", () => {
+  expect(failureMessage("forbidden", "list")).toBe(
+    "The notes list request was blocked. Restore request access, then reload the page. Your current text is preserved.",
+  );
+  expect(failureMessage("missing", "list")).toBe(
+    "The notes list is no longer available. Refresh the notes list or try again later. Your current text is preserved.",
+  );
+});

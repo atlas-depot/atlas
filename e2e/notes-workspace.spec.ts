@@ -272,6 +272,21 @@ test("a forbidden save keeps input and blocks further writes", async ({ page }) 
   await expect(page.getByRole("alert")).toContainText("This request was blocked.");
   await expect(source).toHaveValue("Preserve denied edit");
   await expect(page.getByRole("button", { name: "Save", exact: true })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "New note", exact: true })).toBeEnabled();
+  const other = page.getByRole("button", { name: "Reading notes", exact: true });
+  await expect(other).toBeEnabled();
+  await other.click();
+  await page.getByRole("button", { name: "Keep editing", exact: true }).click();
+  await expect(source).toHaveValue("Preserve denied edit");
+  await other.click();
+  await page.getByRole("button", { name: "Discard changes", exact: true }).click();
+  await expect(source).toHaveValue(/Next steps/);
+  await source.fill("A different note remains readable, with writes blocked");
+  await expect(page.getByRole("button", { name: "Save", exact: true })).toBeDisabled();
+  await page.getByRole("button", { name: "New note", exact: true }).click();
+  await page.getByRole("button", { name: "Discard changes", exact: true }).click();
+  await expect(page.getByRole("textbox", { name: "Title", exact: true })).toHaveValue("");
+  await expect(page.getByRole("button", { name: "Save", exact: true })).toBeDisabled();
 });
 
 test("a missing save removes the old entry before explicit creation, without requiring refresh", async ({
@@ -342,4 +357,31 @@ test("controls and preview remain usable across laptop, tablet and narrow touch 
       .poll(async () => (await button.boundingBox())?.height ?? 0)
       .toBeGreaterThanOrEqual(44);
   await page.getByRole("button", { name: "Keep editing" }).click();
+});
+
+test("GFM task checkboxes keep native proportions while the title keeps its touch target", async ({
+  page,
+}) => {
+  await page.goto("/");
+  await page
+    .getByRole("textbox", { name: "Markdown source" })
+    .fill("- [ ] Pending task\n- [x] Completed task");
+  const preview = page.getByRole("region", { name: "Markdown preview" });
+  const checkboxes = preview.getByRole("checkbox");
+  await expect(checkboxes).toHaveCount(2);
+  await expect(checkboxes.nth(0)).not.toBeChecked();
+  await expect(checkboxes.nth(1)).toBeChecked();
+  for (const width of [1280, 375]) {
+    await page.setViewportSize({ width, height: 812 });
+    for (const checkbox of await checkboxes.all()) {
+      await expect(checkbox).toBeDisabled();
+      const box = await checkbox.boundingBox();
+      expect(box).not.toBeNull();
+      expect(box!.height).toBeLessThan(24);
+      expect(Math.abs(box!.height - box!.width)).toBeLessThanOrEqual(2);
+    }
+    expect(
+      (await page.getByRole("textbox", { name: "Title", exact: true }).boundingBox())?.height,
+    ).toBeGreaterThanOrEqual(44);
+  }
 });

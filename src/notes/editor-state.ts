@@ -49,10 +49,14 @@ export function failureMessage(kind: RequestFailure, operation: "list" | "read" 
     case "unauthenticated":
       return "Your session has ended. Sign in again. Copy any unsaved text before leaving this page.";
     case "forbidden":
-      return operation === "read"
-        ? "This request was blocked. Your current text is unchanged. You can choose another note."
-        : "This request was blocked. Saving is unavailable until request access is restored. Your unsaved text is preserved.";
+      return operation === "list"
+        ? "The notes list request was blocked. Restore request access, then reload the page. Your current text is preserved."
+        : operation === "read"
+          ? "This request was blocked. Your current text is unchanged. You can choose another note."
+          : "This request was blocked. Saving is unavailable until request access is restored. Your unsaved text is preserved.";
     case "missing":
+      if (operation === "list")
+        return "The notes list is no longer available. Refresh the notes list or try again later. Your current text is preserved.";
       return "This note is no longer available. Your unsaved text is preserved. Refresh the notes list or keep your text as a new note.";
     case "unavailable":
       return "Your notes are not available yet. Please try again later.";

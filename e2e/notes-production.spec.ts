@@ -271,3 +271,16 @@ test("a missing different note preserves the current draft and offers only appli
   await page.getByRole("button", { name: "Keep editing" }).click();
   await expect(source).toHaveValue("Edit the still-existing note");
 });
+
+test("a forbidden list describes loading access rather than a save failure", async ({ page }) => {
+  await page.route("**/api/notes", (route) =>
+    route.fulfill({ status: 403, json: { error: { code: "FORBIDDEN", message: "Blocked" } } }),
+  );
+  await page.goto("/");
+  await expect(page.getByRole("alert")).toHaveText(
+    "The notes list request was blocked. Restore request access, then reload the page. Your current text is preserved.",
+  );
+  await expect(page.getByRole("alert")).not.toContainText("Saving");
+  await expect(page.getByRole("button", { name: "Save", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "New note", exact: true })).toBeDisabled();
+});

@@ -53,6 +53,7 @@ export function NotesWorkspace({
   const [pending, setPending] = useState<Selection | null>(null);
   const [savingSnapshot, setSavingSnapshot] = useState<Draft | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  const [writesForbidden, setWritesForbidden] = useState(false);
   const busyRef = useRef(false);
   const titleRef = useRef<HTMLInputElement>(null);
   const cancelRef = useRef<HTMLButtonElement>(null);
@@ -68,10 +69,9 @@ export function NotesWorkspace({
       : loadState !== "loading" && loadState !== "ready"
         ? loadState
         : null);
-  const blocked =
-    recoveryKind === "unauthenticated" ||
-    (recoveryKind === "forbidden" && readFailure === null) ||
-    recoveryKind === "unavailable";
+  const blocked = recoveryKind === "unauthenticated" || recoveryKind === "unavailable";
+
+  const writeBlocked = blocked || writesForbidden || loadState === "forbidden";
 
   const clearPrivateCache = useCallback(() => {
     setNotes([]);
@@ -176,7 +176,7 @@ export function NotesWorkspace({
       (saved !== null && !dirty) ||
       !valid ||
       busyRef.current ||
-      blocked ||
+      writeBlocked ||
       saveState === "conflict" ||
       saveState === "missing"
     )
@@ -202,6 +202,7 @@ export function NotesWorkspace({
     } catch (error) {
       const kind = classifyFailure(error);
       setSaveState(kind);
+      if (kind === "forbidden") setWritesForbidden(true);
       if (kind === "missing" && saved)
         setNotes((current) => current.filter((note) => note.id !== saved.note.id));
       if (kind === "unauthenticated") clearPrivateCache();
@@ -209,7 +210,7 @@ export function NotesWorkspace({
       busyRef.current = false;
       setSavingSnapshot(null);
     }
-  }, [draft, dirty, valid, saved, saveState, store, blocked, clearPrivateCache]);
+  }, [draft, dirty, valid, saved, saveState, store, writeBlocked, clearPrivateCache]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -285,22 +286,25 @@ export function NotesWorkspace({
             ? readFailure.kind === "missing"
               ? "This note is no longer available. Your current text is unchanged. Refresh the notes list or choose another note."
               : failureMessage(readFailure.kind, "read")
-            : saveState === "saving"
-              ? draft && savingSnapshot
-                ? savingMessage(draft, savingSnapshot)
-                : "Saving..."
-              : saveState !== "idle"
-                ? failureMessage(saveState, "save")
-                : dirty
-                  ? "Unsaved changes"
-                  : draft && saved === null
-                    ? "New note"
-                    : draft
-                      ? example
-                        ? "Saved for this preview session"
-                        : "Saved"
-                      : "Select a note or create a new one.";
-  const failed = !busy && recoveryKind !== null && recoveryKind !== "unavailable";
+            : writesForbidden
+              ? failureMessage("forbidden", "save")
+              : saveState === "saving"
+                ? draft && savingSnapshot
+                  ? savingMessage(draft, savingSnapshot)
+                  : "Saving..."
+                : saveState !== "idle"
+                  ? failureMessage(saveState, "save")
+                  : dirty
+                    ? "Unsaved changes"
+                    : draft && saved === null
+                      ? "New note"
+                      : draft
+                        ? example
+                          ? "Saved for this preview session"
+                          : "Saved"
+                        : "Select a note or create a new one.";
+  const failed =
+    !busy && ((recoveryKind !== null && recoveryKind !== "unavailable") || writesForbidden);
 
   return (
     <main className="notes-workspace space-y-5 p-4 sm:p-6">
@@ -425,7 +429,7 @@ export function NotesWorkspace({
                       disabled={
                         (saved !== null && !dirty) ||
                         busy ||
-                        blocked ||
+                        writeBlocked ||
                         !valid ||
                         saveState === "conflict" ||
                         saveState === "missing"
