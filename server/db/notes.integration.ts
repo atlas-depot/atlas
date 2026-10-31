@@ -8,6 +8,7 @@ import { Pool } from "pg";
 import { afterAll, beforeAll, expect, it } from "vite-plus/test";
 import { openDatabase, readTestDatabaseUrl } from "./connection.ts";
 import { createNoteStore } from "./notes.ts";
+import { noteIdSchema } from "../../shared/notes.ts";
 
 const databaseName = `atlas_test_${randomUUID().replaceAll("-", "")}`;
 let admin: Pool;
@@ -65,6 +66,55 @@ it("persists drafts with generated identity and initial revision across connecti
     "title",
     "updatedAt",
   ]);
+});
+
+it("retains edited notes after the writer exits and a new application process starts", async () => {
+  const runProcess = (operation: string, noteId = "") =>
+    promisify(execFile)(
+      process.execPath,
+      [
+        "--input-type=module",
+        "--eval",
+        `import { openDatabase } from "./server/db/connection.ts";
+         import { createNoteStore } from "./server/db/notes.ts";
+         const connection = openDatabase(process.env.DATABASE_URL);
+         const store = createNoteStore(connection.db);
+         try { ${operation} } finally { await connection.close(); }`,
+      ],
+      {
+        env: {
+          PATH: process.env.PATH,
+          DATABASE_URL: connection.db.$client.options.connectionString,
+          NOTE_ID: noteId,
+        },
+        timeout: 15_000,
+      },
+    );
+  const written = await runProcess(`
+    const created = await store.create("owner-restart", ${JSON.stringify(draft)});
+    const result = await store.update("owner-restart", created.note.id, 1,
+      { title: "Persisted edit", content: "# Survives process exit" });
+    if (result.status !== "saved") throw new Error("Expected saved note");
+    console.log(created.note.id);
+  `);
+  const id = noteIdSchema.parse(written.stdout.trim());
+  const read = await runProcess(
+    `
+    console.log(JSON.stringify(await store.read("owner-restart", process.env.NOTE_ID)));
+  `,
+    id,
+  );
+  const recovered: unknown = JSON.parse(read.stdout);
+  expect(recovered).toEqual({
+    note: {
+      id,
+      title: "Persisted edit",
+      content: "# Survives process exit",
+      createdAt: draft.createdAt,
+      updatedAt: expect.any(String),
+    },
+    revision: 2,
+  });
 });
 
 it("does not disclose or mutate another owner's note, even with a stale revision", async () => {
