@@ -72,6 +72,16 @@ Set server-only `DATABASE_URL` in your ignored `.env` to your isolated developme
 
 The `pg` driver connects through Drizzle using a pool of at most five connections and a ten-second connection timeout. TLS settings come from the connection URL; use the provider's verified TLS configuration for Neon. The same driver can use an isolated local PostgreSQL database for credential-free verification. The connection owner must call `close()` when finished. Run migrations from one designated runner for shared staging; no automatic startup migration or concurrent-runner coordination is implemented.
 
+`server/db/notes.ts` provides Hono-independent note operations. Pass the verified server user ID separately from the note payload. Reads and writes always scope by owner; inaccessible and missing notes have the same result. Update/delete lock the owned row inside a transaction before checking the expected revision. Updates replace title/content, set the database server's edit timestamp and increment the internal revision. The returned public note excludes ownership/revision fields; single-note operations carry revision separately for future ETag mapping. Database errors propagate to the caller, which must sanitize them at its public boundary. These operations are not mounted on HTTP routes yet.
+
+Run real-storage tests separately from the credential-free root suite:
+
+```sh
+TEST_DATABASE_URL=postgresql://USER@127.0.0.1:55468/postgres pnpm test:db
+```
+
+Use an isolated local PostgreSQL server and a test role with database creation permission. The suite requires a loopback host, creates a randomly named database, replays committed migrations and drops only that generated database after closing its pools. It never reads `DATABASE_URL` or root `.env`. Tests cover persistence through another connection, owner isolation, stale writes/deletes, concurrent writes, validation, missing notes and storage failure. Identity is synthetic; these tests do not verify WorkOS or Neon access. CI wiring remains pending.
+
 Drizzle Kit uses esbuild's packaged platform executable. `allowBuilds.esbuild: false` disables its dependency install scripts; migration generation must continue to work after a frozen install.
 
 ## Tests and coverage
