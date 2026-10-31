@@ -332,7 +332,7 @@ export function NotesWorkspace({
           Unsaved changes
         </p>
       )}
-      {saveState === "failed" && saved === null && (
+      {saveState === "failed" && saved === null && !readFailure && (
         <Button disabled={busy} onClick={() => void refreshNotes()}>
           Refresh notes
         </Button>

@@ -354,5 +354,18 @@ test("a lost create response offers list reconciliation without automatically cr
     page.getByRole("navigation", { name: "Notes" }).getByRole("button", { name: "A", exact: true }),
   ).toBeVisible();
   await expect(title).toHaveValue("A");
+  await page.route(`**/api/notes/${firstId}`, (route) =>
+    route.fulfill({ status: 404, json: { error: { code: "NOT_FOUND", message: "Missing" } } }),
+  );
+  await page
+    .getByRole("navigation", { name: "Notes" })
+    .getByRole("button", { name: "A", exact: true })
+    .click();
+  await page.getByRole("button", { name: "Discard changes", exact: true }).click();
+  await expect(page.getByRole("alert")).toContainText("This note is no longer available");
+  const refresh = page.getByRole("button", { name: "Refresh notes", exact: true });
+  await expect(refresh).toHaveCount(1);
+  await refresh.click();
+  await expect(title).toHaveValue("A");
   expect(creates).toBe(1);
 });
