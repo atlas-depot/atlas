@@ -66,7 +66,11 @@ For concurrent worktrees, set different `API_PORT` values and frontend ports, fo
 
 The Drizzle PostgreSQL schema lives in `server/db/schema.ts`. Generate a migration after changing it with `pnpm db:generate --name=describe-change`. Generation needs no database credentials and does not apply SQL. Commit the generated SQL, snapshot and journal under `drizzle/` together with the schema. Review the SQL before applying it; never rewrite an applied migration.
 
-Notes store a verified WorkOS owner ID, Markdown source, timestamps and a positive internal revision counter. Public field limits remain in `shared/notes.ts`; PostgreSQL text lengths do not measure UTF-16 code units. The schema alone does not enforce per-user access or atomic revision updates; those must be implemented in the data-access operations. Database connections, migration application, seeds and CI replay are not connected yet.
+Notes store a verified WorkOS owner ID, Markdown source, timestamps and a positive internal revision counter. Public field limits remain in `shared/notes.ts`; PostgreSQL text lengths do not measure UTF-16 code units. The schema alone does not enforce per-user access or atomic revision updates; those must be implemented in the data-access operations. Seeds, CI replay and API storage wiring are not connected yet.
+
+Set server-only `DATABASE_URL` in your ignored `.env` to your isolated development PostgreSQL database, then run `pnpm db:migrate`. This applies pending committed migrations and closes its connection pool on success or failure. Re-running it leaves already recorded migrations alone; it does not reset data. Migration failures exit nonzero without printing driver errors or connection details. The API still starts without a database setting because storage is not wired into its routes yet.
+
+The `pg` driver connects through Drizzle using a pool of at most five connections and a ten-second connection timeout. TLS settings come from the connection URL; use the provider's verified TLS configuration for Neon. The same driver can use an isolated local PostgreSQL database for credential-free verification. The connection owner must call `close()` when finished. Run migrations from one designated runner for shared staging; no automatic startup migration or concurrent-runner coordination is implemented.
 
 Drizzle Kit uses esbuild's packaged platform executable. `allowBuilds.esbuild: false` disables its dependency install scripts; migration generation must continue to work after a frozen install.
 
