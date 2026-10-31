@@ -1,5 +1,8 @@
 import { randomUUID } from "node:crypto";
+import { execFile } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { promisify } from "node:util";
+import { sql } from "drizzle-orm";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
 import { Pool } from "pg";
 import { afterAll, beforeAll, expect, it } from "vite-plus/test";
@@ -166,4 +169,51 @@ it("propagates storage failure rather than reporting a successful save", async (
   const disconnectedStore = createNoteStore(disconnected.db);
   await disconnected.close();
   await expect(disconnectedStore.create("owner-failure", draft)).rejects.toThrow();
+});
+
+it("initializes an empty database and preserves edits and unrelated notes on setup reruns", async () => {
+  const setupDatabase = `${databaseName}_setup`;
+  await admin.query(`CREATE DATABASE "${setupDatabase}"`);
+  const url = new URL(admin.options.connectionString ?? "");
+  url.pathname = `/${setupDatabase}`;
+  const fresh = openDatabase(url.toString());
+  const runSetup = (action: string, extra: Record<string, string> = {}) =>
+    promisify(execFile)(process.execPath, ["server/db/setup.ts", action], {
+      env: { PATH: process.env.PATH, DEV_DATABASE_URL: url.toString(), ...extra },
+      timeout: 15_000,
+    });
+  try {
+    await expect(runSetup("seed")).rejects.toThrow();
+    await expect(runSetup("init", { NODE_ENV: "production" })).rejects.toThrow();
+    const before = await fresh.db.execute<{ table: string | null }>(
+      sql`SELECT to_regclass('public.notes')::text AS "table"`,
+    );
+    expect(before.rows).toEqual([{ table: null }]);
+
+    expect((await runSetup("init")).stdout).toContain("2 synthetic notes inserted.");
+    const freshStore = createNoteStore(fresh.db);
+    const first = await freshStore.list("synthetic-seed-alex");
+    expect(first).toHaveLength(1);
+    expect(first[0].title).toBe("Sample project notes");
+    expect((await freshStore.list("synthetic-seed-sam"))[0].title).toBe("Sample private note");
+    const edited = await freshStore.update("synthetic-seed-alex", first[0].id, 1, {
+      title: "Keep this development edit",
+      content: "Keep my Markdown",
+    });
+    expect(edited.status).toBe("saved");
+    const unrelated = await freshStore.create("unrelated-owner", draft);
+
+    expect((await runSetup("seed")).stdout).toContain("0 synthetic notes inserted.");
+    expect((await runSetup("init")).stdout).toContain("0 synthetic notes inserted.");
+    if (edited.status !== "saved") throw new Error("Expected saved note");
+    expect(await freshStore.read("synthetic-seed-alex", first[0].id)).toEqual(edited.value);
+    expect(await freshStore.read("unrelated-owner", unrelated.note.id)).toEqual(unrelated);
+    const count = await fresh.db.execute<{ count: number }>(
+      sql`SELECT count(*)::int AS count FROM notes`,
+    );
+    expect(count.rows).toEqual([{ count: 3 }]);
+  } finally {
+    await fresh.close();
+    await admin.query(`DROP DATABASE "${setupDatabase}"`);
+  }
 });

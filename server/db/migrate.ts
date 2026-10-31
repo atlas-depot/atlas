@@ -1,13 +1,10 @@
-import { fileURLToPath } from "node:url";
-import { migrate } from "drizzle-orm/node-postgres/migrator";
 import { openDatabase, readDatabaseUrl } from "./connection.ts";
+import { applyMigrations } from "./migrations.ts";
 
 async function main() {
   const connection = openDatabase(readDatabaseUrl(process.env));
   try {
-    await migrate(connection.db, {
-      migrationsFolder: fileURLToPath(new URL("../../drizzle/", import.meta.url)),
-    });
+    await applyMigrations(connection.db);
     console.log("Database migrations completed.");
   } finally {
     await connection.close();

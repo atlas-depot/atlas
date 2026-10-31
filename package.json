@@ -6,6 +6,8 @@
   "scripts": {
     "db:generate": "drizzle-kit generate --config=server/db/drizzle.config.ts",
     "db:migrate": "node --env-file-if-exists=.env server/db/migrate.ts",
+    "db:seed": "node --env-file-if-exists=.env server/db/setup.ts seed",
+    "db:init": "node --env-file-if-exists=.env server/db/setup.ts init",
     "test:db": "vp test run --config=server/db/test.config.ts",
     "dev": "node --env-file-if-exists=.env node_modules/vite-plus/bin/vp dev",
     "dev:api": "node --watch --env-file-if-exists=.env server/index.ts",

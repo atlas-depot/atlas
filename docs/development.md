@@ -66,11 +66,23 @@ For concurrent worktrees, set different `API_PORT` values and frontend ports, fo
 
 The Drizzle PostgreSQL schema lives in `server/db/schema.ts`. Generate a migration after changing it with `pnpm db:generate --name=describe-change`. Generation needs no database credentials and does not apply SQL. Commit the generated SQL, snapshot and journal under `drizzle/` together with the schema. Review the SQL before applying it; never rewrite an applied migration.
 
-Notes store a verified WorkOS owner ID, Markdown source, timestamps and a positive internal revision counter. Public field limits remain in `shared/notes.ts`; PostgreSQL text lengths do not measure UTF-16 code units. The schema alone does not enforce per-user access or atomic revision updates; those must be implemented in the data-access operations. Seeds, CI replay and API storage wiring are not connected yet.
+Notes store a verified WorkOS owner ID, Markdown source, timestamps and a positive internal revision counter. Public field limits remain in `shared/notes.ts`; PostgreSQL text lengths do not measure UTF-16 code units. Owner/revision enforcement lives in the note operations, not the schema alone. CI replay and API storage wiring are not connected yet.
 
 Set server-only `DATABASE_URL` in your ignored `.env` to your isolated development PostgreSQL database, then run `pnpm db:migrate`. This applies pending committed migrations and closes its connection pool on success or failure. Re-running it leaves already recorded migrations alone; it does not reset data. Migration failures exit nonzero without printing driver errors or connection details. The API still starts without a database setting because storage is not wired into its routes yet.
 
 The `pg` driver connects through Drizzle using a pool of at most five connections and a ten-second connection timeout. TLS settings come from the connection URL; use the provider's verified TLS configuration for Neon. The same driver can use an isolated local PostgreSQL database for credential-free verification. The connection owner must call `close()` when finished. Run migrations from one designated runner for shared staging; no automatic startup migration or concurrent-runner coordination is implemented.
+
+For synthetic development data, set `DEV_DATABASE_URL` in your ignored `.env` to your own isolated local database or Neon development branch, then run:
+
+```sh
+pnpm db:init
+# Later, add missing sample rows without applying migrations:
+pnpm db:seed
+```
+
+`db:init` applies the committed migrations and then inserts two sample notes belonging to the fictional owners `synthetic-seed-alex` and `synthetic-seed-sam`. It initializes an existing empty database; it does not create a PostgreSQL database or Neon branch. These owners are not real WorkOS accounts, so their notes do not automatically appear after browser sign-in. Fixtures use fixed UUIDs and UTC timestamps. Reruns skip an existing fixture UUID without changing its content, owner, timestamps or revision, and leave unrelated notes alone. Both samples are inserted in one SQL statement; neither command truncates, resets or deletes data. If seeding fails after migrations succeed, the migrations remain applied and setup can be retried.
+
+Setup requires the dedicated `DEV_DATABASE_URL` and never falls back to `DATABASE_URL`; it rejects `NODE_ENV=production`. These checks do not prove a remote URL points to development: select your development branch explicitly and never configure staging/production as the setup target. Use `db:migrate` alone from the designated runner for staging. Setup closes its pool and exits nonzero with a sanitized message on failure.
 
 `server/db/notes.ts` provides Hono-independent note operations. Pass the verified server user ID separately from the note payload. Reads and writes always scope by owner; inaccessible and missing notes have the same result. Update/delete lock the owned row inside a transaction before checking the expected revision. Updates replace title/content, set the database server's edit timestamp and increment the internal revision. The returned public note excludes ownership/revision fields; single-note operations carry revision separately for future ETag mapping. Database errors propagate to the caller, which must sanitize them at its public boundary. These operations are not mounted on HTTP routes yet.
 
