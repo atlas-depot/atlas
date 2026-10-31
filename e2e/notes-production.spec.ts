@@ -180,6 +180,11 @@ test("adopting a conflict version synchronizes its changed title in the sidebar"
         json: { error: { code: "PRECONDITION_FAILED", message: "Changed" } },
       });
     reads++;
+    if (reads === 2)
+      return route.fulfill({
+        status: 500,
+        json: { error: { code: "INTERNAL_ERROR", message: "Comparison failed" } },
+      });
     return route.fulfill({
       json: { ...serverNote, title: reads === 1 ? "A" : "Authoritative renamed note" },
       headers: { ETag: reads === 1 ? '"v1"' : '"v2"' },
@@ -189,6 +194,9 @@ test("adopting a conflict version synchronizes its changed title in the sidebar"
   await page.getByRole("textbox", { name: "Markdown source" }).fill("Local edit");
   await page.getByRole("button", { name: "Save", exact: true }).click();
   await page.getByRole("button", { name: "Compare latest" }).click();
+  await page.getByRole("button", { name: "Retry opening", exact: true }).click();
+  await expect(page.getByRole("textbox", { name: "Markdown source" })).toHaveValue("Local edit");
+  await expect(page.getByRole("alertdialog")).toHaveCount(0);
   await page.getByRole("button", { name: "Use latest version" }).click();
   await page.getByRole("button", { name: "Discard changes", exact: true }).click();
   await expect(page.getByRole("textbox", { name: "Title", exact: true })).toHaveValue(
@@ -283,4 +291,68 @@ test("a forbidden list describes loading access rather than a save failure", asy
   await expect(page.getByRole("alert")).not.toContainText("Saving");
   await expect(page.getByRole("button", { name: "Save", exact: true })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "New note", exact: true })).toBeDisabled();
+});
+
+test("retrying a failed different-note read requires confirmation before replacing a dirty draft", async ({
+  page,
+}) => {
+  const other = { ...serverNote, id: secondId, title: "B", content: "Original B" };
+  let otherReads = 0;
+  await page.route("**/api/notes", (route) =>
+    route.fulfill({ json: { notes: [serverNote, other] } }),
+  );
+  await page.route(`**/api/notes/${firstId}`, (route) =>
+    route.fulfill({ json: serverNote, headers: { ETag: '"a1"' } }),
+  );
+  await page.route(`**/api/notes/${secondId}`, (route) => {
+    otherReads++;
+    return otherReads === 1
+      ? route.fulfill({
+          status: 500,
+          json: { error: { code: "INTERNAL_ERROR", message: "Read failed" } },
+        })
+      : route.fulfill({ json: other, headers: { ETag: '"b1"' } });
+  });
+  await page.goto("/");
+  const source = page.getByRole("textbox", { name: "Markdown source" });
+  await expect(source).toHaveValue("Original text");
+  await page.getByRole("button", { name: "B", exact: true }).click();
+  await expect(page.getByRole("alert")).toContainText("Could not open note");
+  await source.fill("Unsaved A must survive");
+  await expect(page.getByRole("status")).toHaveText("Unsaved changes");
+  await page.getByRole("button", { name: "Retry opening", exact: true }).click();
+  await expect(page.getByRole("alertdialog")).toBeVisible();
+  expect(otherReads).toBe(1);
+  await page.getByRole("button", { name: "Keep editing", exact: true }).click();
+  await expect(source).toHaveValue("Unsaved A must survive");
+  await expect(page.getByRole("textbox", { name: "Title", exact: true })).toHaveValue("A");
+  await page.getByRole("button", { name: "Retry opening", exact: true }).click();
+  await page.getByRole("button", { name: "Discard changes", exact: true }).click();
+  await expect(source).toHaveValue("Original B");
+  expect(otherReads).toBe(2);
+});
+
+test("a lost create response offers list reconciliation without automatically creating again", async ({
+  page,
+}) => {
+  let creates = 0;
+  await page.route("**/api/notes", (route) => {
+    if (route.request().method() === "POST") {
+      creates++;
+      return route.abort("failed");
+    }
+    return route.fulfill({ json: { notes: creates ? [serverNote] : [] } });
+  });
+  await page.goto("/");
+  await page.getByRole("button", { name: "New note", exact: true }).click();
+  const title = page.getByRole("textbox", { name: "Title", exact: true });
+  await title.fill("A");
+  await page.getByRole("button", { name: "Save", exact: true }).click();
+  await expect(page.getByRole("alert")).toContainText("the note may already exist");
+  await page.getByRole("button", { name: "Refresh notes", exact: true }).click();
+  await expect(
+    page.getByRole("navigation", { name: "Notes" }).getByRole("button", { name: "A", exact: true }),
+  ).toBeVisible();
+  await expect(title).toHaveValue("A");
+  expect(creates).toBe(1);
 });

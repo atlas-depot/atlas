@@ -293,7 +293,9 @@ export function NotesWorkspace({
                   ? savingMessage(draft, savingSnapshot)
                   : "Saving..."
                 : saveState !== "idle"
-                  ? failureMessage(saveState, "save")
+                  ? saveState === "failed" && saved === null
+                    ? "Could not confirm creation. Your text is preserved. Check the notes list before trying again; the note may already exist."
+                    : failureMessage(saveState, "save")
                   : dirty
                     ? "Unsaved changes"
                     : draft && saved === null
@@ -325,6 +327,16 @@ export function NotesWorkspace({
       <p role={failed ? "alert" : "status"} className="text-sm">
         {status}
       </p>
+      {readFailure && dirty && (
+        <p role="status" className="text-sm">
+          Unsaved changes
+        </p>
+      )}
+      {saveState === "failed" && saved === null && (
+        <Button disabled={busy} onClick={() => void refreshNotes()}>
+          Refresh notes
+        </Button>
+      )}
       {loadState === "failed" && (
         <Button
           onClick={() => {
@@ -360,7 +372,13 @@ export function NotesWorkspace({
         </div>
       )}
       {readFailure?.kind === "failed" && (
-        <Button disabled={busy} onClick={() => void openNote(readFailure.id, readFailure.compare)}>
+        <Button
+          disabled={busy}
+          onClick={() => {
+            if (readFailure.compare) void openNote(readFailure.id, true);
+            else requestSelection({ kind: "read", id: readFailure.id });
+          }}
+        >
           Retry opening
         </Button>
       )}

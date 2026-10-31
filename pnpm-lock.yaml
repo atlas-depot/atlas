@@ -42,9 +42,6 @@ importers:
       remark-gfm:
         specifier: 4.0.1
         version: 4.0.1
-      shadcn:
-        specifier: 4.23.0
-        version: 4.23.0
       tw-animate-css:
         specifier: 1.4.0
         version: 1.4.0
@@ -73,6 +70,9 @@ importers:
       '@vitest/coverage-v8':
         specifier: 5.0.5
         version: 5.0.5(@vitest/browser@5.0.5)(vitest@5.0.5)
+      shadcn:
+        specifier: 4.23.0
+        version: 4.23.0
       tailwindcss:
         specifier: 4.3.3
         version: 4.3.3
