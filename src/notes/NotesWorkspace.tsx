@@ -62,7 +62,10 @@ export function NotesWorkspace({
     draft !== null &&
     noteContentSchema.safeParse({ title: draft.title, content: draft.content }).success;
   const busy = saveState === "saving" || openingId !== null || refreshing;
+  const loadFailureKind =
+    loadState === "unauthenticated" || loadState === "unavailable" ? loadState : null;
   const recoveryKind =
+    loadFailureKind ??
     readFailure?.kind ??
     (saveState !== "idle" && saveState !== "saving"
       ? saveState
@@ -332,11 +335,15 @@ export function NotesWorkspace({
           Unsaved changes
         </p>
       )}
-      {saveState === "failed" && saved === null && !readFailure && (
-        <Button disabled={busy} onClick={() => void refreshNotes()}>
-          Refresh notes
-        </Button>
-      )}
+      {saveState === "failed" &&
+        saved === null &&
+        !readFailure &&
+        !blocked &&
+        loadState !== "forbidden" && (
+          <Button disabled={busy} onClick={() => void refreshNotes()}>
+            Refresh notes
+          </Button>
+        )}
       {loadState === "failed" && (
         <Button
           onClick={() => {
@@ -371,7 +378,7 @@ export function NotesWorkspace({
           )}
         </div>
       )}
-      {readFailure?.kind === "failed" && (
+      {readFailure && recoveryKind === "failed" && (
         <Button
           disabled={busy}
           onClick={() => {
@@ -460,7 +467,7 @@ export function NotesWorkspace({
                     {saveState === "conflict" && saved && (
                       <Button
                         variant="outline"
-                        disabled={busy}
+                        disabled={busy || blocked}
                         onClick={() => void openNote(saved.note.id, true)}
                       >
                         Compare latest
@@ -495,6 +502,7 @@ export function NotesWorkspace({
                     <MarkdownPreview content={comparison.note.content} />
                     <Button
                       variant="outline"
+                      disabled={busy || blocked}
                       onClick={() => requestSelection({ kind: "replace", snapshot: comparison })}
                     >
                       Use latest version

@@ -369,3 +369,36 @@ test("a lost create response offers list reconciliation without automatically cr
   await expect(title).toHaveValue("A");
   expect(creates).toBe(1);
 });
+
+test("a 401 list refresh overrides a stale read failure and blocks writes", async ({ page }) => {
+  const other = { ...serverNote, id: secondId, title: "B", content: "Original B" };
+  let refreshBlocked = false;
+  await page.route("**/api/notes", (route) => {
+    if (route.request().method() === "GET" && refreshBlocked)
+      return route.fulfill({
+        status: 401,
+        json: { error: { code: "UNAUTHENTICATED", message: "Session ended" } },
+      });
+    return route.fulfill({ json: { notes: [serverNote, other] } });
+  });
+  await page.route(`**/api/notes/${firstId}`, (route) =>
+    route.fulfill({ json: serverNote, headers: { ETag: '"a1"' } }),
+  );
+  await page.route(`**/api/notes/${secondId}`, (route) =>
+    route.fulfill({ status: 404, json: { error: { code: "NOT_FOUND", message: "Missing" } } }),
+  );
+  await page.goto("/");
+  const source = page.getByRole("textbox", { name: "Markdown source" });
+  await expect(source).toHaveValue("Original text");
+  await page.getByRole("button", { name: "B", exact: true }).click();
+  await expect(page.getByRole("alert")).toContainText("This note is no longer available");
+  await source.fill("Unsaved A must survive");
+  refreshBlocked = true;
+  await page.getByRole("button", { name: "Refresh notes", exact: true }).click();
+  await expect(page.getByRole("alert")).toContainText("Your session has ended");
+  await expect(page.getByRole("link", { name: "Sign in again" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Save", exact: true })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "Refresh notes", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Retry opening", exact: true })).toHaveCount(0);
+  await expect(source).toHaveValue("Unsaved A must survive");
+});
