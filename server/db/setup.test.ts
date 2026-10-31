@@ -7,10 +7,10 @@ it.each([
     action: "init",
     env: { DATABASE_URL: "postgresql://fixture:SYNTHETIC_SECRET@127.0.0.1:1/ignored" },
   },
-  { action: "seed", env: { DEV_DATABASE_URL: "SYNTHETIC_SECRET" } },
+  { action: "seed", env: { DATABASE_URL: "SYNTHETIC_SECRET" } },
   {
     action: "reset",
-    env: { DEV_DATABASE_URL: "postgresql://fixture:SYNTHETIC_SECRET@127.0.0.1:1/ignored" },
+    env: { DATABASE_URL: "postgresql://fixture:SYNTHETIC_SECRET@127.0.0.1:1/ignored" },
   },
 ])(
   "fails closed with sanitized output for invalid development setup: $action",
@@ -27,8 +27,7 @@ it.each([
     expect(result).toMatchObject({
       code: 1,
       stdout: "",
-      stderr:
-        "Development database setup failed. Check DEV_DATABASE_URL and database availability.\n",
+      stderr: "Development database setup failed. Check DATABASE_URL and database availability.\n",
     });
   },
   15_000,

@@ -22,10 +22,6 @@ export function readDatabaseUrl(environment: Record<string, string | undefined>)
   return parsed.data;
 }
 
-export function readDevelopmentDatabaseUrl(environment: Record<string, string | undefined>) {
-  return readDatabaseUrl({ DATABASE_URL: environment.DEV_DATABASE_URL });
-}
-
 /** Only isolated loopback servers may be used by tests that create/drop databases. */
 export function readTestDatabaseUrl(environment: Record<string, string | undefined>) {
   const value = readDatabaseUrl({ DATABASE_URL: environment.TEST_DATABASE_URL });

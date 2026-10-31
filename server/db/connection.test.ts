@@ -1,5 +1,5 @@
 import { expect, it } from "vite-plus/test";
-import { readDatabaseUrl, readDevelopmentDatabaseUrl, readTestDatabaseUrl } from "./connection.ts";
+import { readDatabaseUrl, readTestDatabaseUrl } from "./connection.ts";
 
 it("accepts PostgreSQL URLs without dropping TLS parameters", () => {
   const url = "postgresql://fixture:synthetic@db.example.test/atlas?sslmode=verify-full";
@@ -23,18 +23,6 @@ it.each([
 ])("rejects missing or non-PostgreSQL configuration without disclosing values", (value) => {
   expect(() => readDatabaseUrl({ DATABASE_URL: value })).toThrow(
     /^Set DATABASE_URL to a valid PostgreSQL connection URL\.$/,
-  );
-});
-
-it("requires DEV_DATABASE_URL without falling back to a valid DATABASE_URL", () => {
-  const normal = "postgresql://localhost/normal";
-  const development = "postgresql://localhost/development";
-  expect(() => readDevelopmentDatabaseUrl({ DATABASE_URL: normal })).toThrow();
-  expect(() =>
-    readDevelopmentDatabaseUrl({ DEV_DATABASE_URL: "", DATABASE_URL: normal }),
-  ).toThrow();
-  expect(readDevelopmentDatabaseUrl({ DEV_DATABASE_URL: development, DATABASE_URL: normal })).toBe(
-    development,
   );
 });
 

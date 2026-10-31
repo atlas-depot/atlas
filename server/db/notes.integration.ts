@@ -176,7 +176,7 @@ it("initializes an empty database and preserves edits and unrelated notes on set
   const fresh = openDatabase(url.toString());
   const runSetup = (action: string, extra: Record<string, string> = {}) =>
     promisify(execFile)(process.execPath, ["server/db/setup.ts", action], {
-      env: { PATH: process.env.PATH, DEV_DATABASE_URL: url.toString(), ...extra },
+      env: { PATH: process.env.PATH, DATABASE_URL: url.toString(), ...extra },
       timeout: 15_000,
     });
   try {
