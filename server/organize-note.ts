@@ -9,7 +9,11 @@ const sourceUrlSchema = z.url({ protocol: /^https?$/ }).refine((value) => {
 
 /** Source records come from the research adapter, never from model-written links. */
 export const generatedDraftSchema = z.strictObject({
-  markdown: z.string().refine((value) => value.trim().length > 0),
+  // Derivatives must fit the existing Markdown note contract used by explicit Save.
+  markdown: z
+    .string()
+    .max(100_000)
+    .refine((value) => value.trim().length > 0),
   sources: z
     .array(
       z.strictObject({
@@ -23,6 +27,15 @@ export const generatedDraftSchema = z.strictObject({
 });
 
 export type GeneratedDraft = z.infer<typeof generatedDraftSchema>;
+export class GenerationCleanupError extends Error {
+  readonly retryCleanup: () => Promise<{ status: "ended" | "expired" }>;
+
+  constructor(retryCleanup: () => Promise<{ status: "ended" | "expired" }>) {
+    super("Generation session cleanup is unconfirmed.");
+    this.name = "GenerationCleanupError";
+    this.retryCleanup = retryCleanup;
+  }
+}
 export type DraftGenerator = (
   note: { title: string; content: string },
   options: { signal: AbortSignal },
@@ -36,6 +49,11 @@ export type OrganizeNoteResult =
     }
   | { status: "not_found" }
   | { status: "cancelled" }
+  | {
+      status: "failed";
+      reason: "cleanup_failed";
+      retryCleanup: GenerationCleanupError["retryCleanup"];
+    }
   | { status: "failed"; reason: "read_failed" | "generation_failed" | "invalid_draft" };
 
 export function createOrganizeNote({
@@ -69,7 +87,10 @@ export function createOrganizeNote({
         { title: snapshot.note.title, content: snapshot.note.content },
         { signal },
       );
-    } catch {
+    } catch (error) {
+      if (error instanceof GenerationCleanupError) {
+        return { status: "failed", reason: "cleanup_failed", retryCleanup: error.retryCleanup };
+      }
       return signal.aborted
         ? { status: "cancelled" }
         : { status: "failed", reason: "generation_failed" };

@@ -3,14 +3,17 @@ import { test } from "node:test";
 import {
   Client,
   ClientError,
+  SessionNotActiveError,
   type SendTurnInput,
   type SessionEvent,
   type SessionStreamEvent,
 } from "eve/client";
 import type { Delivery, DeliveryResult } from "eve/sessions";
 import { createEveOrganizer } from "./client.ts";
+import { GenerationCleanupError } from "../../server/organize-note.ts";
 
 const signal = () => new AbortController().signal;
+const timeouts = { startupMs: 60_000, modelSilenceMs: 60_000, researchMs: 60_000 };
 const url = "https://example.com/evidence";
 const research = {
   text: "Supported research.",
@@ -80,6 +83,10 @@ function fixture({
   endResult = async () => ({ ...completed, outcome: "applied" as const, sessionEnded: true }),
   history,
   newCleanupSignal = signal,
+  limits = timeouts,
+  maxModelCalls = 16,
+  create,
+  stream,
 }: {
   events?: SessionStreamEvent[];
   finalEvents?: SessionStreamEvent[];
@@ -88,6 +95,10 @@ function fixture({
   endResult?: () => Promise<DeliveryResult>;
   history?: (attempt: number, signal?: AbortSignal) => AsyncIterable<SessionStreamEvent>;
   newCleanupSignal?: () => AbortSignal;
+  limits?: typeof timeouts;
+  maxModelCalls?: number;
+  create?: (signal?: AbortSignal) => Promise<void>;
+  stream?: (signal?: AbortSignal) => AsyncIterable<SessionStreamEvent>;
 } = {}) {
   const calls = { creates: [] as SendTurnInput[], cancels: 0, ends: 0, histories: 0 };
   const cleanups: AbortSignal[] = [];
@@ -96,9 +107,10 @@ function fixture({
   const delivery: Delivery = {
     sessionId: "session-1",
     deliveryId: "delivery-1",
-    async *stream() {
+    async *stream(options) {
       beforeStream();
       yield consumed;
+      if (stream) yield* stream(options?.signal);
       yield* events;
       yield* finalEvents;
     },
@@ -129,10 +141,13 @@ function fixture({
     },
   };
   const prepare = createEveOrganizer({
+    timeouts: limits,
+    maxModelCalls,
     client: {
       sessions: {
         async create(input) {
           calls.creates.push(input);
+          await create?.(input.signal);
           return { session, delivery };
         },
       },
@@ -158,6 +173,7 @@ function fixture({
 
 await test("the actual eve Client satisfies the adapter without a custom transport", () => {
   createEveOrganizer({
+    timeouts,
     client: new Client({ baseUrl: "http://127.0.0.1:2027" }),
     cleanupSignal: signal,
   });
@@ -453,15 +469,156 @@ await test("verification cancellation interrupts the retry delay", async () => {
   assert.equal(f.calls.histories, 1);
 });
 
-await test("cleanup failure after generation failure stays visible", async () => {
+await test("cleanup failure after generation failure preserves a retry without rerunning generation", async () => {
   const f = fixture({
     beforeStream: () => {
       throw new Error("Provider secret diagnostic");
     },
   });
   f.failEnd(new Error("End failed"));
+  const error: unknown = await f
+    .prepare({ title: "", content: "Note" }, { signal: signal() })
+    .catch((failure: unknown) => failure);
+  assert.ok(error instanceof GenerationCleanupError);
+  assert.equal(error.message, "Generation session cleanup is unconfirmed.");
+  f.failEnd();
+  assert.deepEqual(await error.retryCleanup(), { status: "ended" });
+  assert.equal(f.calls.creates.length, 1);
+  assert.equal(f.calls.ends, 2);
+});
+
+function waitForAbort(signal?: AbortSignal): Promise<never> {
+  assert.ok(signal);
+  return new Promise((_, reject) => {
+    if (signal.aborted) reject(signal.reason);
+    else signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+  });
+}
+
+await test("stalled creation is aborted once and never silently retried", async () => {
+  const f = fixture({
+    limits: { startupMs: 10, modelSilenceMs: 10, researchMs: 20 },
+    create: waitForAbort,
+  });
+  await assert.rejects(f.prepare({ title: "", content: "Note" }, { signal: signal() }), {
+    name: "TimeoutError",
+    message: "Organization startup timed out; its remote state is unconfirmed.",
+  });
+  assert.equal(f.calls.creates.length, 1);
+  assert.equal(f.calls.creates[0]?.signal?.aborted, true);
+  assert.equal(f.calls.cancels, 0);
+  assert.equal(f.calls.ends, 0);
+});
+
+await test("stalled first output cancels accepted work and retires with independent cleanup signals", async () => {
+  const caller = signal();
+  const f = fixture({
+    limits: { startupMs: 10, modelSilenceMs: 10, researchMs: 20 },
+    async *stream(signal) {
+      yield await waitForAbort(signal);
+    },
+  });
+  await assert.rejects(f.prepare({ title: "", content: "Note" }, { signal: caller }), {
+    name: "TimeoutError",
+    message: "Organization stalled while waiting for model output.",
+  });
+  assert.equal(caller.aborted, false);
+  assert.equal(f.calls.cancels, 1);
+  assert.equal(f.calls.ends, 1);
+  assert.ok(f.cleanups.every((cleanup) => !cleanup.aborted));
+});
+
+await test("stalled research is distinctly reported and the accepted session is retired", async () => {
+  const f = fixture({
+    limits: { startupMs: 10, modelSilenceMs: 10, researchMs: 20 },
+    async *stream(signal) {
+      yield researchEvents()[0]!;
+      await waitForAbort(signal);
+    },
+  });
+  await assert.rejects(f.prepare({ title: "", content: "Note" }, { signal: signal() }), {
+    name: "TimeoutError",
+    message: "Organization research stalled.",
+  });
+  assert.equal(f.calls.cancels, 1);
+  assert.equal(f.calls.ends, 1);
+});
+
+await test("discard retires a rejected result and coalesces with acknowledgement", async () => {
+  const f = fixture();
+  const prepared = await f.prepare({ title: "", content: "Note" }, { signal: signal() });
+  assert.deepEqual(await Promise.all([prepared.discard(), prepared.acknowledge()]), [
+    { status: "ended" },
+    { status: "ended" },
+  ]);
+  assert.equal(f.calls.ends, 1);
+});
+
+await test("a completed draft disposes its watchdog before waiting for acknowledgement", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const f = fixture({ limits: { startupMs: 10, modelSilenceMs: 10, researchMs: 20 } });
+  const prepared = await f.prepare({ title: "", content: "Note" }, { signal: signal() });
+  t.mock.timers.tick(1_000);
+  assert.equal(f.calls.creates[0]?.signal?.aborted, false);
+  assert.equal(f.calls.cancels, 0);
+  assert.equal(f.calls.ends, 0);
+  await prepared.acknowledge();
+});
+
+await test("terminates a progressing research loop before accepting an incomplete proposal", async () => {
+  const f = fixture({
+    maxModelCalls: 2,
+    events: [
+      modelSettled("tool-calls", "completed", "step-1"),
+      modelSettled("tool-calls", "completed", "step-2"),
+    ],
+  });
   await assert.rejects(
-    f.prepare({ title: "", content: "Note" }, { signal: signal() }),
-    /^Error: Organization session cleanup is unconfirmed\.$/,
+    f.prepare({ title: "note", content: "research" }, { signal: signal() }),
+    /complete draft/,
   );
+  assert.equal(f.calls.cancels, 1);
+  assert.equal(f.calls.ends, 1);
+});
+
+await test("permits a completed answer at the model-step boundary and ignores replayed settlements", async () => {
+  const f = fixture({
+    maxModelCalls: 2,
+    events: [
+      modelSettled("tool-calls", "completed", "step-1"),
+      modelSettled("tool-calls", "completed", "step-1"),
+    ],
+  });
+  const prepared = await f.prepare({ title: "note", content: "research" }, { signal: signal() });
+  assert.equal(prepared.draft.markdown, completed.reply);
+  await prepared.acknowledge();
+});
+
+await test("acknowledgement retry verifies expired history after an inactive end response", async () => {
+  const f = fixture({
+    history: async function* () {
+      yield await Promise.reject(
+        new ClientError(410, JSON.stringify({ code: "session_expired", message: "Expired" })),
+      );
+    },
+  });
+  const prepared = await f.prepare({ title: "note", content: "text" }, { signal: signal() });
+  f.failEnd(new Error("receipt lost"));
+  await assert.rejects(prepared.acknowledge(), /cleanup is unconfirmed/);
+  f.failEnd(new SessionNotActiveError());
+  assert.deepEqual(await prepared.acknowledge(), { status: "expired" });
+  assert.equal(f.calls.creates.length, 1);
+});
+
+await test("inactive end without readable terminal evidence stays retryable", async () => {
+  const f = fixture({
+    history: async function* () {
+      yield await Promise.reject(new Error("read unavailable"));
+    },
+  });
+  const prepared = await f.prepare({ title: "note", content: "text" }, { signal: signal() });
+  f.failEnd(new SessionNotActiveError());
+  await assert.rejects(prepared.acknowledge(), /cleanup is unconfirmed/);
+  f.failEnd();
+  assert.deepEqual(await prepared.acknowledge(), { status: "ended" });
 });

@@ -48,7 +48,7 @@ experiments/    Isolated experiments with separate setup
 
 Atlas owns user authorization, source provenance and external-action outcomes. eve may handle agent execution, but it does not replace those policies. External actions require the agreed user approval, and retries must handle uncertain provider outcomes. See [security boundaries](security.md).
 
-The [organizer](../agents/organizer/README.md) is preparation for #50, not a wired product flow. Hono owns note access and calls a private eve service. A standard eve research tool uses OpenRouter and returns source records through tool results. After Atlas accepts a draft, an explicit acknowledgement ends the session with zero-retention requested. Hosted storage and provider retention still require verification. Draft persistence and source rendering remain in #53.
+The [organizer](../agents/organizer/README.md) is preparation for #50, not a wired product flow. Hono owns note access and calls a private eve service. A standard eve research tool uses OpenRouter and returns source records through tool results. A temporary owner-bound run handle lets the browser reconnect without starting a second generation. After the browser confirms receipt, an explicit acknowledgement ends the session with zero retention requested. The current registry is process-local; deployment with multiple replicas or recovery across API restarts needs shared run storage. Hosted storage and provider retention still require verification. Explicit draft persistence and source rendering remain in #53.
 
 Use disposable sandboxes only for bounded work, and persist important outputs outside them. Do not create a second agent loop, approval journal, heartbeat or workflow system until a verified gap requires it.
 

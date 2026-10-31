@@ -1,12 +1,19 @@
 import {
   ClientError,
+  SessionNotActiveError,
   type ClientSession,
   type SendTurnInput,
   type SessionStreamEvent,
 } from "eve/client";
 import { setTimeout as delay } from "node:timers/promises";
 import type { Delivery } from "eve/sessions";
+import { GenerationCleanupError } from "../../server/organize-note.ts";
 import { researchResultSchema, type ResearchResult } from "./research.ts";
+import {
+  createOrganizerWatchdog,
+  validateOrganizerTimeouts,
+  type OrganizerTimeouts,
+} from "./watchdog.ts";
 
 type OrganizerSession = Pick<ClientSession, "cancel" | "end" | "stream">;
 type OrganizerClient = {
@@ -19,124 +26,166 @@ export type PreparedDraft = {
   draft: { markdown: string; sources: ResearchResult["sources"] };
   /** Call only after Atlas has accepted the complete draft. Bind that action to its owner. */
   acknowledge(): Promise<{ status: "ended" | "expired" }>;
+  /** Retire an unusable or explicitly discarded result without claiming delivery. */
+  discard(): Promise<{ status: "ended" | "expired" }>;
 };
 
 /** Transport adapter only. HTTP ownership, delivery acknowledgement and abandoned-run recovery are caller responsibilities. */
 export function createEveOrganizer({
   client,
   cleanupSignal,
+  timeouts,
+  maxModelCalls = 16,
 }: {
   client: OrganizerClient;
   cleanupSignal: () => AbortSignal;
+  timeouts: OrganizerTimeouts;
+  maxModelCalls?: number;
 }) {
+  validateOrganizerTimeouts(timeouts);
+  if (!Number.isSafeInteger(maxModelCalls) || maxModelCalls < 1) {
+    throw new Error("The organizer model-call limit must be a positive integer.");
+  }
   return async function prepare(
     note: { title: string; content: string },
     {
-      signal,
+      signal: callerSignal,
       onProgress,
     }: { signal: AbortSignal; onProgress?: (state: "researching" | "writing") => void },
   ): Promise<PreparedDraft> {
+    const watchdog = createOrganizerWatchdog(timeouts, callerSignal);
+    const signal = watchdog.signal;
     const throwIfCancelled = () => {
-      if (signal.aborted) throw new DOMException("Organization cancelled.", "AbortError");
+      if (callerSignal.aborted) throw new DOMException("Organization cancelled.", "AbortError");
+      signal.throwIfAborted();
     };
-    throwIfCancelled();
-    let accepted;
     try {
-      accepted = await client.sessions.create({ message: JSON.stringify(note), signal });
-    } catch {
-      // A failed creation response does not prove the server did not create a session.
-      throw new Error("Organization could not start. Its remote state is unconfirmed.");
-    }
-    const { session, delivery } = accepted;
-    let ending: Promise<{ status: "ended" | "expired" }> | undefined;
-    const retire = (reason: string) => {
-      ending ??= Promise.resolve().then(async () => {
+      throwIfCancelled();
+      let accepted;
+      try {
+        accepted = await client.sessions.create({ message: JSON.stringify(note), signal });
+      } catch {
+        throwIfCancelled();
+        // A failed creation response does not prove the server did not create a session.
+        throw new Error("Organization could not start. Its remote state is unconfirmed.");
+      }
+      const { session, delivery } = accepted;
+      watchdog.accepted();
+      let ending: Promise<{ status: "ended" | "expired" }> | undefined;
+      const retire = (reason: string) => {
+        ending ??= Promise.resolve().then(async () => {
+          try {
+            const cleanup = cleanupSignal();
+            cleanup.throwIfAborted();
+            const receipt = await session.end({ reason, signal: cleanup });
+            let result;
+            try {
+              result = await receipt.result({ signal: cleanup });
+            } catch (error) {
+              if (isExpired(error)) return { status: "expired" } as const;
+              // Retention can remove the receipt before the remaining history is purged.
+              return await verifyRetirement(session, cleanupSignal());
+            }
+            if (result.status !== "completed" || !result.sessionEnded) throw new Error();
+            // An ended session requests retention cleanup; it is not proof of physical deletion.
+            return { status: "ended" } as const;
+          } catch (error) {
+            if (isExpired(error)) return { status: "expired" } as const;
+            if (SessionNotActiveError.is(error) && error.code === "session_not_active") {
+              try {
+                // A previous end can succeed while its receipt disappears. Inactive
+                // alone is not proof; confirm the recorded end or expired history.
+                return await verifyRetirement(session, cleanupSignal());
+              } catch {
+                // Keep the operation retryable when that independent read also fails.
+              }
+            }
+            ending = undefined;
+            throw new Error("Organization session cleanup is unconfirmed.");
+          }
+        });
+        return ending;
+      };
+
+      let turnId: string | undefined;
+      try {
+        throwIfCancelled();
+        const researchCalls = new Set<string>();
+        const sources = new Map<string, ResearchResult["sources"][number]>();
+        const models = new Map<string, { outcome: string; finishReason?: string }>();
+        let replyRunId: string | undefined;
+        let completedResearch = false;
+        for await (const event of delivery.stream({ signal })) {
+          throwIfCancelled();
+          if (event.type === "delivery.consumed" && event.data.deliveryId === delivery.deliveryId) {
+            turnId = event.data.turnId;
+          }
+          if (event.scope?.turnId && event.scope.turnId !== turnId) continue;
+          watchdog.observe(event);
+          if (event.type === "model.settled") {
+            models.set(event.data.runId, event.data);
+            // A progressing research loop can avoid silence timeouts. Bound its
+            // model steps too, without turning elapsed time or dollars into a cap.
+            if (
+              models.size > maxModelCalls ||
+              (models.size === maxModelCalls && event.data.finishReason !== "stop")
+            ) {
+              throw new Error("Organization exceeded its model-call limit.");
+            }
+          } else if (
+            event.type === "content.completed" &&
+            event.data.kind === "text" &&
+            event.data.phase === "reply"
+          ) {
+            replyRunId = event.data.interrupted ? undefined : event.data.runId;
+          }
+          collectSources(event, researchCalls, sources, () => {
+            completedResearch = true;
+          });
+          if (event.type === "call.requested" && researchCalls.has(event.data.callId)) {
+            onProgress?.("researching");
+          } else if (event.type === "content.delta" && event.data.kind === "text") {
+            onProgress?.("writing");
+          }
+        }
+        const result = await delivery.result({ signal });
+        throwIfCancelled();
+        const replyModel = replyRunId === undefined ? undefined : models.get(replyRunId);
+        if (
+          result.status !== "completed" ||
+          result.outcome !== "handled" ||
+          !result.reply?.trim() ||
+          replyModel?.outcome !== "completed" ||
+          replyModel.finishReason !== "stop" ||
+          (researchCalls.size > 0 && !completedResearch)
+        ) {
+          throw new Error();
+        }
+        return {
+          draft: { markdown: result.reply, sources: [...sources.values()] },
+          acknowledge: () => retire("Atlas accepted the draft"),
+          discard: () => retire("Atlas discarded the draft"),
+        };
+      } catch {
+        // Aborting a read does not stop accepted eve work. Cancel the isolated run, then retire it.
         try {
           const cleanup = cleanupSignal();
           cleanup.throwIfAborted();
-          const receipt = await session.end({ reason, signal: cleanup });
-          let result;
-          try {
-            result = await receipt.result({ signal: cleanup });
-          } catch (error) {
-            if (isExpired(error)) return { status: "expired" } as const;
-            // Retention can remove the receipt before the remaining history is purged.
-            return await verifyRetirement(session, cleanupSignal());
-          }
-          if (result.status !== "completed" || !result.sessionEnded) throw new Error();
-          // An ended session requests retention cleanup; it is not proof of physical deletion.
-          return { status: "ended" } as const;
-        } catch (error) {
-          if (isExpired(error)) return { status: "expired" } as const;
-          ending = undefined;
-          throw new Error("Organization session cleanup is unconfirmed.");
+          const cancellation = await session.cancel({ turnId, signal: cleanup });
+          await cancellation.result({ signal: cleanup });
+        } catch {
+          // Terminal retirement below is still attempted if cancellation could not be confirmed.
         }
-      });
-      return ending;
-    };
-
-    let turnId: string | undefined;
-    try {
-      throwIfCancelled();
-      const researchCalls = new Set<string>();
-      const sources = new Map<string, ResearchResult["sources"][number]>();
-      const models = new Map<string, { outcome: string; finishReason?: string }>();
-      let replyRunId: string | undefined;
-      let completedResearch = false;
-      for await (const event of delivery.stream({ signal })) {
+        try {
+          await retire("Atlas abandoned the generation");
+        } catch {
+          throw new GenerationCleanupError(() => retire("Atlas abandoned the generation"));
+        }
         throwIfCancelled();
-        if (event.type === "delivery.consumed" && event.data.deliveryId === delivery.deliveryId) {
-          turnId = event.data.turnId;
-        }
-        if (event.scope?.turnId && event.scope.turnId !== turnId) continue;
-        if (event.type === "model.settled") {
-          models.set(event.data.runId, event.data);
-        } else if (
-          event.type === "content.completed" &&
-          event.data.kind === "text" &&
-          event.data.phase === "reply"
-        ) {
-          replyRunId = event.data.interrupted ? undefined : event.data.runId;
-        }
-        collectSources(event, researchCalls, sources, () => {
-          completedResearch = true;
-        });
-        if (event.type === "call.requested" && researchCalls.has(event.data.callId)) {
-          onProgress?.("researching");
-        } else if (event.type === "content.delta" && event.data.kind === "text") {
-          onProgress?.("writing");
-        }
+        throw new Error("Organization did not return a complete draft.");
       }
-      const result = await delivery.result({ signal });
-      throwIfCancelled();
-      const replyModel = replyRunId === undefined ? undefined : models.get(replyRunId);
-      if (
-        result.status !== "completed" ||
-        result.outcome !== "handled" ||
-        !result.reply?.trim() ||
-        replyModel?.outcome !== "completed" ||
-        replyModel.finishReason !== "stop" ||
-        (researchCalls.size > 0 && !completedResearch)
-      ) {
-        throw new Error();
-      }
-      return {
-        draft: { markdown: result.reply, sources: [...sources.values()] },
-        acknowledge: () => retire("Atlas accepted the draft"),
-      };
-    } catch {
-      // Aborting a read does not stop accepted eve work. Cancel the isolated run, then retire it.
-      try {
-        const cleanup = cleanupSignal();
-        cleanup.throwIfAborted();
-        const cancellation = await session.cancel({ turnId, signal: cleanup });
-        await cancellation.result({ signal: cleanup });
-      } catch {
-        // Terminal retirement below is still attempted if cancellation could not be confirmed.
-      }
-      await retire("Atlas abandoned the generation");
-      throwIfCancelled();
-      throw new Error("Organization did not return a complete draft.");
+    } finally {
+      watchdog.dispose();
     }
   };
 }

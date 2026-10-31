@@ -194,3 +194,14 @@ it.each(["read", "generate", "recheck"])(
     if (phase === "read") expect(generateDraft).not.toHaveBeenCalled();
   },
 );
+
+it("rejects generated Markdown that cannot fit the existing note Save contract", async () => {
+  const run = createOrganizeNote({
+    readNote: async () => savedNote,
+    generateDraft: async () => ({ markdown: "x".repeat(100_001), sources: [] }),
+  });
+  expect(await run(ownerId, noteId, { signal: new AbortController().signal })).toEqual({
+    status: "failed",
+    reason: "invalid_draft",
+  });
+});
