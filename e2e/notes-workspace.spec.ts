@@ -269,7 +269,7 @@ test("a forbidden save keeps input and blocks further writes", async ({ page }) 
   const source = page.getByRole("textbox", { name: "Markdown source" });
   await source.fill("Preserve denied edit");
   await page.getByRole("button", { name: "Save", exact: true }).click();
-  await expect(page.getByRole("alert")).toContainText("You do not have access");
+  await expect(page.getByRole("alert")).toContainText("This request was blocked.");
   await expect(source).toHaveValue("Preserve denied edit");
   await expect(page.getByRole("button", { name: "Save", exact: true })).toBeDisabled();
 });

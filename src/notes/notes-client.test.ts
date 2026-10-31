@@ -177,3 +177,21 @@ describe("bounded notes requests", () => {
     }
   });
 });
+
+it("does not automatically retry a create whose response is lost after the write", async () => {
+  const committed: (typeof note)[] = [];
+  const request = vi.fn<typeof fetch>((_url, init) => {
+    if (init?.method === "POST") {
+      committed.push({ ...note });
+      return Promise.reject(new TypeError("Synthetic response lost after commit"));
+    }
+    return Promise.resolve(Response.json({ notes: committed }));
+  });
+  const client = createNotesClient(request);
+  await expect(
+    client.create({ title: note.title, content: note.content, createdAt: note.createdAt }),
+  ).rejects.toThrow();
+  expect(committed).toHaveLength(1);
+  expect(request.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(1);
+  expect(await client.list()).toEqual([note]);
+});

@@ -49,7 +49,9 @@ export function failureMessage(kind: RequestFailure, operation: "list" | "read" 
     case "unauthenticated":
       return "Your session has ended. Sign in again. Copy any unsaved text before leaving this page.";
     case "forbidden":
-      return "You do not have access to this note. Your unsaved text is preserved.";
+      return operation === "read"
+        ? "This request was blocked. Your current text is unchanged. You can choose another note."
+        : "This request was blocked. Saving is unavailable until request access is restored. Your unsaved text is preserved.";
     case "missing":
       return "This note is no longer available. Your unsaved text is preserved. Refresh the notes list or keep your text as a new note.";
     case "unavailable":

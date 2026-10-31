@@ -143,7 +143,7 @@ test("a forbidden read does not block the current draft or another allowed note"
   const shortButton = page.getByRole("button", { name: "A", exact: true });
   expect((await shortButton.boundingBox())?.width).toBeGreaterThanOrEqual(44);
   await page.getByRole("button", { name: "Forbidden", exact: true }).click();
-  await expect(page.getByRole("alert")).toContainText("You do not have access");
+  await expect(page.getByRole("alert")).toContainText("This request was blocked.");
   await source.fill("Still editable");
   await expect(page.getByRole("button", { name: "Save", exact: true })).toBeEnabled();
   await expect(shortButton).toBeEnabled();
@@ -243,3 +243,31 @@ for (const operation of ["list", "read", "save"] as const) {
       );
   });
 }
+
+test("a missing different note preserves the current draft and offers only applicable recovery", async ({
+  page,
+}) => {
+  const missing = { ...serverNote, id: secondId, title: "Deleted elsewhere" };
+  await page.route("**/api/notes", (route) =>
+    route.fulfill({ json: { notes: [serverNote, missing] } }),
+  );
+  await page.route(`**/api/notes/${firstId}`, (route) =>
+    route.fulfill({ json: serverNote, headers: { ETag: '"v1"' } }),
+  );
+  await page.route(`**/api/notes/${secondId}`, (route) =>
+    route.fulfill({ status: 404, json: { error: { code: "NOT_FOUND", message: "Missing" } } }),
+  );
+  await page.goto("/");
+  const source = page.getByRole("textbox", { name: "Markdown source" });
+  await expect(source).toHaveValue("Original text");
+  await page.getByRole("button", { name: "Deleted elsewhere", exact: true }).click();
+  await expect(page.getByRole("alert")).toContainText("Your current text is unchanged.");
+  await expect(source).toHaveValue("Original text");
+  await expect(page.getByRole("button", { name: "Deleted elsewhere", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Keep as new note", exact: true })).toHaveCount(0);
+  await source.fill("Edit the still-existing note");
+  await expect(page.getByRole("button", { name: "Save", exact: true })).toBeEnabled();
+  await page.getByRole("button", { name: "New note", exact: true }).click();
+  await page.getByRole("button", { name: "Keep editing" }).click();
+  await expect(source).toHaveValue("Edit the still-existing note");
+});

@@ -50,3 +50,12 @@ describe("editor recovery and save state", () => {
     );
   });
 });
+
+it("does not misreport a forbidden request as resource ownership denial", () => {
+  expect(failureMessage("forbidden", "read")).toBe(
+    "This request was blocked. Your current text is unchanged. You can choose another note.",
+  );
+  expect(failureMessage("forbidden", "save")).toBe(
+    "This request was blocked. Saving is unavailable until request access is restored. Your unsaved text is preserved.",
+  );
+});
