@@ -2,7 +2,7 @@
 
 A personal assistant for scattered context: notes, connected sources and useful memory.
 
-Atlas currently has a React/TypeScript source viewer and a local Hono API. The WorkOS browser sign-in routes and protected API boundary are implemented and were verified live against the WorkOS Staging environment, including five-person dashboard access, failed/cancelled login and provider recovery; Neon persistence remains pending. The [architecture](docs/architecture.md) separates accepted decisions from implemented behavior.
+Atlas currently has a React/TypeScript notes editor built with shadcn/Base UI and a local Hono API. The editor and development fixtures follow the REST/Zod note contract with separate create/update and ETag/If-Match handling. Development saves are session-only; actual note persistence and account lifecycle integration remain pending. The WorkOS browser sign-in routes and protected API boundary were verified live against WorkOS Staging. The [architecture](docs/architecture.md) separates accepted decisions from implemented behavior.
 
 ## Start development
 

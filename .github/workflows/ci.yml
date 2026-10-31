@@ -137,11 +137,11 @@ jobs:
       - run: vp install --frozen-lockfile
       - run: vp exec playwright install --with-deps chromium
       - run: vp exec playwright test
-      - name: Upload the failure trace
-        if: failure()
+      - name: Upload browser screenshots and failure traces
+        if: ${{ !cancelled() }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: playwright-trace
+          name: playwright-evidence
           path: test-results/
           retention-days: 7
 
