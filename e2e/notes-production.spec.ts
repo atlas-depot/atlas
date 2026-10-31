@@ -51,7 +51,15 @@ test("production editor opens and updates through actual HTTP requests with If-M
   let updates = 0;
   await page.route("**/api/notes", (route) =>
     route.fulfill({
-      json: { notes: [{ ...note, content: "List summary must not become editor input" }] },
+      json: {
+        notes: [
+          {
+            ...note,
+            title: "Old list title",
+            content: "List summary must not become editor input",
+          },
+        ],
+      },
     }),
   );
   await page.route(`**/api/notes/${id}`, async (route) => {
@@ -75,6 +83,12 @@ test("production editor opens and updates through actual HTTP requests with If-M
   await page.goto("/");
   const source = page.getByRole("textbox", { name: "Markdown source" });
   await expect(source).toHaveValue("Individual HTTP source");
+  await expect(
+    page
+      .getByRole("navigation", { name: "Notes" })
+      .getByRole("button", { name: "HTTP contract", exact: true }),
+  ).toBeVisible();
+  await expect(page.getByRole("button", { name: "Old list title", exact: true })).toHaveCount(0);
   for (const content of ["First HTTP edit", "Second HTTP edit"]) {
     await source.fill(content);
     await page.getByRole("button", { name: "Save", exact: true }).click();
@@ -98,3 +112,134 @@ test("normal production assets exclude synthetic note data", async () => {
   ])
     expect(content).not.toContain(fixtureText);
 });
+
+const firstId = "fa100001-1234-4000-8000-000000000001";
+const secondId = "fa100001-1234-4000-8000-000000000002";
+const serverNote = {
+  id: firstId,
+  title: "A",
+  content: "Original text",
+  createdAt: "2026-10-28T09:00:00.000Z",
+  updatedAt: "2026-10-28T09:00:00.000Z",
+};
+
+test("a forbidden read does not block the current draft or another allowed note", async ({
+  page,
+}) => {
+  const other = { ...serverNote, id: secondId, title: "Forbidden" };
+  await page.route("**/api/notes", (route) =>
+    route.fulfill({ json: { notes: [serverNote, other] } }),
+  );
+  await page.route(`**/api/notes/${firstId}`, (route) =>
+    route.fulfill({ json: serverNote, headers: { ETag: '"v1"' } }),
+  );
+  await page.route(`**/api/notes/${secondId}`, (route) =>
+    route.fulfill({ status: 403, json: { error: { code: "FORBIDDEN", message: "Denied" } } }),
+  );
+  await page.setViewportSize({ width: 375, height: 812 });
+  await page.goto("/");
+  const source = page.getByRole("textbox", { name: "Markdown source" });
+  await expect(source).toHaveValue("Original text");
+  const shortButton = page.getByRole("button", { name: "A", exact: true });
+  expect((await shortButton.boundingBox())?.width).toBeGreaterThanOrEqual(44);
+  await page.getByRole("button", { name: "Forbidden", exact: true }).click();
+  await expect(page.getByRole("alert")).toContainText("You do not have access");
+  await source.fill("Still editable");
+  await expect(page.getByRole("button", { name: "Save", exact: true })).toBeEnabled();
+  await expect(shortButton).toBeEnabled();
+  await page.getByRole("button", { name: "New note", exact: true }).click();
+  await page.getByRole("button", { name: "Discard changes", exact: true }).click();
+  await shortButton.click();
+  await expect(source).toHaveValue("Original text");
+});
+
+test("initial missing read removes the entry and gives recovery that exists", async ({ page }) => {
+  await page.route("**/api/notes", (route) => route.fulfill({ json: { notes: [serverNote] } }));
+  await page.route(`**/api/notes/${firstId}`, (route) =>
+    route.fulfill({ status: 404, json: { error: { code: "NOT_FOUND", message: "Missing" } } }),
+  );
+  await page.goto("/");
+  await expect(page.getByRole("alert")).toContainText(
+    "Refresh the notes list or choose another note.",
+  );
+  await expect(page.getByRole("alert")).not.toContainText("keep your text as a new note");
+  await expect(page.getByRole("navigation", { name: "Notes" }).getByRole("button")).toHaveCount(0);
+  await page.getByRole("button", { name: "New note", exact: true }).click();
+  await expect(page.getByRole("textbox", { name: "Title", exact: true })).toHaveValue("");
+});
+
+test("adopting a conflict version synchronizes its changed title in the sidebar", async ({
+  page,
+}) => {
+  let reads = 0;
+  await page.route("**/api/notes", (route) => route.fulfill({ json: { notes: [serverNote] } }));
+  await page.route(`**/api/notes/${firstId}`, (route) => {
+    if (route.request().method() === "PUT")
+      return route.fulfill({
+        status: 412,
+        json: { error: { code: "PRECONDITION_FAILED", message: "Changed" } },
+      });
+    reads++;
+    return route.fulfill({
+      json: { ...serverNote, title: reads === 1 ? "A" : "Authoritative renamed note" },
+      headers: { ETag: reads === 1 ? '"v1"' : '"v2"' },
+    });
+  });
+  await page.goto("/");
+  await page.getByRole("textbox", { name: "Markdown source" }).fill("Local edit");
+  await page.getByRole("button", { name: "Save", exact: true }).click();
+  await page.getByRole("button", { name: "Compare latest" }).click();
+  await page.getByRole("button", { name: "Use latest version" }).click();
+  await page.getByRole("button", { name: "Discard changes", exact: true }).click();
+  await expect(page.getByRole("textbox", { name: "Title", exact: true })).toHaveValue(
+    "Authoritative renamed note",
+  );
+  await expect(
+    page
+      .getByRole("navigation", { name: "Notes" })
+      .getByRole("button", { name: "Authoritative renamed note", exact: true }),
+  ).toBeVisible();
+  await expect(page.getByRole("button", { name: "A", exact: true })).toHaveCount(0);
+});
+
+for (const operation of ["list", "read", "save"] as const) {
+  test(`hung ${operation} releases controls after the request deadline`, async ({ page }) => {
+    await page.clock.install();
+    let stalled = false;
+    await page.route("**/api/notes", (route) => {
+      if (operation === "list") {
+        stalled = true;
+        return;
+      }
+      return route.fulfill({ json: { notes: [serverNote] } });
+    });
+    await page.route(`**/api/notes/${firstId}`, (route) => {
+      if (operation === "read" || route.request().method() === "PUT") {
+        stalled = true;
+        return;
+      }
+      return route.fulfill({ json: serverNote, headers: { ETag: '"v1"' } });
+    });
+    await page.goto("/");
+    if (operation === "save") {
+      await page.getByRole("textbox", { name: "Markdown source" }).fill("Preserve stalled edit");
+      await page.getByRole("button", { name: "Save", exact: true }).click();
+    }
+    await expect.poll(() => stalled).toBe(true);
+    await page.clock.fastForward(30_001);
+    await expect(page.getByRole("alert")).toContainText(
+      operation === "list"
+        ? "Could not load"
+        : operation === "read"
+          ? "Could not open"
+          : "Save failed",
+    );
+    if (operation === "list")
+      await expect(page.getByRole("button", { name: "Retry loading" })).toBeEnabled();
+    else await expect(page.getByRole("button", { name: "New note", exact: true })).toBeEnabled();
+    if (operation === "save")
+      await expect(page.getByRole("textbox", { name: "Markdown source" })).toHaveValue(
+        "Preserve stalled edit",
+      );
+  });
+}

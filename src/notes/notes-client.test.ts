@@ -22,7 +22,10 @@ describe("notes REST client", () => {
     expect(await client.list()).toEqual([note]);
     expect(await client.read(id)).toEqual({ note, etag: '"opaque-17"' });
     expect(request.mock.calls.map(([url]) => url)).toEqual(["/api/notes", `/api/notes/${id}`]);
-    expect(request.mock.calls[1][1]).toEqual({ credentials: "same-origin" });
+    expect(request.mock.calls[1][1]).toMatchObject({
+      credentials: "same-origin",
+      signal: expect.any(AbortSignal),
+    });
   });
 
   it("creates without an ID and updates with only editable fields and If-Match", async () => {
@@ -120,5 +123,57 @@ describe("notes REST client", () => {
     const client = createNotesClient(request);
     await expect(client.read(id)).rejects.toThrow("Unexpected note identity.");
     await expect(client.read(id)).rejects.toThrow();
+  });
+});
+
+describe("bounded notes requests", () => {
+  it.each(["list", "read", "create", "update"] as const)(
+    "aborts a hung %s and ignores late success",
+    async (operation) => {
+      vi.useFakeTimers();
+      try {
+        let finish!: (response: Response) => void;
+        const request = vi.fn<typeof fetch>(
+          () =>
+            new Promise((resolve) => {
+              finish = resolve;
+            }),
+        );
+        const client = createNotesClient(request, 100);
+        const pending =
+          operation === "list"
+            ? client.list()
+            : operation === "read"
+              ? client.read(id)
+              : operation === "create"
+                ? client.create({
+                    title: note.title,
+                    content: note.content,
+                    createdAt: note.createdAt,
+                  })
+                : client.update(id, { title: note.title, content: note.content }, '"v1"');
+        const rejected = expect(pending).rejects.toThrow("timed out");
+        await vi.advanceTimersByTimeAsync(100);
+        await rejected;
+        expect(request.mock.calls[0][1]?.signal?.aborted).toBe(true);
+        finish(result('"late"'));
+      } finally {
+        vi.useRealTimers();
+      }
+    },
+  );
+
+  it("bounds a stalled response body", async () => {
+    vi.useFakeTimers();
+    try {
+      const request = vi.fn<typeof fetch>().mockResolvedValue(new Response(new ReadableStream()));
+      const pending = createNotesClient(request, 100).list();
+      const rejected = expect(pending).rejects.toThrow("timed out");
+      await vi.advanceTimersByTimeAsync(100);
+      await rejected;
+      expect(request.mock.calls[0][1]?.signal?.aborted).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

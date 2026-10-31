@@ -21,6 +21,11 @@ body {
 
 .notes-workspace [data-slot="button"],
 .notes-dialog button {
+  min-width: 44px;
+  min-height: 44px;
+}
+
+.notes-workspace input {
   min-height: 44px;
 }
 

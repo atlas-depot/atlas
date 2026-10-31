@@ -35,9 +35,42 @@ export class NotesRequestError extends Error {
 }
 
 /** Same-origin transport; credentials stay in the browser's HttpOnly cookie. */
-export function createNotesClient(request: typeof fetch = globalThis.fetch): NotesStore {
+export function createNotesClient(
+  request: typeof fetch = globalThis.fetch,
+  timeoutMs = 30_000,
+): NotesStore {
+  async function boundedRequest(path: string, init: RequestInit) {
+    const controller = new AbortController();
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timeout = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => {
+        controller.abort();
+        reject(new Error("The notes request timed out."));
+      }, timeoutMs);
+    });
+    try {
+      return await Promise.race([
+        (async () => {
+          const result = await request(path, { ...init, signal: controller.signal });
+          // Bound body delivery as well as headers. Late responses cannot update the screen.
+          const body = await result.arrayBuffer();
+          return new Response(body.byteLength ? body : null, {
+            status: result.status,
+            statusText: result.statusText,
+            headers: result.headers,
+          });
+        })(),
+        timeout,
+      ]);
+    } finally {
+      clearTimeout(timer);
+    }
+  }
   async function response(path: string, init: RequestInit = {}, expectedStatus = 200) {
-    const result = await request(`/api/notes${path}`, { ...init, credentials: "same-origin" });
+    const result = await boundedRequest(`/api/notes${path}`, {
+      ...init,
+      credentials: "same-origin",
+    });
     if (!result.ok) {
       const error = apiErrorSchema.safeParse(await result.json().catch(() => null));
       throw new NotesRequestError(

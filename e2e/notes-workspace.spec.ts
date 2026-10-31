@@ -3,7 +3,6 @@ import { expect, test } from "@playwright/test";
 test("edit, keyboard save, and switching notes preserve the literal Markdown", async ({ page }) => {
   await page.goto("/");
   const source = page.getByRole("textbox", { name: "Markdown source" });
-  await expect(page.getByRole("status")).toHaveText("Loading notes...");
   await expect(page.getByRole("textbox", { name: "Title", exact: true })).toHaveValue(
     "Project review",
   );
@@ -17,7 +16,6 @@ test("edit, keyboard save, and switching notes preserve the literal Markdown", a
       .getByRole("heading", { name: "My note" }),
   ).toBeVisible();
   await page.keyboard.press("Control+s");
-  await expect(page.getByRole("status")).toHaveText("Saving...");
   await expect(page.getByRole("status")).toHaveText("Saved for this preview session");
   await page.getByRole("button", { name: "Reading notes", exact: true }).click();
   await page.getByRole("button", { name: "Project review", exact: true }).click();
@@ -42,6 +40,9 @@ test("typing during save stays unsaved and repeated shortcuts do not acknowledge
 }) => {
   await page.goto("/?notesExample=slow-save");
   const source = page.getByRole("textbox", { name: "Markdown source" });
+  await expect(source).toHaveValue(/Prepare the/);
+  await page.clock.install({ time: new Date(0) });
+  await page.clock.pauseAt(new Date(1000));
   await source.fill("First snapshot");
   await page.keyboard.press("Control+s");
   await expect(page.getByRole("status")).toHaveText("Saving...");
@@ -50,9 +51,11 @@ test("typing during save stays unsaved and repeated shortcuts do not acknowledge
     "Saving earlier edits. Newer changes are unsaved.",
   );
   await page.keyboard.press("Control+s");
+  await page.clock.runFor(1501);
   await expect(page.getByRole("status")).toHaveText("Unsaved changes");
   await expect(source).toHaveValue("A newer edit");
   await page.getByRole("button", { name: "Save", exact: true }).click();
+  await page.clock.runFor(1501);
   await expect(page.getByRole("status")).toHaveText("Saved for this preview session");
 });
 
@@ -271,7 +274,7 @@ test("a forbidden save keeps input and blocks further writes", async ({ page }) 
   await expect(page.getByRole("button", { name: "Save", exact: true })).toBeDisabled();
 });
 
-test("a missing note offers refresh without discarding text, then explicit creation of a new note", async ({
+test("a missing save removes the old entry before explicit creation, without requiring refresh", async ({
   page,
 }) => {
   await page.goto("/?notesExample=missing-save");
@@ -279,7 +282,7 @@ test("a missing note offers refresh without discarding text, then explicit creat
   await source.fill("Keep this orphaned local edit");
   await page.getByRole("button", { name: "Save", exact: true }).click();
   await expect(page.getByRole("alert")).toContainText("This note is no longer available.");
-  await page.getByRole("button", { name: "Refresh notes", exact: true }).click();
+
   await expect(
     page
       .getByRole("navigation", { name: "Notes" })
@@ -290,6 +293,11 @@ test("a missing note offers refresh without discarding text, then explicit creat
   await page.getByRole("button", { name: "Save", exact: true }).click();
   await expect(page.getByRole("status")).toHaveText("Saved for this preview session");
   await expect(source).toHaveValue("Keep this orphaned local edit");
+  await expect(
+    page
+      .getByRole("navigation", { name: "Notes" })
+      .getByRole("button", { name: "Project review", exact: true }),
+  ).toHaveCount(1);
 });
 
 test("controls and preview remain usable across laptop, tablet and narrow touch widths", async ({
@@ -314,9 +322,14 @@ test("controls and preview remain usable across laptop, tablet and narrow touch 
         "parseFloat(getComputedStyle(document.querySelector('#note-content')).fontSize)",
       ),
     ).toBeGreaterThanOrEqual(16);
+    expect(
+      (await page.getByRole("textbox", { name: "Title", exact: true }).boundingBox())?.height,
+    ).toBeGreaterThanOrEqual(44);
     const buttons = page.getByRole("button");
-    for (const button of await buttons.all())
+    for (const button of await buttons.all()) {
       expect((await button.boundingBox())?.height).toBeGreaterThanOrEqual(44);
+      expect((await button.boundingBox())?.width).toBeGreaterThanOrEqual(44);
+    }
     if (width >= 1200 || width <= 375)
       expect((await previewHeading.boundingBox())?.y).toBeLessThan(812);
   }

@@ -70,7 +70,7 @@ export function NotesWorkspace({
         : null);
   const blocked =
     recoveryKind === "unauthenticated" ||
-    recoveryKind === "forbidden" ||
+    (recoveryKind === "forbidden" && readFailure === null) ||
     recoveryKind === "unavailable";
 
   const clearPrivateCache = useCallback(() => {
@@ -85,6 +85,9 @@ export function NotesWorkspace({
       content: snapshot.note.content,
       createdAt: snapshot.note.createdAt,
     });
+    setNotes((current) =>
+      current.map((note) => (note.id === snapshot.note.id ? snapshot.note : note)),
+    );
     setSaved(snapshot);
     setSaveState("idle");
     setComparison(null);
@@ -120,6 +123,7 @@ export function NotesWorkspace({
           const kind = classifyFailure(error);
           setReadFailure({ id, compare: false, kind });
           if (kind === "unauthenticated") clearPrivateCache();
+          if (kind === "missing") setNotes((current) => current.filter((note) => note.id !== id));
         }
       } finally {
         if (active) {
@@ -198,6 +202,8 @@ export function NotesWorkspace({
     } catch (error) {
       const kind = classifyFailure(error);
       setSaveState(kind);
+      if (kind === "missing" && saved)
+        setNotes((current) => current.filter((note) => note.id !== saved.note.id));
       if (kind === "unauthenticated") clearPrivateCache();
     } finally {
       busyRef.current = false;
@@ -276,7 +282,9 @@ export function NotesWorkspace({
         : openingId
           ? "Opening note..."
           : readFailure
-            ? failureMessage(readFailure.kind, "read")
+            ? readFailure.kind === "missing"
+              ? "This note is no longer available. Your current text is unchanged. Refresh the notes list or choose another note."
+              : failureMessage(readFailure.kind, "read")
             : saveState === "saving"
               ? draft && savingSnapshot
                 ? savingMessage(draft, savingSnapshot)
