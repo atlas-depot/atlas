@@ -22,9 +22,21 @@ export function readDatabaseUrl(environment: Record<string, string | undefined>)
   return parsed.data;
 }
 
+/** Synthetic setup requires a deliberate development-only invocation. */
+export function readDevelopmentDatabaseUrl(environment: Record<string, string | undefined>) {
+  if (environment.NODE_ENV !== "development") {
+    throw new Error("Development database setup requires NODE_ENV=development.");
+  }
+  return readDatabaseUrl(environment);
+}
+
 /** Only isolated loopback servers may be used by tests that create/drop databases. */
 export function readTestDatabaseUrl(environment: Record<string, string | undefined>) {
-  const value = readDatabaseUrl({ DATABASE_URL: environment.TEST_DATABASE_URL });
+  const parsed = databaseUrlSchema.safeParse(environment.TEST_DATABASE_URL);
+  if (!parsed.success) {
+    throw new Error("Set TEST_DATABASE_URL to a valid PostgreSQL connection URL.");
+  }
+  const value = parsed.data;
   if (!["localhost", "127.0.0.1", "[::1]"].includes(new URL(value).hostname)) {
     throw new Error("Database integration tests require an isolated local PostgreSQL server.");
   }

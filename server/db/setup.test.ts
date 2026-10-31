@@ -16,7 +16,7 @@ it.each([
   "fails closed with sanitized output for invalid development setup: $action",
   async ({ action, env }) => {
     const result = await promisify(execFile)(process.execPath, ["server/db/setup.ts", action], {
-      env: { PATH: process.env.PATH, ...env },
+      env: { PATH: process.env.PATH, NODE_ENV: "development", ...env },
       timeout: 10_000,
     }).then(
       () => {
@@ -27,7 +27,8 @@ it.each([
     expect(result).toMatchObject({
       code: 1,
       stdout: "",
-      stderr: "Development database setup failed. Check DATABASE_URL and database availability.\n",
+      stderr:
+        "Development database setup failed. Set NODE_ENV=development and check DATABASE_URL and database availability.\n",
     });
   },
   15_000,

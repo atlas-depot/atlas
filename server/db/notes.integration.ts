@@ -176,12 +176,19 @@ it("initializes an empty database and preserves edits and unrelated notes on set
   const fresh = openDatabase(url.toString());
   const runSetup = (action: string, extra: Record<string, string> = {}) =>
     promisify(execFile)(process.execPath, ["server/db/setup.ts", action], {
-      env: { PATH: process.env.PATH, DATABASE_URL: url.toString(), ...extra },
+      env: {
+        PATH: process.env.PATH,
+        NODE_ENV: "development",
+        DATABASE_URL: url.toString(),
+        ...extra,
+      },
       timeout: 15_000,
     });
   try {
     await expect(runSetup("seed")).rejects.toThrow();
-    await expect(runSetup("init", { NODE_ENV: "production" })).rejects.toThrow();
+    for (const mode of ["", "test", "staging", "production"]) {
+      await expect(runSetup("init", { NODE_ENV: mode })).rejects.toThrow();
+    }
     const before = await fresh.db.execute<{ table: string | null }>(
       sql`SELECT to_regclass('public.notes')::text AS "table"`,
     );
