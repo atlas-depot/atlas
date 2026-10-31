@@ -44,6 +44,6 @@ No day-one commitment to billing, a graph visualization, OCR for every format, a
 
 ## UI boundary
 
-Use existing component libraries; do not author custom UI primitives. Composing product screens from library components is expected. Do not make custom SVG icons, use emoji as UI icons, or use lucide-react. Hugeicons, Phosphor, Base UI, and shadcn are candidates, not a requirement to install all of them.
+Use shadcn components built on Base UI, as agreed for the notes editor. Do not author custom UI primitives. Composing product screens from library components is expected. Do not make custom SVG icons, use emoji as UI icons, or use lucide-react. Hugeicons and Phosphor remain icon options; add one only for a concrete consumer.
 
 Colors, tokens, panel widths, navigation, typography, and motion remain team decisions. See [historical references](design/references.md); none is a binding production design.
