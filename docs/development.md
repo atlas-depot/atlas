@@ -66,7 +66,7 @@ For concurrent worktrees, set different `API_PORT` values and frontend ports, fo
 
 The Drizzle PostgreSQL schema lives in `server/db/schema.ts`. Generate a migration after changing it with `pnpm db:generate --name=describe-change`. Generation needs no database credentials and does not apply SQL. Commit the generated SQL, snapshot and journal under `drizzle/` together with the schema. Review the SQL before applying it; never rewrite an applied migration.
 
-Notes store a verified WorkOS owner ID, Markdown source, timestamps and a positive internal revision counter. Public field limits remain in `shared/notes.ts`; PostgreSQL text lengths do not measure UTF-16 code units. Owner/revision enforcement lives in the note operations, not the schema alone. CI replay and API storage wiring are not connected yet.
+Notes store a verified WorkOS owner ID, Markdown source, timestamps and a positive internal revision counter. Public field limits remain in `shared/notes.ts`; PostgreSQL text lengths do not measure UTF-16 code units. Owner/revision enforcement lives in the note operations, not the schema alone. API storage wiring is not connected yet.
 
 Set server-only `DATABASE_URL` in your ignored `.env` to your isolated development PostgreSQL database, then run `pnpm db:migrate`. This applies pending committed migrations and closes its connection pool on success or failure. Re-running it leaves already recorded migrations alone; it does not reset data. Migration failures exit nonzero without printing driver errors or connection details. The API still starts without a database setting because storage is not wired into its routes yet.
 
@@ -92,7 +92,7 @@ Run real-storage tests separately from the credential-free root suite:
 TEST_DATABASE_URL=postgresql://USER@127.0.0.1:55468/postgres pnpm test:db
 ```
 
-Use an isolated local PostgreSQL server and a test role with database creation permission. The suite requires a loopback host, creates a randomly named database, replays committed migrations and drops only that generated database after closing its pools. It never reads `DATABASE_URL` or root `.env`. Tests cover persistence through another connection, owner isolation, stale writes/deletes, concurrent writes, validation, missing notes and storage failure. Identity is synthetic; these tests do not verify WorkOS or Neon access. CI wiring remains pending.
+Use an isolated local PostgreSQL server and a test role with database creation permission. The suite requires a loopback host, creates a randomly named database, replays committed migrations and drops only that generated database after closing its pools. It never reads `DATABASE_URL` or root `.env`. Tests cover persistence through another connection, owner isolation, stale writes/deletes, concurrent writes, validation, missing notes, storage failure and repeatable setup/seed. Identity is synthetic; these tests do not verify WorkOS or Neon access.
 
 Drizzle Kit uses esbuild's packaged platform executable. `allowBuilds.esbuild: false` disables its dependency install scripts; migration generation must continue to work after a frozen install.
 
@@ -167,7 +167,9 @@ Vercel environment variables are the selected hosting approach. Project linkage,
 
 ## CI and deployment status
 
-CI runs on pull requests and pushes to `main`. Required `verify` aggregates format, lint/typecheck and build. Coverage runs the full root suite separately and publishes its summary; browser regression is also separate. Neither belongs to the `verify` aggregate. The lint job installs the isolated experiment and runs its mocked budget-guard tests without credentials. CI uses `.node-version`.
+CI runs on pull requests and pushes to `main`. Required `verify` aggregates format, lint/typecheck, build and database regression. The database job provisions an ephemeral PostgreSQL 17 service, waits for readiness and runs `test:db` through a dynamically assigned loopback port. Tests create clean databases and replay versioned migrations before exercising note operations and setup/seed. The service uses synthetic CI-only credentials; no Neon, staging or production secrets are supplied. Its ten-minute timeout bounds the job, and GitHub disposes of the service after the job. This workflow configuration requires a real Actions run before reporting remote success.
+
+Coverage runs the full root suite separately and publishes its summary; browser regression is also separate. Neither belongs to the `verify` aggregate. The lint job installs the isolated experiment and runs its mocked budget-guard tests without credentials. CI uses `.node-version`.
 
 Feature previews and `main` production remain the deployment direction. Git branches and passing CI do not configure Vercel linkage, routing or credentials. After an authorized deployment, verify the revision and affected live flow. Application rollback does not roll back the database. Follow [contributing](contributing.md) for PR evidence and merge authority.
 
