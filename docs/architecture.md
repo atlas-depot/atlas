@@ -20,7 +20,7 @@ File storage, connector adapters, memory storage and the product model remain op
 
 ## Current delivery scope
 
-The notes sprint covers online personal notes, explicit Save, Markdown source and preview, followed by a user-triggered AI draft kept separate from the original. Offline synchronization, live collaboration, PDF import, connectors, search and richer generated views are outside this batch.
+The notes sprint covers online personal notes, explicit Save, Markdown source and preview, followed by a user-triggered AI draft kept separate from the original. In #50, the agent may choose to restructure, shorten, expand or research the note without asking for approval for each public web search. Offline synchronization, live collaboration, PDF import, account connectors, workspace-wide search and richer generated views remain outside this batch.
 
 The executable provides public health and authentication routes plus a protected API boundary. Protected API requests without a verified Bearer token or browser session are rejected. Tests inject a trusted identity; authenticated note operations return `501` until persistence is connected. Terminal invalid or expired sessions return `401`; a successful browser refresh returns `200` with a resealed cookie. Rejected cookie-origin checks return `403`. Provider outages during verification or refresh return `500`; logout falls back to clearing the local cookie and redirecting to `APP_ORIGIN` when WorkOS cannot confirm the session.
 
@@ -36,6 +36,7 @@ The [note schemas](../shared/notes.ts) own the payload and timestamp contract. [
 src/            React notes workspace and development-only source viewer
 server/         HTTP routing, authentication and backend operations
 shared/         Browser-safe schemas and types
+agents/         Private agent runtimes called by the backend
 experiments/    Isolated experiments with separate setup
 ```
 
@@ -46,6 +47,8 @@ experiments/    Isolated experiments with separate setup
 - Use Neon branches to isolate development data and resets. Review migration conflicts in Git before applying migrations to shared staging.
 
 Atlas owns user authorization, source provenance and external-action outcomes. eve may handle agent execution, but it does not replace those policies. External actions require the agreed user approval, and retries must handle uncertain provider outcomes. See [security boundaries](security.md).
+
+The [organizer](../agents/organizer/README.md) is preparation for #50, not a wired product flow. Hono owns note access and calls a private eve service. A standard eve research tool uses OpenRouter and returns source records through tool results. After Atlas accepts a draft, an explicit acknowledgement ends the session with zero-retention requested. Hosted storage and provider retention still require verification. Draft persistence and source rendering remain in #53.
 
 Use disposable sandboxes only for bounded work, and persist important outputs outside them. Do not create a second agent loop, approval journal, heartbeat or workflow system until a verified gap requires it.
 

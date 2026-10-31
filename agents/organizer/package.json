@@ -1,0 +1,23 @@
+{
+  "name": "@atlas/organizer",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "eve dev --no-ui --no-default-extensions --host 127.0.0.1 --port 2027",
+    "check": "tsc --noEmit",
+    "test": "node --test *.test.ts"
+  },
+  "dependencies": {
+    "@openrouter/ai-sdk-provider": "3.1.0",
+    "ai": "7.0.152",
+    "eve": "0.91.0",
+    "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "@types/node": "24.10.0",
+    "typescript": "6.0.2"
+  },
+  "engines": {
+    "node": "24.22.0"
+  }
+}
