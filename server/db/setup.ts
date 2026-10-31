@@ -1,4 +1,4 @@
-import { openDatabase, readDatabaseUrl } from "./connection.ts";
+import { openDatabase, readDevelopmentDatabaseUrl } from "./connection.ts";
 import { applyMigrations } from "./migrations.ts";
 import { seedNotes } from "./seed.ts";
 
@@ -8,7 +8,7 @@ async function main() {
     throw new Error("Development database setup is unavailable.");
   }
   // A dedicated setting prevents silently reusing the API or staging migration URL.
-  const url = readDatabaseUrl({ DATABASE_URL: process.env.DEV_DATABASE_URL });
+  const url = readDevelopmentDatabaseUrl(process.env);
   const connection = openDatabase(url);
   try {
     if (action === "init") await applyMigrations(connection.db);

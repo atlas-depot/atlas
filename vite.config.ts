@@ -59,6 +59,7 @@ export default defineConfig(({ command, isPreview }) => {
         exclude: [
           "**/*.test.*",
           "**/*.spec.*",
+          "**/*.integration.*",
           "**/*.config.*",
           "**/*.d.ts",
           "e2e/**",

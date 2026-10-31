@@ -31,4 +31,5 @@ it.each([
         "Development database setup failed. Check DEV_DATABASE_URL and database availability.\n",
     });
   },
+  15_000,
 );

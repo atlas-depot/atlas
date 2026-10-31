@@ -6,7 +6,7 @@ import { sql } from "drizzle-orm";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
 import { Pool } from "pg";
 import { afterAll, beforeAll, expect, it } from "vite-plus/test";
-import { openDatabase } from "./connection.ts";
+import { openDatabase, readTestDatabaseUrl } from "./connection.ts";
 import { createNoteStore } from "./notes.ts";
 
 const databaseName = `atlas_test_${randomUUID().replaceAll("-", "")}`;
@@ -17,10 +17,7 @@ let otherConnection: ReturnType<typeof openDatabase>;
 let otherStore: ReturnType<typeof createNoteStore>;
 
 beforeAll(async () => {
-  const url = new URL(process.env.TEST_DATABASE_URL ?? "");
-  if (!["localhost", "127.0.0.1", "[::1]"].includes(url.hostname)) {
-    throw new Error("Database integration tests require an isolated local PostgreSQL server.");
-  }
+  const url = new URL(readTestDatabaseUrl(process.env));
   admin = new Pool({ connectionString: url.toString(), connectionTimeoutMillis: 10_000 });
   await admin.query(`CREATE DATABASE "${databaseName}"`);
   url.pathname = `/${databaseName}`;
