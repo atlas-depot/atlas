@@ -96,6 +96,10 @@ Use an isolated local PostgreSQL server and a test role with database creation p
 
 Drizzle Kit uses esbuild's packaged platform executable. `allowBuilds.esbuild: false` disables its dependency install scripts; migration generation must continue to work after a frozen install.
 
+### Live Neon development verification
+
+On 2026-10-31, the code at `10e666c` was exercised against the `dev-talha` branch of `atlas-dev` in AWS Frankfurt, using Neon PostgreSQL 18. The ignored local `.env` holds a pooled `DATABASE_URL` and direct `DEV_DATABASE_URL`, both with TLS certificate verification. `pnpm db:init` applied the committed migration and inserted two synthetic notes; a second run inserted zero notes. A separate synthetic smoke exercised create/list/read/update/delete through the pooled connection, persistence after closing and reopening connection pools, cross-owner denial, concurrent updates from revision 1 (one success and one conflict), and stale update/delete rejection. It deleted only its own generated test note; the two seed notes remain. Identity was injected synthetically, not obtained through WorkOS, and no HTTP/UI integration or Neon compute-restart test was performed. The live commands used Node 24.22.1 and pnpm 11.25.0; repository pins are Node 24.22.0 and pnpm 11.23.0.
+
 ## Tests and coverage
 
 Import test APIs from `vite-plus/test`. The existing runner discovers tests under `src/`, `scripts/`, `server/` and `shared/`, with `passWithNoTests: false`. Do not add another Vitest installation. A no-tests run is not passing evidence.
