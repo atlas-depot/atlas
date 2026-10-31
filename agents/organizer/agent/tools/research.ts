@@ -11,7 +11,7 @@ const provider = createOpenRouter({
   fetch: createRetryFetch(),
 });
 const research = createResearch({
-  model: provider(config.ORGANIZER_MODEL),
+  model: provider(config.ORGANIZER_MODEL, { maxTokens: 8_192 }),
   webSearch: provider.tools.webSearch({}),
 });
 
