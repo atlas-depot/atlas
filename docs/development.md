@@ -62,6 +62,46 @@ Deterministic tests use a synthetic provider and never call WorkOS. A separate l
 
 For concurrent worktrees, set different `API_PORT` values and frontend ports, for example `pnpm dev --host 127.0.0.1 --port 5177 --strictPort`. Stop both processes with Ctrl-C. Production routing is separate configuration.
 
+## Note schema and migrations
+
+The Drizzle PostgreSQL schema lives in `server/db/schema.ts`. Generate a migration after changing it with `pnpm db:generate --name=describe-change`. Generation needs no database credentials and does not apply SQL. Commit the generated SQL, snapshot and journal under `drizzle/` together with the schema. Review the SQL before applying it; never rewrite an applied migration.
+
+Notes store a verified WorkOS owner ID, Markdown source, timestamps and a positive internal revision counter. Public field limits remain in `shared/notes.ts`; PostgreSQL text lengths do not measure UTF-16 code units. Owner/revision enforcement lives in the note operations, not the schema alone. API storage wiring is not connected yet.
+
+Set server-only `DATABASE_URL` in your ignored `.env` to your isolated development PostgreSQL database, then run `pnpm db:migrate`. This applies pending committed migrations and closes its connection pool on success or failure. Re-running it leaves already recorded migrations alone; it does not reset data. Migration failures exit nonzero without printing driver errors or connection details. The API still starts without a database setting because storage is not wired into its routes yet.
+
+The `pg` driver connects through Drizzle using a pool of at most five connections and a ten-second connection timeout. Use a pooled Neon URL for application traffic and a direct URL with `sslmode=verify-full` for migration commands, supplied through the same `DATABASE_URL` setting. The same driver can use an isolated local PostgreSQL database for credential-free verification. The connection owner must call `close()` when finished. Efe's account is the designated staging migration operator, including an agent acting through that account. Only that operator applies reviewed migrations to staging, one run at a time. This is an operating responsibility, not a restriction on other organization admins; no automatic startup migration or concurrent-runner coordination is implemented.
+
+For synthetic development data, set `DATABASE_URL` in your ignored `.env` to your own isolated local database or Neon development branch, then run:
+
+```sh
+NODE_ENV=development pnpm db:init
+# Later, add missing sample rows without applying migrations:
+NODE_ENV=development pnpm db:seed
+```
+
+`db:init` applies the committed migrations and then inserts two sample notes belonging to the fictional owners `synthetic-seed-alex` and `synthetic-seed-sam`. It initializes an existing empty database; it does not create a PostgreSQL database or Neon branch. These owners are not real WorkOS accounts, so their notes do not automatically appear after browser sign-in. Fixtures use fixed UUIDs and UTC timestamps. Reruns skip an existing fixture UUID without changing its content, owner, timestamps or revision, and leave unrelated notes alone. Both samples are inserted in one SQL statement; neither command truncates, resets or deletes data. If seeding fails after migrations succeed, the migrations remain applied and setup can be retried.
+
+Setup uses the same `DATABASE_URL` as note operations and migrations. Both commands require an explicit `NODE_ENV=development`; missing, test, staging and production modes are rejected before opening a database connection. The examples use POSIX shell syntax; in PowerShell, set `$env:NODE_ENV = "development"` for the command and remove it afterward. This opt-in does not prove a remote URL points to development: select your development branch explicitly and never configure staging/production as the setup target. Use `db:migrate` alone from the designated runner for staging. Setup closes its pool and exits nonzero with a sanitized message on failure.
+
+`server/db/notes.ts` provides Hono-independent note operations. Pass the verified server user ID separately from the note payload. Reads and writes always scope by owner; inaccessible and missing notes have the same result. Update/delete lock the owned row inside a transaction before checking the expected revision. Updates replace title/content, set the database server's edit timestamp and increment the internal revision. The returned public note excludes ownership/revision fields; single-note operations carry revision separately for future ETag mapping. Database errors propagate to the caller, which must sanitize them at its public boundary. These operations are not mounted on HTTP routes yet.
+
+Run real-storage tests separately from the credential-free root suite:
+
+```sh
+TEST_DATABASE_URL=postgresql://USER@127.0.0.1:55468/postgres pnpm test:db
+```
+
+Use an isolated local PostgreSQL server and a test role with database creation permission. The suite requires a loopback host, creates a randomly named database and a second database with the `_setup` suffix, replays committed migrations and drops only those generated databases after closing their pools. Connection URLs require an explicit host and database path; query parameters that override host, hostaddr, port, database or dbname are rejected before connecting. The suite never reads the developer's root `DATABASE_URL` or `.env`; it passes the generated disposable database URL as `DATABASE_URL` to setup subprocesses. Tests cover persistence across connections and application processes, owner isolation, stale writes/deletes, concurrent writes, validation, missing notes, storage failure and repeatable setup/seed. Identity is synthetic; these tests do not verify WorkOS or Neon access. Database tests have a 90-second test timeout for the sequential setup subprocesses and 30-second hook timeouts.
+
+Drizzle Kit uses esbuild's packaged platform executable. `allowBuilds.esbuild: false` disables its dependency install scripts; migration generation must continue to work after a frozen install.
+
+### Live Neon development verification
+
+On 2026-11-01, code at `4181a9b` was verified on `atlas-dev` / `dev-efe`, Neon PostgreSQL 18 in AWS Frankfurt, using Node 24.22.0. The direct connection used verified TLS. With `NODE_ENV=development`, the actual setup command applied the committed migration and inserted two synthetic notes; a second run inserted zero. Pooled CRUD verified owner isolation, concurrent updates with one winner, stale update/delete rejection, and committed creation/edit recovery in fresh Node processes after the writers exited. Only the generated smoke note was deleted; the two synthetic seed notes remain. Staging was not modified. This verifies storage and process restart, not WorkOS, HTTP/UI integration or a Neon compute restart.
+
+The Atlas organization is on Free. Its five development branches (`dev-efe`, `dev-talha`, `dev-onat`, `dev-iklim`, `dev-ali`) have distinct endpoints separate from `staging`; all six computes are fixed at 0.25 CU. The [current Free allowance](https://neon.com/blog/neon-free-plan-1-gb-per-project) is 10 branches, 100 CU-hours per project/month and 1 GB storage per project. The compute allowance is shared across this project's branches. Four active project members were verified; Ali's invitation is still pending, so #46's five-member access condition remains open. Current members are organization admins: branch data is separate, but per-branch console access isolation is not enforced.
+
 ## Tests and coverage
 
 Import test APIs from `vite-plus/test`. The existing runner discovers tests under `src/`, `scripts/`, `server/` and `shared/`, with `passWithNoTests: false`. Do not add another Vitest installation. A no-tests run is not passing evidence.
@@ -158,7 +198,9 @@ Vercel environment variables are the selected hosting approach. Project linkage,
 
 ## CI and deployment status
 
-CI runs on pull requests and pushes to `main`. Required `verify` aggregates format, lint/typecheck and build. Coverage runs the full root suite separately and publishes its summary; browser regression is also separate. Neither belongs to the `verify` aggregate. The lint job installs the isolated experiment and runs its mocked budget-guard tests without credentials. CI uses `.node-version`.
+CI runs on pull requests and pushes to `main`. Required `verify` aggregates format, lint/typecheck, build and database regression. The database job provisions an ephemeral PostgreSQL 17 service, waits for readiness and runs `test:db` through a dynamically assigned loopback port. Tests create clean databases and replay versioned migrations before exercising note operations and setup/seed. The service uses synthetic CI-only credentials; no Neon, staging or production secrets are supplied. Its ten-minute timeout bounds the job, and GitHub disposes of the service after the job. This workflow configuration requires a real Actions run before reporting remote success.
+
+Coverage runs the full root suite separately and publishes its summary; browser regression is also separate. Neither belongs to the `verify` aggregate. The lint job installs the isolated experiment and runs its mocked budget-guard tests without credentials. CI uses `.node-version`.
 
 Feature previews and `main` production remain the deployment direction. Git branches and passing CI do not configure Vercel linkage, routing or credentials. After an authorized deployment, verify the revision and affected live flow. Application rollback does not roll back the database. Follow [contributing](contributing.md) for PR evidence and merge authority.
 

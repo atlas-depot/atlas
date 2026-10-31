@@ -75,6 +75,39 @@ jobs:
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
+  database:
+    name: database regression
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: atlas_test
+          POSTGRES_PASSWORD: atlas_ci_synthetic
+          POSTGRES_DB: postgres
+        ports:
+          - 5432/tcp
+        options: >-
+          --health-cmd "pg_isready -U atlas_test -d postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: voidzero-dev/setup-vp@68f39c78aaf39be468cabd2afb09c162574c84af # v1.21.2
+        with:
+          node-version-file: .node-version
+          cache: true
+          run-install: false
+      - run: vp install --frozen-lockfile
+      - name: Replay migrations and test isolated PostgreSQL persistence
+        env:
+          TEST_DATABASE_URL: postgresql://atlas_test:atlas_ci_synthetic@127.0.0.1:${{ job.services.postgres.ports[5432] }}/postgres
+        run: vp run test:db
+
   build:
     runs-on: ubuntu-24.04
     steps:
@@ -113,7 +146,7 @@ jobs:
           retention-days: 7
 
   verify:
-    needs: [format, lint, build]
+    needs: [format, lint, build, database]
     if: always()
     runs-on: ubuntu-24.04
     steps:
@@ -122,4 +155,5 @@ jobs:
           FORMAT: ${{ needs.format.result }}
           LINT: ${{ needs.lint.result }}
           BUILD: ${{ needs.build.result }}
-        run: test "$FORMAT" = success && test "$LINT" = success && test "$BUILD" = success
+          DATABASE: ${{ needs.database.result }}
+        run: test "$FORMAT" = success && test "$LINT" = success && test "$BUILD" = success && test "$DATABASE" = success
