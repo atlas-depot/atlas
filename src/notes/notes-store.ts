@@ -21,6 +21,7 @@ export interface NotesStore {
   read(id: string): Promise<NoteSnapshot>;
   create(input: CreateNote): Promise<NoteSnapshot>;
   update(id: string, input: UpdateNote, etag: string): Promise<NoteSnapshot>;
+  delete(id: string, etag: string): Promise<void>;
 }
 
 export class NotesRequestError extends Error {
@@ -116,6 +117,16 @@ export function createNotesClient(
           body: JSON.stringify(updateNoteSchema.parse(input)),
         }),
         id,
+      );
+    },
+    async delete(id, etag) {
+      await response(
+        `/${noteIdSchema.parse(id)}`,
+        {
+          method: "DELETE",
+          headers: { "If-Match": ifMatchSchema.parse(etag) },
+        },
+        204,
       );
     },
   };

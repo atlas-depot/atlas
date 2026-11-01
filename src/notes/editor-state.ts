@@ -44,7 +44,10 @@ export function savingMessage(current: EditableContent, submitted: EditableConte
     : "Saving earlier edits. Newer changes are unsaved.";
 }
 
-export function failureMessage(kind: RequestFailure, operation: "list" | "read" | "save") {
+export function failureMessage(
+  kind: RequestFailure,
+  operation: "list" | "read" | "save" | "delete",
+) {
   switch (kind) {
     case "unauthenticated":
       return "Your session has ended. Sign in again. Copy any unsaved text before leaving this page.";
@@ -53,7 +56,9 @@ export function failureMessage(kind: RequestFailure, operation: "list" | "read" 
         ? "The notes list request was blocked. Restore request access, then reload the page. Your current text is preserved."
         : operation === "read"
           ? "This request was blocked. Your current text is unchanged. You can choose another note."
-          : "This request was blocked. Saving is unavailable until request access is restored. Your unsaved text is preserved.";
+          : operation === "delete"
+            ? "This request was blocked. Deleting is unavailable until request access is restored. Your note and unsaved text are still here."
+            : "This request was blocked. Saving is unavailable until request access is restored. Your unsaved text is preserved.";
     case "missing":
       if (operation === "list")
         return "The notes list is no longer available. Refresh the notes list or try again later. Your current text is preserved.";
@@ -61,12 +66,16 @@ export function failureMessage(kind: RequestFailure, operation: "list" | "read" 
     case "unavailable":
       return "Your notes are not available yet. Please try again later.";
     case "conflict":
-      return "This note changed on the server. Your edits are preserved. Compare the latest version before continuing.";
+      return operation === "delete"
+        ? "This note changed on the server. Nothing was deleted. Compare the latest version before trying again."
+        : "This note changed on the server. Your edits are preserved. Compare the latest version before continuing.";
     default:
       return operation === "list"
         ? "Could not load notes. Try again."
         : operation === "read"
           ? "Could not open note. Your current changes are still here. Try again."
-          : "Save failed. Your changes are still here. Try again.";
+          : operation === "delete"
+            ? "Could not confirm deletion. Your text is preserved. Refresh the notes list before trying again; the note may already be gone."
+            : "Save failed. Your changes are still here. Try again.";
   }
 }
