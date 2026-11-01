@@ -4,6 +4,7 @@
   "type": "module",
   "scripts": {
     "dev": "eve dev --no-ui --no-default-extensions --host 127.0.0.1 --port 2027",
+    "build": "eve build",
     "check": "tsc --noEmit",
     "test": "node --test *.test.ts"
   },

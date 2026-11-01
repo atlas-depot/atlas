@@ -1,215 +1,285 @@
-import { randomUUID } from "node:crypto";
-import type { OrganizeNoteResult } from "./organize-note.ts";
-import type { PreparedNoteResult } from "./prepare-organized-note.ts";
-
-type Draft = Extract<PreparedNoteResult, { status: "draft" }>;
-type Retirement = { status: "ended" | "expired" };
+import type {
+  createOrganizeRunStore,
+  OrganizeRunRecord,
+  RunTerminalState,
+} from "./db/organize-runs.ts";
+import { generatedDraftSchema, type GeneratedDraft } from "./organize-note.ts";
 export type OrganizeRunState =
-  | Exclude<OrganizeNoteResult, { reason: "cleanup_failed" }>
+  | {
+      status: "draft";
+      draft: GeneratedDraft;
+      source: { noteId: string; revision: number; stale: boolean };
+    }
   | { status: "running"; phase: "starting" | "researching" | "writing" }
-  | { status: "cleaning" | "expired" }
-  | { status: "failed"; reason: "cleanup_failed" };
-type Entry = {
-  ownerId: string;
-  noteId: string;
-  runId: string;
-  controller: AbortController;
-  state: OrganizeRunState;
-  work: Promise<void>;
-  prepared?: Draft;
-  cleanup?: () => Promise<Retirement>;
-  target?: "expired" | "cancelled";
-  cleaning?: Promise<OrganizeRunState>;
-  expiresAt?: number;
-  timer?: ReturnType<typeof setTimeout>;
+  | { status: "not_found" | "cancelled" | "cleaning" | "expired" }
+  | {
+      status: "failed";
+      reason: "cleanup_failed" | "read_failed" | "generation_failed" | "invalid_draft";
+    };
+
+type RuntimeReference = NonNullable<OrganizeRunRecord["runtime"]>;
+export type DurableOrganizer = {
+  allocate(input: { operationId: string }): Promise<RuntimeReference>;
+  submit(input: {
+    sessionId: string;
+    operationId: string;
+    note: { title: string; content: string };
+  }): Promise<(RuntimeReference & { deliveryId: string }) | { status: "expired" }>;
+  inspect(
+    reference: RuntimeReference & { deliveryId: string },
+  ): Promise<
+    | { status: "running"; phase: "starting" | "researching" | "writing" }
+    | { status: "draft"; draft: GeneratedDraft; completedAt?: number }
+    | { status: "cancelled" }
+    | { status: "failed"; reason: "generation_failed" | "invalid_draft" | "expired" }
+  >;
+  retire(reference: RuntimeReference): Promise<{ status: "ended" | "expired" }>;
 };
 
-/** Single-process reconnect support. A lost process loses run handles, never silently restarts them. */
-export function createOrganizeRuns({
-  prepareNote,
+type RunStore = ReturnType<typeof createOrganizeRunStore>;
+
+/** Neon owns handles and delivery. eve owns execution; no generation outlives a request here. */
+export function createDurableOrganizeRuns({
+  store,
+  runtimeUrl,
+  runtimeFor,
   resultRetentionMs,
   now = Date.now,
-  newRunId = randomUUID,
 }: {
-  prepareNote: (
-    ownerId: string,
-    noteId: string,
-    options: { signal: AbortSignal; onProgress?: (phase: "researching" | "writing") => void },
-  ) => Promise<PreparedNoteResult>;
+  store: RunStore;
+  runtimeUrl: string;
+  runtimeFor: (url: string) => DurableOrganizer;
   resultRetentionMs: number;
   now?: () => number;
-  newRunId?: () => string;
 }) {
-  if (
-    !Number.isSafeInteger(resultRetentionMs) ||
-    resultRetentionMs <= 0 ||
-    resultRetentionMs > 2_147_483_647
-  ) {
-    throw new Error("Result retention must be a positive timer-safe integer.");
+  if (!Number.isSafeInteger(resultRetentionMs) || resultRetentionMs < 1) {
+    throw new Error("Organizer result retention must be a positive integer.");
   }
-  const entries = new Map<string, Entry>();
-  const active = new Map<string, string>();
-  const key = (ownerId: string, noteId: string) => JSON.stringify([ownerId, noteId]);
-  let disposed = false;
-  const clearExpiry = (entry: Entry) => {
-    clearTimeout(entry.timer);
-    entry.timer = undefined;
-    entry.expiresAt = undefined;
-  };
-  const armExpiry = (entry: Entry, expire: () => void) => {
-    clearExpiry(entry);
-    entry.expiresAt = now() + resultRetentionMs;
-    entry.timer = setTimeout(expire, resultRetentionMs);
-    entry.timer.unref();
-  };
-  const terminal = (entry: Entry, state: OrganizeRunState) => {
-    entry.state = state;
-    entry.prepared = undefined;
-    entry.cleanup = undefined;
-    entry.target = undefined;
-    const identity = key(entry.ownerId, entry.noteId);
-    if (active.get(identity) === entry.runId) active.delete(identity);
-    armExpiry(entry, () => entries.delete(entry.runId));
-  };
-  const retire = (
-    entry: Entry,
-    cleanup: () => Promise<Retirement>,
-    target: "expired" | "cancelled",
-  ): Promise<OrganizeRunState> => {
-    if (entry.cleaning) return entry.cleaning;
-    clearExpiry(entry);
-    entry.cleanup = cleanup;
-    entry.target = target;
-    entry.prepared = undefined;
-    entry.state = { status: "cleaning" };
-    entry.cleaning = Promise.resolve()
-      .then(cleanup)
-      .then(() => {
-        terminal(entry, { status: target });
-        return entry.state;
-      })
-      .catch(() => {
-        // Keep only a retryable cleanup handle, never the undelivered draft.
-        entry.state = { status: "failed", reason: "cleanup_failed" };
-        return entry.state;
-      })
-      .finally(() => {
-        entry.cleaning = undefined;
-      });
-    return entry.cleaning;
-  };
-  const expire = (entry: Entry) => {
-    if (entry.prepared) void retire(entry, entry.prepared.discard, "expired");
-    else if (!entry.cleanup) entries.delete(entry.runId);
-  };
-  const lookup = (ownerId: string, runId: string): Entry | undefined => {
-    const entry = entries.get(runId);
-    if (entry?.ownerId !== ownerId) return undefined;
-    if (entry.expiresAt !== undefined && entry.expiresAt <= now()) expire(entry);
-    return entries.get(runId);
-  };
-  const view = (entry?: Entry): OrganizeRunState =>
-    structuredClone(entry?.state ?? { status: "not_found" });
-  const finish = async (entry: Entry) => {
-    try {
-      const result = await prepareNote(entry.ownerId, entry.noteId, {
-        signal: entry.controller.signal,
-        onProgress: (phase) => {
-          if (entry.state.status === "running" && !entry.controller.signal.aborted) {
-            entry.state = { status: "running", phase };
-          }
-        },
-      });
-      if (result.status === "draft") {
-        if (entry.controller.signal.aborted) {
-          await retire(entry, result.discard, "cancelled");
-        } else {
-          entry.prepared = result;
-          entry.state = { status: "draft", draft: result.draft, source: result.source };
-          armExpiry(entry, () => expire(entry));
-        }
-      } else if (result.status === "failed" && result.reason === "cleanup_failed") {
-        entry.state = { status: "failed", reason: "cleanup_failed" };
-        entry.cleanup = result.retryCleanup;
-        entry.target = entry.controller.signal.aborted ? "cancelled" : "expired";
-      } else {
-        terminal(entry, entry.controller.signal.aborted ? { status: "cancelled" } : result);
+
+  const view = (record?: OrganizeRunRecord): OrganizeRunState =>
+    structuredClone(record?.state ?? { status: "not_found" });
+
+  // The database lock serializes short transport operations, never model generation.
+  // A lost acceptance response is reconciled using the persisted immutable operation.
+  const ensureStarted = async (ownerId: string, runId: string) => {
+    // Allocate without note content first. A lost allocation can leave only an empty
+    // idle session; never send a note until its fixed session identity is committed.
+    await store.withRun(ownerId, runId, async (record, save, readSource) => {
+      if (!record.active || record.cleanupTarget || record.runtime) return;
+      if (!(await readSource())) {
+        await save({
+          ...record,
+          input: null,
+          state: { status: "cleaning" },
+          cleanupTarget: { status: "not_found" },
+        });
+        return;
       }
-    } catch {
-      terminal(
-        entry,
-        entry.controller.signal.aborted
-          ? { status: "cancelled" }
-          : { status: "failed", reason: "generation_failed" },
-      );
-    }
+      const reference = await runtimeFor(record.runtimeUrl).allocate({ operationId: record.runId });
+      if (reference.deliveryId !== null) throw new Error("Organizer allocation must be empty.");
+      await save({ ...record, runtime: reference });
+    });
+    return store.withRun(ownerId, runId, async (record, save, readSource) => {
+      if (!record.active || record.cleanupTarget || record.runtime?.deliveryId) return record;
+      if (!(await readSource())) {
+        const missing: OrganizeRunRecord = {
+          ...record,
+          input: null,
+          state: { status: "cleaning" },
+          cleanupTarget: { status: "not_found" },
+        };
+        await save(missing);
+        return missing;
+      }
+      if (!record.input || !record.runtime)
+        throw new Error("Organizer recovery input is unavailable.");
+      const reference = await runtimeFor(record.runtimeUrl).submit({
+        sessionId: record.runtime.sessionId,
+        operationId: record.runId,
+        note: record.input,
+      });
+      if ("status" in reference) {
+        const expired: OrganizeRunRecord = {
+          ...record,
+          input: null,
+          state: { status: "cleaning" },
+          cleanupTarget: { status: "expired" },
+        };
+        await save(expired);
+        return expired;
+      }
+      const started = { ...record, runtime: reference, input: null };
+      await save(started);
+      return started;
+    });
+  };
+
+  const requestCleanup = async (
+    ownerId: string,
+    runId: string,
+    target: RunTerminalState,
+    onlyDraft = false,
+  ) =>
+    store.withRun(ownerId, runId, async (record, save) => {
+      if (!record.active || record.cleanupTarget) return record;
+      if (onlyDraft && record.state.status !== "draft") return record;
+      const next: OrganizeRunRecord = {
+        ...record,
+        state: { status: "cleaning" },
+        cleanupTarget: target,
+        input: null,
+        expiresAt: null,
+      };
+      await save(next);
+      return next;
+    });
+
+  const finishCleanup = async (ownerId: string, runId: string): Promise<OrganizeRunState> => {
+    const record = await store.read(ownerId, runId);
+    if (!record?.active || !record.cleanupTarget) return view(record);
+    return (
+      (await store.withRun(ownerId, runId, async (current, save) => {
+        if (!current.active || !current.cleanupTarget) return view(current);
+        try {
+          // Cancellation before allocation commits must never allocate or send work.
+          if (current.runtime) await runtimeFor(current.runtimeUrl).retire(current.runtime);
+        } catch {
+          const failed: OrganizeRunRecord = {
+            ...current,
+            state: { status: "failed", reason: "cleanup_failed" },
+          };
+          await save(failed);
+          return view(failed);
+        }
+        const retired: OrganizeRunRecord = {
+          ...current,
+          active: false,
+          state: current.cleanupTarget,
+          cleanupTarget: null,
+          runtime: null,
+          input: null,
+          expiresAt: now() + resultRetentionMs,
+        };
+        await save(retired);
+        return view(retired);
+      })) ?? { status: "not_found" }
+    );
+  };
+
+  const read = async (ownerId: string, runId: string): Promise<OrganizeRunState> => {
+    const found = await store.read(ownerId, runId);
+    if (!found?.active) return view(found);
+    if (found.cleanupTarget) return finishCleanup(ownerId, runId);
+    await ensureStarted(ownerId, runId);
+    // Persist completion/cleanup intent in one transaction, end the session in a later one.
+    const observed = await store.withRun(ownerId, runId, async (record, save, readSource) => {
+      if (!record.active || record.cleanupTarget) return record;
+      let current = await readSource();
+      let target: RunTerminalState | undefined;
+      if (!current) target = { status: "not_found" };
+      else if (record.expiresAt !== null && record.expiresAt <= now())
+        target = { status: "expired" };
+      else if (record.state.status === "draft") {
+        const refreshed = {
+          ...record,
+          state: {
+            ...record.state,
+            source: { ...record.state.source, stale: current.revision !== record.sourceRevision },
+          },
+        };
+        await save(refreshed);
+        return refreshed;
+      } else {
+        if (!record.runtime?.deliveryId)
+          throw new Error("Organizer runtime identity is unavailable.");
+        const result = await runtimeFor(record.runtimeUrl).inspect({
+          ...record.runtime,
+          deliveryId: record.runtime.deliveryId,
+        });
+        current = await readSource();
+        if (!current) target = { status: "not_found" };
+        else if (result.status === "draft") {
+          const draft = generatedDraftSchema.safeParse(result.draft);
+          if (!draft.success) target = { status: "failed", reason: "invalid_draft" };
+          else {
+            const expiresAt = (result.completedAt ?? now()) + resultRetentionMs;
+            if (expiresAt <= now()) target = { status: "expired" };
+            else {
+              const next: OrganizeRunRecord = {
+                ...record,
+                state: {
+                  status: "draft",
+                  draft: draft.data,
+                  source: {
+                    noteId: record.noteId,
+                    revision: record.sourceRevision,
+                    stale: current.revision !== record.sourceRevision,
+                  },
+                },
+                expiresAt,
+              };
+              await save(next);
+              return next;
+            }
+          }
+        } else if (result.status === "running") {
+          const next = { ...record, state: result };
+          await save(next);
+          return next;
+        } else if (result.status === "failed") {
+          target =
+            result.reason === "expired"
+              ? { status: "expired" }
+              : { status: "failed", reason: result.reason };
+        } else target = result;
+      }
+      if (!target) throw new Error("Organizer observation did not resolve a state.");
+      const next: OrganizeRunRecord = {
+        ...record,
+        state: { status: "cleaning" },
+        cleanupTarget: target,
+        input: null,
+        expiresAt: null,
+      };
+      await save(next);
+      return next;
+    });
+    return observed?.cleanupTarget ? finishCleanup(ownerId, runId) : view(observed);
   };
 
   return {
-    start(ownerId: string, noteId: string): { runId: string } {
-      if (disposed) throw new Error("Organizer runs are shutting down.");
-      const identity = key(ownerId, noteId);
-      const current = active.get(identity);
-      if (current && lookup(ownerId, current)) return { runId: current };
-      const runId = newRunId();
-      if (entries.has(runId)) throw new Error("Organizer run identity collision.");
-      const entry: Entry = {
-        ownerId,
-        noteId,
-        runId,
-        controller: new AbortController(),
-        state: { status: "running", phase: "starting" },
-        work: Promise.resolve(),
-      };
-      entries.set(runId, entry);
-      active.set(identity, runId);
-      // No browser request signal: a disconnect only stops that reader.
-      entry.work = Promise.resolve().then(() => finish(entry));
-      return { runId };
+    async start(
+      ownerId: string,
+      noteId: string,
+    ): Promise<{ runId: string } | { status: "not_found" }> {
+      const record = await store.claim(ownerId, noteId, runtimeUrl);
+      if (!record) return { status: "not_found" };
+      await ensureStarted(ownerId, record.runId);
+      return { runId: record.runId };
     },
-    read(ownerId: string, runId: string): OrganizeRunState {
-      return view(lookup(ownerId, runId));
-    },
+    read,
     async acknowledge(ownerId: string, runId: string): Promise<OrganizeRunState> {
-      const entry = lookup(ownerId, runId);
-      if (!entry) return { status: "not_found" };
-      if (entry.cleaning) return structuredClone(await entry.cleaning);
-      if (entry.cleanup)
-        return structuredClone(await retire(entry, entry.cleanup, entry.target ?? "expired"));
-      if (entry.prepared)
-        return structuredClone(await retire(entry, entry.prepared.acknowledge, "expired"));
-      return view(entry);
+      const record = await requestCleanup(ownerId, runId, { status: "expired" }, true);
+      return record?.cleanupTarget ? finishCleanup(ownerId, runId) : view(record);
     },
     async cancel(ownerId: string, runId: string): Promise<OrganizeRunState> {
-      const entry = lookup(ownerId, runId);
-      if (!entry) return { status: "not_found" };
-      entry.controller.abort();
-      if (entry.state.status === "running") entry.state = { status: "cleaning" };
-      await entry.work;
-      if (entry.cleaning) return structuredClone(await entry.cleaning);
-      if (entry.cleanup)
-        return structuredClone(await retire(entry, entry.cleanup, entry.target ?? "cancelled"));
-      if (entry.prepared)
-        return structuredClone(await retire(entry, entry.prepared.discard, "cancelled"));
-      return view(entry);
+      const record = await requestCleanup(ownerId, runId, { status: "cancelled" });
+      return record?.cleanupTarget ? finishCleanup(ownerId, runId) : view(record);
     },
-    async dispose(): Promise<{ cleanupFailed: number }> {
-      disposed = true;
-      const pending = [...entries.values()];
-      for (const entry of pending) entry.controller.abort();
-      await Promise.all(pending.map((entry) => entry.work));
-      await Promise.all(
-        pending.map(async (entry) => {
-          if (entry.cleaning) await entry.cleaning;
-          else if (entry.cleanup) await retire(entry, entry.cleanup, entry.target ?? "cancelled");
-          else if (entry.prepared) await retire(entry, entry.prepared.discard, "cancelled");
-          clearExpiry(entry);
-          if (!entry.cleanup) entries.delete(entry.runId);
-        }),
-      );
-      return {
-        cleanupFailed: [...entries.values()].filter((entry) => entry.cleanup !== undefined).length,
-      };
+    /** A scheduled invocation reconciles abandoned readers and retries persisted cleanup. */
+    async sweep(limit = 20): Promise<{ checked: number; retryPending: number }> {
+      const pending = await store.pending(limit);
+      let retryPending = 0;
+      for (const record of pending) {
+        try {
+          const state = await read(record.ownerId, record.runId);
+          if (state.status === "failed" && state.reason === "cleanup_failed") retryPending += 1;
+        } catch {
+          retryPending += 1;
+        }
+      }
+      await store.purgeExpired();
+      return { checked: pending.length, retryPending };
     },
   };
 }

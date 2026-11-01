@@ -13,7 +13,7 @@ The [agreed sprint scope](https://github.com/atlas-depot/atlas/issues/45) record
 | API | Hono on Node 24, REST and shared Zod schemas |
 | Authentication | WorkOS AuthKit with hosted Google and email/password sign-in, server callback and HttpOnly session cookie; the API also accepts verified WorkOS Bearer access tokens |
 | Database | Neon PostgreSQL with Drizzle, one remote branch per developer, shared staging and separate production |
-| Agent runtime | eve; verify its existing capabilities before adding another runtime or workflow system |
+| Agent runtime | eve on Vercel Workflow; Neon stores Atlas ownership and delivery records, without a second agent loop |
 | Hosting | Vercel direction; production routing, deployment and team access need setup and verification |
 
 File storage, connector adapters, memory storage and the product model remain open. A vector database, graph service or extra package needs a concrete consumer before it is added.
@@ -48,7 +48,9 @@ experiments/    Isolated experiments with separate setup
 
 Atlas owns user authorization, source provenance and external-action outcomes. eve may handle agent execution, but it does not replace those policies. External actions require the agreed user approval, and retries must handle uncertain provider outcomes. See [security boundaries](security.md).
 
-The [organizer](../agents/organizer/README.md) is preparation for #50, not a wired product flow. Hono owns note access and calls a private eve service. A standard eve research tool uses OpenRouter and returns source records through tool results. A temporary owner-bound run handle lets the browser reconnect without starting a second generation. After the browser confirms receipt, an explicit acknowledgement ends the session with zero retention requested. The current registry is process-local; deployment with multiple replicas or recovery across API restarts needs shared run storage. Hosted storage and provider retention still require verification. Explicit draft persistence and source rendering remain in #53.
+The [organizer](../agents/organizer/README.md) prepares #50 independently of #51 HTTP wiring. Hono owns note access and calls a private eve service on Vercel Workflow. A standard eve research tool uses OpenRouter and returns source records through tool results. Neon stores the owner-bound run, exact source revision, temporary input/result and pinned runtime identity. An empty eve session is committed before the note is sent to its fixed identity with an idempotency key. Reconnect inspects that work across API processes instead of starting a second generation.
+
+Browser acknowledgement first records cleanup and clears temporary Atlas content, then ends the eve session with zero retention requested. Failed cleanup is retryable after process replacement. An explicitly enabled maintenance schedule reconciles abandoned readers and expires results. Hosted Workflow access, resumption and retention still require live deployment verification. Explicit derivative Save and source rendering remain in #53.
 
 Use disposable sandboxes only for bounded work, and persist important outputs outside them. Do not create a second agent loop, approval journal, heartbeat or workflow system until a verified gap requires it.
 

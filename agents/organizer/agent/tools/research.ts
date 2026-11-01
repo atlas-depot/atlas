@@ -21,5 +21,7 @@ export default defineTool({
     "Use only when outside information helps the note. Ask a focused question, not the entire private note.",
   inputSchema: z.object({ question: z.string().trim().min(1) }),
   label: { start: () => "Researching sources" },
-  execute: ({ question }, ctx) => research(question, ctx.abortSignal),
+  // Research returns one opaque response, so a stalled tool needs its own runtime deadline.
+  execute: ({ question }, ctx) =>
+    research(question, AbortSignal.any([ctx.abortSignal, AbortSignal.timeout(180_000)])),
 });

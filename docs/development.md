@@ -102,6 +102,12 @@ On 2026-11-01, code at `4181a9b` was verified on `atlas-dev` / `dev-efe`, Neon P
 
 The Atlas organization is on Free. Its five development branches (`dev-efe`, `dev-talha`, `dev-onat`, `dev-iklim`, `dev-ali`) have distinct endpoints separate from `staging`; all six computes are fixed at 0.25 CU. The [current Free allowance](https://neon.com/blog/neon-free-plan-1-gb-per-project) is 10 branches, 100 CU-hours per project/month and 1 GB storage per project. The compute allowance is shared across this project's branches. Four active project members were verified; Ali's invitation is still pending, so #46's five-member access condition remains open. Current members are organization admins: branch data is separate, but per-branch console access isolation is not enforced.
 
+### Organizer run persistence
+
+The `organize_runs` migration adds owner-bound transient run records alongside notes. Apply it with the normal reviewed migration command. A partial unique index coalesces active work for one owner/note, including pending cleanup. The note relation deliberately does not cascade-delete cleanup references. Acknowledgement clears temporary content before remote retirement and successful cleanup leaves an expiring metadata tombstone. These records are not saved notes.
+
+`pnpm test:db` also exercises run recovery, concurrency, source revision/deletion races and cleanup using separate pools and Node processes. Runtime transport is mocked in database tests. See the [organizer](../agents/organizer/README.md) for the eve/Vercel build, private service and explicitly enabled maintenance settings. #51 still owns HTTP wiring; do not interpret these service tests as end-to-end browser verification.
+
 ## Tests and coverage
 
 Import test APIs from `vite-plus/test`. The existing runner discovers tests under `src/`, `scripts/`, `server/` and `shared/`, with `passWithNoTests: false`. Do not add another Vitest installation. A no-tests run is not passing evidence.

@@ -1,38 +1,35 @@
-import type { Client } from "eve/client";
-import type { StoredNote } from "../../server/db/notes.ts";
-import { createOrganizeRuns } from "../../server/organize-runs.ts";
-import { createPrepareOrganizedNote } from "../../server/prepare-organized-note.ts";
-import { createEveOrganizer } from "./client.ts";
-import type { OrganizerTimeouts } from "./watchdog.ts";
+import type { openDatabase } from "../../server/db/connection.ts";
+import { createOrganizeRunStore } from "../../server/db/organize-runs.ts";
+import { createDurableOrganizeRuns } from "../../server/organize-runs.ts";
+import { createDurableEveOrganizer } from "./durable-client.ts";
 
-/** One instance per API process. Pass only a private, authenticated eve client. */
+/** The caller owns the database pool. Requests only dispatch or inspect durable eve work. */
 export function createOrganizerBackend({
-  client,
-  readNote,
-  timeouts,
+  db,
+  runtimeUrl,
+  serviceToken,
+  deploymentProtectionSecret,
   resultRetentionMs,
-  cleanupTimeoutMs = 15_000,
+  requestTimeoutMs = 15_000,
 }: {
-  client: Client;
-  readNote: (ownerId: string, noteId: string) => Promise<StoredNote | undefined>;
-  timeouts: OrganizerTimeouts;
+  db: ReturnType<typeof openDatabase>["db"];
+  /** Immutable deployment URL, persisted before dispatch so a redeploy cannot redirect an old run. */
+  runtimeUrl: string;
+  serviceToken: string;
+  deploymentProtectionSecret?: string;
   resultRetentionMs: number;
-  cleanupTimeoutMs?: number;
+  requestTimeoutMs?: number;
 }) {
-  if (
-    !Number.isSafeInteger(cleanupTimeoutMs) ||
-    cleanupTimeoutMs < 1 ||
-    cleanupTimeoutMs > 2_147_483_647
-  ) {
-    throw new Error("Organizer cleanup timeout must be a positive timer-safe integer.");
-  }
-  const prepare = createEveOrganizer({
-    client,
-    timeouts,
-    cleanupSignal: () => AbortSignal.timeout(cleanupTimeoutMs),
-  });
-  return createOrganizeRuns({
-    prepareNote: createPrepareOrganizedNote({ readNote, prepare }),
+  return createDurableOrganizeRuns({
+    store: createOrganizeRunStore(db),
+    runtimeUrl,
+    runtimeFor: (baseUrl) =>
+      createDurableEveOrganizer({
+        baseUrl,
+        serviceToken,
+        deploymentProtectionSecret,
+        requestTimeoutMs,
+      }),
     resultRetentionMs,
   });
 }
