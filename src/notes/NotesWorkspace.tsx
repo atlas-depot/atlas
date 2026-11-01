@@ -54,19 +54,30 @@ export function NotesWorkspace({
   const [savingSnapshot, setSavingSnapshot] = useState<Draft | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [writesForbidden, setWritesForbidden] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteFailure, setDeleteFailure] = useState<RequestFailure | null>(null);
+  const [deleteNotice, setDeleteNotice] = useState<string | null>(null);
+  const [deleteOpen, setDeleteOpen] = useState(false);
   const busyRef = useRef(false);
   const titleRef = useRef<HTMLInputElement>(null);
   const cancelRef = useRef<HTMLButtonElement>(null);
+  const newNoteRef = useRef<HTMLButtonElement>(null);
+  const signInRef = useRef<HTMLAnchorElement>(null);
+  const compareRef = useRef<HTMLButtonElement>(null);
+  const deleteRefreshRef = useRef<HTMLButtonElement>(null);
+  const deleteCancelRef = useRef<HTMLButtonElement>(null);
+  const deleteButtonRef = useRef<HTMLButtonElement>(null);
   const dirty = hasUnsavedChanges(draft, saved?.note ?? null);
   const valid =
     draft !== null &&
     noteContentSchema.safeParse({ title: draft.title, content: draft.content }).success;
-  const busy = saveState === "saving" || openingId !== null || refreshing;
+  const busy = saveState === "saving" || openingId !== null || refreshing || deleting;
   const loadFailureKind =
     loadState === "unauthenticated" || loadState === "unavailable" ? loadState : null;
   const recoveryKind =
     loadFailureKind ??
     readFailure?.kind ??
+    deleteFailure ??
     (saveState !== "idle" && saveState !== "saving"
       ? saveState
       : loadState !== "loading" && loadState !== "ready"
@@ -75,6 +86,12 @@ export function NotesWorkspace({
   const blocked = recoveryKind === "unauthenticated" || recoveryKind === "unavailable";
 
   const writeBlocked = blocked || writesForbidden || loadState === "forbidden";
+  const deleteBlocked =
+    loadState !== "ready" ||
+    saveState === "conflict" ||
+    saveState === "missing" ||
+    deleteFailure === "conflict" ||
+    deleteFailure === "failed";
 
   const clearPrivateCache = useCallback(() => {
     setNotes([]);
@@ -95,6 +112,9 @@ export function NotesWorkspace({
     setSaveState("idle");
     setComparison(null);
     setReadFailure(null);
+    setDeleteFailure(null);
+    setDeleteNotice(null);
+    setDeleteOpen(false);
   }, []);
 
   useEffect(() => {
@@ -150,11 +170,32 @@ export function NotesWorkspace({
     return () => window.removeEventListener("beforeunload", warn);
   }, [dirty, saveState]);
 
+  useEffect(() => {
+    const target =
+      deleteNotice !== null
+        ? newNoteRef.current
+        : deleteFailure === "conflict"
+          ? compareRef.current
+          : deleteFailure === "missing"
+            ? titleRef.current
+            : deleteFailure === "unauthenticated"
+              ? signInRef.current
+              : deleteFailure === "failed"
+                ? deleteRefreshRef.current
+                : deleteFailure === "forbidden" || deleteFailure === "unavailable"
+                  ? titleRef.current
+                  : null;
+    if (!target) return;
+    const frame = requestAnimationFrame(() => target.focus());
+    return () => cancelAnimationFrame(frame);
+  }, [deleteFailure, deleteNotice]);
+
   async function openNote(id: string, compare = false) {
     if (busyRef.current) return;
     busyRef.current = true;
     setOpeningId(id);
     setReadFailure(null);
+    setDeleteNotice(null);
     try {
       const snapshot = await store.read(id);
       if (compare) setComparison(snapshot);
@@ -180,6 +221,7 @@ export function NotesWorkspace({
       !valid ||
       busyRef.current ||
       writeBlocked ||
+      deleteFailure !== null ||
       saveState === "conflict" ||
       saveState === "missing"
     )
@@ -189,6 +231,7 @@ export function NotesWorkspace({
     setSaveState("saving");
     setSavingSnapshot(snapshot);
     setReadFailure(null);
+    setDeleteNotice(null);
     try {
       const result = saved
         ? await store.update(
@@ -202,6 +245,8 @@ export function NotesWorkspace({
       // Advance the identity/ETag, but acknowledge only the submitted text, not newer edits.
       setDraft((current) => (current ? { ...current, createdAt: result.note.createdAt } : current));
       setSaveState("idle");
+      setDeleteFailure(null);
+      setDeleteNotice(null);
     } catch (error) {
       const kind = classifyFailure(error);
       setSaveState(kind);
@@ -213,17 +258,27 @@ export function NotesWorkspace({
       busyRef.current = false;
       setSavingSnapshot(null);
     }
-  }, [draft, dirty, valid, saved, saveState, store, writeBlocked, clearPrivateCache]);
+  }, [
+    draft,
+    dirty,
+    valid,
+    saved,
+    saveState,
+    store,
+    writeBlocked,
+    deleteFailure,
+    clearPrivateCache,
+  ]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (!(event.ctrlKey || event.metaKey) || event.key.toLowerCase() !== "s") return;
       event.preventDefault();
-      if (!pending) void save();
+      if (!pending && !deleteOpen) void save();
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [save, pending]);
+  }, [save, pending, deleteOpen]);
 
   function select(selection: Selection) {
     setPending(null);
@@ -238,6 +293,9 @@ export function NotesWorkspace({
       setSaveState("idle");
       setReadFailure(null);
       setComparison(null);
+      setDeleteFailure(null);
+      setDeleteNotice(null);
+      setDeleteOpen(false);
     }
     requestAnimationFrame(() => titleRef.current?.focus());
   }
@@ -257,8 +315,19 @@ export function NotesWorkspace({
     busyRef.current = true;
     setRefreshing(true);
     try {
-      setNotes(await store.list());
+      const list = await store.list();
+      setNotes(list);
       setLoadState("ready");
+      setDeleteNotice(null);
+      const deleteWasUnconfirmed = deleteFailure === "failed";
+      if (saved && !list.some((note) => note.id === saved.note.id)) {
+        setSaveState("missing");
+        setDeleteFailure(null);
+        requestAnimationFrame(() => titleRef.current?.focus());
+      } else if (deleteWasUnconfirmed) {
+        setDeleteFailure(null);
+        requestAnimationFrame(() => deleteButtonRef.current?.focus());
+      }
     } catch (error) {
       const kind = classifyFailure(error);
       setLoadState(kind);
@@ -275,7 +344,63 @@ export function NotesWorkspace({
     setSaveState("idle");
     setReadFailure(null);
     setComparison(null);
+    setDeleteFailure(null);
+    setDeleteNotice(null);
+    setDeleteOpen(false);
     setDraft({ ...draft, createdAt: new Date().toISOString() });
+    requestAnimationFrame(() => titleRef.current?.focus());
+  }
+
+  function removeSelection(remaining: Note[], removedId: string) {
+    setNotes(remaining);
+    setDraft(null);
+    setSaved(null);
+    setSaveState("idle");
+    setReadFailure(null);
+    setComparison(null);
+    const removedIndex = notes.findIndex((note) => note.id === removedId);
+    const next = remaining[removedIndex] ?? remaining[removedIndex - 1] ?? null;
+    if (next) return next.id;
+    setDeleteNotice("Note deleted. No notes left.");
+    return null;
+  }
+
+  async function deleteNote() {
+    if (!saved || busyRef.current || writeBlocked || deleteBlocked) return;
+    const snapshot = saved;
+    setDeleteOpen(false);
+    setSaveState("idle");
+    setDeleteFailure(null);
+    setDeleteNotice(null);
+    setReadFailure(null);
+    setComparison(null);
+    busyRef.current = true;
+    setDeleting(true);
+    let nextId: string | null = null;
+    try {
+      await store.delete(snapshot.note.id, snapshot.etag);
+      nextId = removeSelection(
+        notes.filter((note) => note.id !== snapshot.note.id),
+        snapshot.note.id,
+      );
+    } catch (error) {
+      const kind = classifyFailure(error);
+      if (kind === "missing") {
+        setNotes(notes.filter((note) => note.id !== snapshot.note.id));
+        setSaveState("missing");
+        setReadFailure(null);
+        setComparison(null);
+        setDeleteFailure("missing");
+        return;
+      }
+      setDeleteFailure(kind);
+      if (kind === "forbidden") setWritesForbidden(true);
+      if (kind === "unauthenticated") clearPrivateCache();
+    } finally {
+      busyRef.current = false;
+      setDeleting(false);
+    }
+    if (nextId) await openNote(nextId);
   }
 
   const status =
@@ -285,29 +410,34 @@ export function NotesWorkspace({
         ? failureMessage(loadState, "list")
         : openingId
           ? "Opening note..."
-          : readFailure
-            ? readFailure.kind === "missing"
-              ? "This note is no longer available. Your current text is unchanged. Refresh the notes list or choose another note."
-              : failureMessage(readFailure.kind, "read")
-            : writesForbidden
-              ? failureMessage("forbidden", "save")
-              : saveState === "saving"
-                ? draft && savingSnapshot
-                  ? savingMessage(draft, savingSnapshot)
-                  : "Saving..."
-                : saveState !== "idle"
-                  ? saveState === "failed" && saved === null
-                    ? "Could not confirm creation. Your text is preserved. Check the notes list before trying again; the note may already exist."
-                    : failureMessage(saveState, "save")
-                  : dirty
-                    ? "Unsaved changes"
-                    : draft && saved === null
-                      ? "New note"
-                      : draft
-                        ? example
-                          ? "Saved for this preview session"
-                          : "Saved"
-                        : "Select a note or create a new one.";
+          : deleting
+            ? "Deleting note..."
+            : readFailure
+              ? readFailure.kind === "missing"
+                ? "This note is no longer available. Your current text is unchanged. Refresh the notes list or choose another note."
+                : failureMessage(readFailure.kind, "read")
+              : writesForbidden
+                ? failureMessage("forbidden", deleteFailure === "forbidden" ? "delete" : "save")
+                : deleteFailure
+                  ? failureMessage(deleteFailure, "delete")
+                  : saveState === "saving"
+                    ? draft && savingSnapshot
+                      ? savingMessage(draft, savingSnapshot)
+                      : "Saving..."
+                    : saveState !== "idle"
+                      ? saveState === "failed" && saved === null
+                        ? "Could not confirm creation. Your text is preserved. Check the notes list before trying again; the note may already exist."
+                        : failureMessage(saveState, "save")
+                      : (deleteNotice ??
+                        (dirty
+                          ? "Unsaved changes"
+                          : draft && saved === null
+                            ? "New note"
+                            : draft
+                              ? example
+                                ? "Saved for this preview session"
+                                : "Saved"
+                              : "Select a note or create a new one."));
   const failed =
     !busy && ((recoveryKind !== null && recoveryKind !== "unavailable") || writesForbidden);
 
@@ -316,6 +446,7 @@ export function NotesWorkspace({
       <header className="flex flex-wrap items-center justify-between gap-3">
         <h1 className="text-2xl font-semibold">Atlas notes</h1>
         <Button
+          ref={newNoteRef}
           disabled={loadState !== "ready" || busy || blocked}
           onClick={() => requestSelection({ kind: "new" })}
         >
@@ -334,6 +465,11 @@ export function NotesWorkspace({
         <p role="status" className="text-sm">
           Unsaved changes
         </p>
+      )}
+      {deleteFailure === "failed" && saved && (
+        <Button ref={deleteRefreshRef} disabled={busy} onClick={() => void refreshNotes()}>
+          Refresh notes
+        </Button>
       )}
       {saveState === "failed" &&
         saved === null &&
@@ -360,6 +496,7 @@ export function NotesWorkspace({
       )}
       {recoveryKind === "unauthenticated" && (
         <a
+          ref={signInRef}
           className="inline-flex min-h-11 items-center underline underline-offset-4"
           href="/api/auth/login"
         >
@@ -371,11 +508,14 @@ export function NotesWorkspace({
           <Button disabled={busy} onClick={() => void refreshNotes()}>
             Refresh notes
           </Button>
-          {draft && (saveState === "missing" || readFailure?.id === saved?.note.id) && (
-            <Button variant="outline" disabled={busy} onClick={keepAsNew}>
-              Keep as new note
-            </Button>
-          )}
+          {draft &&
+            (saveState === "missing" ||
+              deleteFailure === "missing" ||
+              readFailure?.id === saved?.note.id) && (
+              <Button variant="outline" disabled={busy} onClick={keepAsNew}>
+                Keep as new note
+              </Button>
+            )}
         </div>
       )}
       {readFailure && recoveryKind === "failed" && (
@@ -431,7 +571,7 @@ export function NotesWorkspace({
                     id="note-title"
                     value={draft.title}
                     maxLength={256}
-                    disabled={openingId !== null}
+                    disabled={openingId !== null || deleting}
                     onChange={(event) => setDraft({ ...draft, title: event.target.value })}
                   />
                   <Label htmlFor="note-content">Markdown source</Label>
@@ -441,7 +581,7 @@ export function NotesWorkspace({
                     maxLength={100_000}
                     rows={6}
                     className="note-source"
-                    disabled={openingId !== null}
+                    disabled={openingId !== null || deleting}
                     onChange={(event) => setDraft({ ...draft, content: event.target.value })}
                   />
                   {!valid && (
@@ -455,6 +595,7 @@ export function NotesWorkspace({
                         (saved !== null && !dirty) ||
                         busy ||
                         writeBlocked ||
+                        deleteFailure !== null ||
                         !valid ||
                         saveState === "conflict" ||
                         saveState === "missing"
@@ -464,13 +605,24 @@ export function NotesWorkspace({
                       Save
                     </Button>
                     <span className="text-xs text-muted-foreground">Ctrl/Cmd+S to save</span>
-                    {saveState === "conflict" && saved && (
+                    {(saveState === "conflict" || deleteFailure === "conflict") && saved && (
                       <Button
+                        ref={compareRef}
                         variant="outline"
                         disabled={busy || blocked}
                         onClick={() => void openNote(saved.note.id, true)}
                       >
                         Compare latest
+                      </Button>
+                    )}
+                    {saved && (
+                      <Button
+                        ref={deleteButtonRef}
+                        variant="destructive"
+                        disabled={busy || writeBlocked || deleteBlocked}
+                        onClick={() => setDeleteOpen(true)}
+                      >
+                        Delete note
                       </Button>
                     )}
                   </div>
@@ -537,6 +689,33 @@ export function NotesWorkspace({
               }}
             >
               Discard changes
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+      <AlertDialog
+        open={deleteOpen}
+        onOpenChange={(open) => {
+          if (!open) setDeleteOpen(false);
+        }}
+      >
+        <AlertDialogContent
+          className="notes-dialog"
+          initialFocus={deleteCancelRef}
+          finalFocus={saved ? deleteButtonRef : newNoteRef}
+        >
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete note?</AlertDialogTitle>
+            <AlertDialogDescription>
+              &quot;{saved?.note.title || "Untitled note"}&quot; will be permanently deleted. This
+              cannot be undone.
+              {dirty ? " Your unsaved changes will also be discarded." : ""}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel ref={deleteCancelRef}>Keep note</AlertDialogCancel>
+            <AlertDialogAction variant="destructive" onClick={() => void deleteNote()}>
+              Delete permanently
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

@@ -28,8 +28,10 @@ export function createPreviewStore(scenario: string | null) {
   const versions = new Map([...notes.keys()].map((id) => [id, 1]));
   let failLoad = scenario === "load-failure";
   let failSave = scenario === "save-failure";
+  let failDelete = scenario === "delete-failure";
   let failRead = scenario === "read-failure";
   let conflict = scenario === "conflict";
+  let deleteConflict = scenario === "delete-conflict";
   const tag = (id: string) => `"${id}-v${versions.get(id)}"`;
   const fail = (status: number, code: Parameters<typeof apiError>[0]) =>
     Response.json(apiError(code, "Synthetic request failure."), { status });
@@ -72,6 +74,26 @@ export function createPreviewStore(scenario: string | null) {
     }
     if (scenario === "expired-save") return fail(401, "UNAUTHENTICATED");
     if (scenario === "forbidden-save") return fail(403, "FORBIDDEN");
+    if (method === "DELETE" && id !== null) {
+      const note = notes.get(id);
+      if (!note) return fail(404, "NOT_FOUND");
+      const header = new Headers(init?.headers).get("If-Match");
+      if (header === null) return fail(428, "PRECONDITION_REQUIRED");
+      if (!ifMatchSchema.safeParse(header).success) return fail(400, "VALIDATION_ERROR");
+      if (deleteConflict) {
+        deleteConflict = false;
+        notes.set(id, { ...note, content: "A newer version saved by another client." });
+        versions.set(id, (versions.get(id) ?? 1) + 1);
+      }
+      if (header !== tag(id)) return fail(412, "PRECONDITION_FAILED");
+      if (failDelete) {
+        failDelete = false;
+        return fail(500, "INTERNAL_ERROR");
+      }
+      notes.delete(id);
+      versions.delete(id);
+      return new Response(null, { status: 204 });
+    }
     if (scenario === "missing-save" && id !== null && notes.has(id)) {
       notes.delete(id);
       return fail(404, "NOT_FOUND");

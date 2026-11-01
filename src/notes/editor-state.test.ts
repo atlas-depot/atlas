@@ -68,3 +68,16 @@ it("gives list failures their own recovery messages", () => {
     "The notes list is no longer available. Refresh the notes list or try again later. Your current text is preserved.",
   );
 });
+
+it("describes delete failures without implying the note was removed", () => {
+  expect(failureMessage("conflict", "delete")).toBe(
+    "This note changed on the server. Nothing was deleted. Compare the latest version before trying again.",
+  );
+  expect(failureMessage("failed", "delete")).toBe(
+    "Could not confirm deletion. Your text is preserved. Refresh the notes list before trying again; the note may already be gone.",
+  );
+  expect(failureMessage("forbidden", "delete")).toContain("Deleting is unavailable");
+  expect(failureMessage("missing", "delete")).toBe(
+    "This note is no longer available. Your unsaved text is preserved. Refresh the notes list or keep your text as a new note.",
+  );
+});

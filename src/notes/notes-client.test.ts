@@ -28,6 +28,25 @@ describe("notes REST client", () => {
     });
   });
 
+  it("deletes with If-Match and accepts an empty 204 response", async () => {
+    const request = vi.fn<typeof fetch>().mockResolvedValue(new Response(null, { status: 204 }));
+    const client = createNotesClient(request);
+    await expect(client.delete(id, '"opaque-17"')).resolves.toBeUndefined();
+    const [url, init] = request.mock.calls[0];
+    expect(url).toBe(`/api/notes/${id}`);
+    expect(init?.method).toBe("DELETE");
+    expect(new Headers(init?.headers).get("If-Match")).toBe('"opaque-17"');
+    expect(init?.body).toBeUndefined();
+  });
+
+  it("rejects unsafe delete inputs before dispatching", async () => {
+    const request = vi.fn<typeof fetch>();
+    const client = createNotesClient(request);
+    await expect(client.delete("not-a-uuid", '"v1"')).rejects.toThrow();
+    await expect(client.delete(id, 'W/"weak"')).rejects.toThrow();
+    expect(request).not.toHaveBeenCalled();
+  });
+
   it("creates without an ID and updates with only editable fields and If-Match", async () => {
     const request = vi
       .fn<typeof fetch>()
@@ -127,7 +146,7 @@ describe("notes REST client", () => {
 });
 
 describe("bounded notes requests", () => {
-  it.each(["list", "read", "create", "update"] as const)(
+  it.each(["list", "read", "create", "update", "delete"] as const)(
     "aborts a hung %s and ignores late success",
     async (operation) => {
       vi.useFakeTimers();
@@ -151,12 +170,14 @@ describe("bounded notes requests", () => {
                     content: note.content,
                     createdAt: note.createdAt,
                   })
-                : client.update(id, { title: note.title, content: note.content }, '"v1"');
+                : operation === "delete"
+                  ? client.delete(id, '"v1"')
+                  : client.update(id, { title: note.title, content: note.content }, '"v1"');
         const rejected = expect(pending).rejects.toThrow("timed out");
         await vi.advanceTimersByTimeAsync(100);
         await rejected;
         expect(request.mock.calls[0][1]?.signal?.aborted).toBe(true);
-        finish(result('"late"'));
+        finish(operation === "delete" ? new Response(null, { status: 204 }) : result('"late"'));
       } finally {
         vi.useRealTimers();
       }
