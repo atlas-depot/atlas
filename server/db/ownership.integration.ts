@@ -117,19 +117,20 @@ function conflict<E extends Env>(c: Context<E>) {
   return c.json(apiError("PRECONDITION_FAILED", "Note was updated by another client."), 412);
 }
 
-function parseExpectedRevision(value: string | undefined) {
+/**
+ * The client copies the exact per-note tag into If-Match, so the adapter compares
+ * opaque strings. Numeric coercion would accept "01", "0x1" or "1e0" as revision 1
+ * and let a tag that was never issued for this note satisfy the precondition.
+ */
+function readIfMatch(value: string | undefined) {
   if (value === undefined) return { status: "missing" } as const;
-  const parsed = ifMatchSchema.safeParse(value);
-  if (!parsed.success) return { status: "invalid" } as const;
-  const revision = Number(parsed.data.slice(1, -1));
-  if (!Number.isSafeInteger(revision) || revision < 1 || revision > 2_147_483_647) {
-    return { status: "invalid" } as const;
-  }
-  return { status: "ok", revision } as const;
+  return ifMatchSchema.safeParse(value).success
+    ? ({ status: "ok", tag: value } as const)
+    : ({ status: "invalid" } as const);
 }
 
-function revisionEtag(revision: number): string {
-  return `"${revision}"`;
+function revisionEtag(noteId: string, revision: number): string {
+  return `"${noteId}:${revision}"`;
 }
 
 /**
@@ -144,7 +145,7 @@ function createPreparedNoteRoutes(store: ReturnType<typeof createNoteStore>) {
     const body: unknown = await c.req.json().catch(() => undefined);
     try {
       const stored = await store.create(ownerOf(c), body);
-      return c.json(stored.note, 201, { ETag: revisionEtag(stored.revision) });
+      return c.json(stored.note, 201, { ETag: revisionEtag(stored.note.id, stored.revision) });
     } catch (error) {
       if (error instanceof ZodError || error instanceof SyntaxError) return invalidRequest(c);
       throw error;
@@ -158,23 +159,28 @@ function createPreparedNoteRoutes(store: ReturnType<typeof createNoteStore>) {
     if (!id.success) return invalidRequest(c);
     const stored = await store.read(ownerOf(c), id.data);
     if (!stored) return notFound(c);
-    return c.json(stored.note, 200, { ETag: revisionEtag(stored.revision) });
+    return c.json(stored.note, 200, { ETag: revisionEtag(stored.note.id, stored.revision) });
   });
 
   routes.put("/prepared/notes/:id", async (c) => {
     const id = noteIdSchema.safeParse(c.req.param("id"));
     if (!id.success) return invalidRequest(c);
-    const expected = parseExpectedRevision(c.req.header("If-Match"));
+    const expected = readIfMatch(c.req.header("If-Match"));
     if (expected.status === "missing") {
       return c.json(apiError("PRECONDITION_REQUIRED", "If-Match is required."), 428);
     }
     if (expected.status === "invalid") return invalidRequest(c);
+    const current = await store.read(ownerOf(c), id.data);
+    if (!current) return notFound(c);
+    if (expected.tag !== revisionEtag(current.note.id, current.revision)) return conflict(c);
     const body: unknown = await c.req.json().catch(() => undefined);
     try {
-      const result = await store.update(ownerOf(c), id.data, expected.revision, body);
+      const result = await store.update(ownerOf(c), id.data, current.revision, body);
       if (result.status === "not_found") return notFound(c);
       if (result.status === "conflict") return conflict(c);
-      return c.json(result.value.note, 200, { ETag: revisionEtag(result.value.revision) });
+      return c.json(result.value.note, 200, {
+        ETag: revisionEtag(result.value.note.id, result.value.revision),
+      });
     } catch (error) {
       if (error instanceof ZodError || error instanceof SyntaxError) return invalidRequest(c);
       throw error;
@@ -184,12 +190,15 @@ function createPreparedNoteRoutes(store: ReturnType<typeof createNoteStore>) {
   routes.delete("/prepared/notes/:id", async (c) => {
     const id = noteIdSchema.safeParse(c.req.param("id"));
     if (!id.success) return invalidRequest(c);
-    const expected = parseExpectedRevision(c.req.header("If-Match"));
+    const expected = readIfMatch(c.req.header("If-Match"));
     if (expected.status === "missing") {
       return c.json(apiError("PRECONDITION_REQUIRED", "If-Match is required."), 428);
     }
     if (expected.status === "invalid") return invalidRequest(c);
-    const result = await store.delete(ownerOf(c), id.data, expected.revision);
+    const current = await store.read(ownerOf(c), id.data);
+    if (!current) return notFound(c);
+    if (expected.tag !== revisionEtag(current.note.id, current.revision)) return conflict(c);
+    const result = await store.delete(ownerOf(c), id.data, current.revision);
     if (result.status === "not_found") return notFound(c);
     if (result.status === "conflict") return conflict(c);
     return c.body(null, 204);
@@ -313,8 +322,9 @@ describe("authenticated note ownership and stale-write boundaries (synthetic ide
     const bobNote = await createNote(appA, "synthetic-bob", bobDraft);
 
     expect(aliceNote.note).toMatchObject(aliceDraft);
-    expect(aliceNote.etag).toMatch(/^"[^"]+"$/);
+    expect(aliceNote.etag).toBe(`"${aliceNote.note.id}:1"`);
     expect(bobNote.note).toMatchObject(bobDraft);
+    expect(bobNote.etag).toBe(`"${bobNote.note.id}:1"`);
 
     expect((await listNotes(appA, "synthetic-alice")).map((note) => note.id)).toEqual([
       aliceNote.note.id,
@@ -350,6 +360,15 @@ describe("authenticated note ownership and stale-write boundaries (synthetic ide
     expect(crossUpdateText).not.toContain(aliceDraft.title);
     expect(crossUpdateText).not.toContain(aliceDraft.content);
     expect(crossUpdateText).not.toContain("user_alice");
+    const nonexistentUpdate = await updateNote(
+      appA,
+      "synthetic-bob",
+      randomUUID(),
+      aliceNote.etag,
+      { title: "Attacked title", content: "Attacked content" },
+    );
+    expect(nonexistentUpdate.status).toBe(crossUpdate.status);
+    expect(await nonexistentUpdate.text()).toBe(crossUpdateText);
     expect((await readNote(appA, "synthetic-alice", aliceNote.note.id)).note).toEqual(
       aliceNote.note,
     );
@@ -360,6 +379,9 @@ describe("authenticated note ownership and stale-write boundaries (synthetic ide
     expect(crossDeleteText).not.toContain(aliceDraft.title);
     expect(crossDeleteText).not.toContain(aliceDraft.content);
     expect(crossDeleteText).not.toContain("user_alice");
+    const nonexistentDelete = await deleteNote(appA, "synthetic-bob", randomUUID(), aliceNote.etag);
+    expect(nonexistentDelete.status).toBe(crossDelete.status);
+    expect(await nonexistentDelete.text()).toBe(crossDeleteText);
     expect((await readNote(appA, "synthetic-alice", aliceNote.note.id)).note).toEqual(
       aliceNote.note,
     );
@@ -444,6 +466,8 @@ describe("authenticated note ownership and stale-write boundaries (synthetic ide
     });
     expect(bearerOverCookie.status).toBe(404);
 
+    // The synthetic authenticator has no provider-side revocation. This verifies the
+    // cleared cookie cannot authenticate, not that a copied pre-logout token is invalid.
     const logout = await appA.request("/api/auth/logout", {
       method: "POST",
       headers: { Cookie: sessionCookie("session_alice"), Origin: appOrigin },
@@ -558,24 +582,133 @@ describe("authenticated note ownership and stale-write boundaries (synthetic ide
     });
     expect(missing.status).toBe(428);
 
-    const malformed = await updateNote(
-      appA,
-      "synthetic-alice",
-      created.note.id,
-      '"not-a-revision"',
-      {
+    for (const malformedTag of ["*", "v1", '"v3", "v4"', 'W/"1"']) {
+      const update = await updateNote(appA, "synthetic-alice", created.note.id, malformedTag, {
         title: "Malformed",
         content: "Malformed",
-      },
-    );
-    expect(malformed.status).toBe(400);
+      });
+      expect(update.status).toBe(400);
+      expect(apiErrorSchema.parse((await update.json()) as unknown).error.code).toBe(
+        "VALIDATION_ERROR",
+      );
 
-    const weak = await updateNote(appA, "synthetic-alice", created.note.id, 'W/"1"', {
-      title: "Weak",
-      content: "Weak",
+      const deletion = await deleteNote(appA, "synthetic-alice", created.note.id, malformedTag);
+      expect(deletion.status).toBe(400);
+      expect(apiErrorSchema.parse((await deletion.json()) as unknown).error.code).toBe(
+        "VALIDATION_ERROR",
+      );
+    }
+
+    const missingDelete = await appA.request(`/api/prepared/notes/${created.note.id}`, {
+      method: "DELETE",
+      headers: authorization("synthetic-alice"),
     });
-    expect(weak.status).toBe(400);
+    expect(missingDelete.status).toBe(428);
 
     expect(await readNote(appA, "synthetic-alice", created.note.id)).toEqual(created);
+  });
+
+  it("rejects invalid identifiers and payloads before touching stored notes", async () => {
+    const created = await createNote(appA, "synthetic-alice", aliceDraft);
+    const invalidId = "not-a-uuid";
+
+    const readInvalid = await appA.request(`/api/prepared/notes/${invalidId}`, {
+      headers: authorization("synthetic-alice"),
+    });
+    expect(readInvalid.status).toBe(400);
+
+    const updateInvalid = await updateNote(appA, "synthetic-alice", invalidId, created.etag, {
+      title: "Invalid id",
+      content: "Invalid id",
+    });
+    expect(updateInvalid.status).toBe(400);
+
+    const deleteInvalid = await deleteNote(appA, "synthetic-alice", invalidId, created.etag);
+    expect(deleteInvalid.status).toBe(400);
+
+    const malformedJson = await appA.request(`/api/prepared/notes/${created.note.id}`, {
+      method: "PUT",
+      headers: {
+        ...authorization("synthetic-alice"),
+        "If-Match": created.etag,
+        "Content-Type": "application/json",
+      },
+      body: "{",
+    });
+    expect(malformedJson.status).toBe(400);
+
+    const injected = await appA.request(`/api/prepared/notes/${created.note.id}`, {
+      method: "PUT",
+      headers: {
+        ...authorization("synthetic-alice"),
+        "If-Match": created.etag,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ title: "Injected", content: "Injected", ownerId: "user_bob" }),
+    });
+    expect(injected.status).toBe(400);
+
+    const malformedCreate = await appA.request("/api/prepared/notes", {
+      method: "POST",
+      headers: { ...authorization("synthetic-alice"), "Content-Type": "application/json" },
+      body: "{",
+    });
+    expect(malformedCreate.status).toBe(400);
+
+    expect(await readNote(appA, "synthetic-alice", created.note.id)).toEqual(created);
+    expect(await listNotes(appA, "synthetic-alice")).toEqual([created.note]);
+  });
+
+  it("compares the exact per-note ETag and rejects unissued or cross-note tags", async () => {
+    const created = await createNote(appA, "synthetic-alice", aliceDraft);
+    const other = await createNote(appA, "synthetic-alice", {
+      ...aliceDraft,
+      title: "Second note",
+      content: "Second note content",
+    });
+    expect(created.etag).toBe(`"${created.note.id}:1"`);
+    expect(other.etag).toBe(`"${other.note.id}:1"`);
+
+    for (const tag of [
+      '"01"',
+      '"0x1"',
+      '"1e0"',
+      '"1.0"',
+      '"0b1"',
+      '"+1"',
+      `"${created.note.id}:2"`,
+      other.etag,
+    ]) {
+      const update = await updateNote(appA, "synthetic-alice", created.note.id, tag, {
+        title: "Forged",
+        content: "Forged",
+      });
+      expect(update.status).toBe(412);
+      expect(apiErrorSchema.parse((await update.json()) as unknown).error.code).toBe(
+        "PRECONDITION_FAILED",
+      );
+
+      const deletion = await deleteNote(appA, "synthetic-alice", created.note.id, tag);
+      expect(deletion.status).toBe(412);
+      expect(apiErrorSchema.parse((await deletion.json()) as unknown).error.code).toBe(
+        "PRECONDITION_FAILED",
+      );
+    }
+
+    expect(await readNote(appA, "synthetic-alice", created.note.id)).toEqual(created);
+    expect(await readNote(appA, "synthetic-alice", other.note.id)).toEqual(other);
+
+    const saved = await updateNote(appA, "synthetic-alice", created.note.id, created.etag, {
+      title: "Edited",
+      content: "Edited content",
+    });
+    expect(saved.status).toBe(200);
+    expect(saved.headers.get("ETag")).toBe(`"${created.note.id}:2"`);
+    const savedNote = noteSchema.parse((await saved.json()) as unknown);
+    expect(savedNote).toMatchObject({ title: "Edited", content: "Edited content" });
+    expect(await readNote(appA, "synthetic-alice", created.note.id)).toEqual({
+      note: savedNote,
+      etag: `"${created.note.id}:2"`,
+    });
   });
 });
