@@ -1,5 +1,6 @@
 packages:
   - "."
+  - "agents/organizer"
 
 allowBuilds:
   esbuild: false

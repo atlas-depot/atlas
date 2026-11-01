@@ -16,7 +16,7 @@ export type NoteWriteResult =
 const revisionSchema = z.number().int().positive().max(2_147_483_647);
 const ownerSchema = z.string().min(1);
 
-function storedNote(row: Row): StoredNote {
+export function storedNote(row: Row): StoredNote {
   return {
     note: {
       id: row.id,
