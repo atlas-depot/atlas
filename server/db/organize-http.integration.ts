@@ -4,6 +4,7 @@ import { createServer } from "node:http";
 import { getRequestListener } from "@hono/node-server";
 import { Pool } from "pg";
 import { afterAll, afterEach, beforeAll, expect, it, vi } from "vite-plus/test";
+import { reconcileOrganizerRuns } from "../../agents/organizer/maintenance.ts";
 import { createApp } from "../app.ts";
 import { createRequestAuthenticator } from "../auth.ts";
 import { readCookie, SESSION_COOKIE_NAME } from "../cookies.ts";
@@ -399,5 +400,97 @@ it("recovers a committed start after the HTTP client disconnects before receivin
   } finally {
     abort.abort();
     release();
+  }
+});
+
+const maintenanceEnvironment = () => ({
+  ORGANIZER_MAINTENANCE_ENABLED: "true",
+  DATABASE_URL: databaseUrl,
+  ORGANIZER_RUNTIME_URL: runtimeUrl,
+  ORGANIZER_SERVICE_TOKEN: "synthetic-maintenance-service-token",
+});
+
+it("leaves disabled maintenance inert even without valid database or service settings", async () => {
+  await expect(reconcileOrganizerRuns({})).resolves.toBeUndefined();
+  await expect(
+    reconcileOrganizerRuns({
+      ORGANIZER_MAINTENANCE_ENABLED: "false",
+      DATABASE_URL: "invalid",
+      ORGANIZER_SERVICE_TOKEN: "short",
+    }),
+  ).resolves.toBeUndefined();
+});
+
+it("runs maintenance through its environment and backend to purge only expired terminal metadata", async () => {
+  const expiredId = randomUUID();
+  const retainedId = randomUUID();
+  const now = Date.now();
+  await connection.db.insert(organizeRuns).values(
+    [expiredId, retainedId].map((id) => ({
+      id,
+      ownerId: "synthetic-maintenance-owner",
+      noteId: randomUUID(),
+      sourceRevision: 1,
+      runtimeUrl,
+      state: { status: "expired" as const },
+      active: false,
+      usage,
+      expiresAt: new Date(now + (id === expiredId ? -60_000 : 60_000)).toISOString(),
+    })),
+  );
+  const transport = vi
+    .spyOn(globalThis, "fetch")
+    .mockRejectedValue(new Error("Unexpected maintenance dispatch"));
+  try {
+    expect(await reconcileOrganizerRuns(maintenanceEnvironment())).toEqual({
+      checked: 0,
+      retryPending: 0,
+    });
+    expect(await connection.db.select({ id: organizeRuns.id }).from(organizeRuns)).toEqual([
+      { id: retainedId },
+    ]);
+    expect(transport).not.toHaveBeenCalled();
+  } finally {
+    transport.mockRestore();
+  }
+});
+
+it("finishes persisted maintenance cleanup after a crash without dispatching an unstarted run", async () => {
+  const owner = randomUUID();
+  const note = await createNoteStore(connection.db).create(owner, source);
+  const store = createOrganizeRunStore(connection.db);
+  const run = await store.claim(owner, note.note.id, runtimeUrl);
+  if (!run) throw new Error("Expected owned run");
+  // Crash after cleanup intent commits, before the scheduled worker finalizes it.
+  await store.withRun(owner, run.runId, async (record, save) => {
+    await save({
+      ...record,
+      input: null,
+      state: { status: "cleaning" },
+      cleanupTarget: { status: "expired" },
+    });
+  });
+  const transport = vi
+    .spyOn(globalThis, "fetch")
+    .mockRejectedValue(new Error("Unexpected maintenance dispatch"));
+  const before = Date.now();
+  try {
+    expect(await reconcileOrganizerRuns(maintenanceEnvironment())).toEqual({
+      checked: 1,
+      retryPending: 0,
+    });
+    const retired = await store.read(owner, run.runId);
+    expect(retired).toMatchObject({
+      active: false,
+      input: null,
+      runtime: null,
+      cleanupTarget: null,
+      state: { status: "expired" },
+    });
+    expect(retired?.expiresAt).toBeGreaterThanOrEqual(before + ORGANIZE_METADATA_RETENTION_MS);
+    expect(retired?.expiresAt).toBeLessThanOrEqual(Date.now() + ORGANIZE_METADATA_RETENTION_MS);
+    expect(transport).not.toHaveBeenCalled();
+  } finally {
+    transport.mockRestore();
   }
 });
