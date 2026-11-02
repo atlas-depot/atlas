@@ -4,16 +4,18 @@ import { createApp } from "./app.ts";
 import { createAuthRoutes } from "./auth-routes.ts";
 import { createRequestAuthenticator } from "./auth.ts";
 import { createBrowserAuth } from "./browser-auth.ts";
+import { openDatabase } from "./db/connection.ts";
+import { createNoteStore } from "./db/notes.ts";
 import { readServerEnv } from "./env.ts";
 import { createBearerAuthenticator } from "./workos.ts";
 
-function main() {
+async function main() {
   let configuration: ReturnType<typeof readServerEnv>;
   try {
     configuration = readServerEnv(process.env);
   } catch {
     console.error(
-      "Atlas API could not start. Check API_PORT, APP_ORIGIN and WorkOS configuration.",
+      "Atlas API could not start. Check API_PORT, authentication, database and organizer configuration.",
     );
     process.exitCode = 1;
     return;
@@ -32,7 +34,19 @@ function main() {
     workosClient ? createBearerAuthenticator(workosClient) : undefined,
     browser?.authenticate,
   );
+  // Load the isolated eve adapter only when this API is configured to use it.
+  const organizer = configuration.organizer
+    ? (await import("../agents/organizer/backend.ts")).createOrganizerBackend(
+        configuration.organizer,
+      )
+    : undefined;
+  const database = configuration.databaseUrl ? openDatabase(configuration.databaseUrl) : undefined;
+  const closeDatabases = async () => {
+    await Promise.all([database?.close(), organizer?.close()]);
+  };
   const app = createApp(authenticateRequest, {
+    notes: database ? createNoteStore(database.db) : undefined,
+    organizer,
     appOrigin: browserAuth?.appOrigin,
     authRoutes:
       browser && browserAuth
@@ -49,6 +63,10 @@ function main() {
     } else {
       console.error("Atlas API could not start. Check API_PORT and port availability.");
       process.exitCode = 1;
+      void closeDatabases().catch(() => {
+        console.error("Atlas API database shutdown failed.");
+        process.exitCode = 1;
+      });
     }
   });
   let closing = false;
@@ -57,13 +75,23 @@ function main() {
     closing = true;
     const deadline = setTimeout(() => process.exit(1), 5_000);
     deadline.unref();
-    server.close((error) => {
+    server.close(async (error) => {
+      try {
+        await closeDatabases();
+      } catch {
+        process.exitCode = 1;
+      }
       clearTimeout(deadline);
-      process.exitCode = error ? 1 : 0;
+      if (error) process.exitCode = 1;
     });
   };
   process.once("SIGINT", shutdown);
   process.once("SIGTERM", shutdown);
 }
 
-main();
+void main().catch(() => {
+  console.error(
+    "Atlas API could not start. Check authentication, database and organizer configuration.",
+  );
+  process.exitCode = 1;
+});

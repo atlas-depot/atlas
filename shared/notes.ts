@@ -1,6 +1,8 @@
 import { z } from "zod";
 
 export const noteIdSchema = z.uuid();
+/** Account-scoped key for one logical creation, reused with the original payload. */
+export const createNoteKeySchema = z.uuid().transform((value) => value.toLowerCase());
 
 /** Editable fields: preserve whitespace, allow empty drafts. Limits use UTF-16 code units. */
 export const noteContentSchema = z.strictObject({
@@ -22,10 +24,13 @@ export const noteSchema = createNoteSchema.extend({
 export const noteListSchema = z.strictObject({ notes: z.array(noteSchema) });
 
 /**
- * REST target under /api/notes (storage is not connected yet):
+ * REST contract under /api/notes:
  * POST: CreateNote -> 201 Note; GET: -> 200 { notes: Note[] }.
  * GET /:id: -> 200 Note; PUT /:id: UpdateNote -> 200 Note; DELETE /:id: -> 204.
  * Individual Note responses carry ETag; PUT replaces both editable fields.
+ * POST requires a UUID Idempotency-Key. Matching, unchanged replays return the same 201/ETag.
+ * Changed payload, edited note or deleted note under that key returns 409 CONFLICT.
+ * Key/hash/note-ID metadata remains until account deletion; no content snapshot is retained.
  * PUT/DELETE require If-Match (shared/http.ts). DELETE has no body.
  * Invalid input/UUID: 400; unauthenticated: 401; absent or inaccessible note: 404.
  * Ownership comes only from the verified user. Clients never supply owner IDs.
@@ -33,5 +38,3 @@ export const noteListSchema = z.strictObject({ notes: z.array(noteSchema) });
 export type Note = z.infer<typeof noteSchema>;
 export type CreateNote = z.infer<typeof createNoteSchema>;
 export type UpdateNote = z.infer<typeof updateNoteSchema>;
-
-export const createNoteKeySchema = z.uuid().transform((value) => value.toLowerCase());

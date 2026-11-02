@@ -4,7 +4,7 @@ import { readServerEnv } from "./env.ts";
 it("starts without unused provider credentials", () => {
   expect(readServerEnv({})).toEqual({ port: 3001 });
   expect(readServerEnv({ API_PORT: "0" })).toEqual({ port: 0 });
-  expect(readServerEnv({ API_PORT: "4317", DATABASE_URL: "unused" })).toEqual({ port: 4317 });
+  expect(readServerEnv({ API_PORT: "4317" })).toEqual({ port: 4317 });
 });
 
 it.each(["", " 3001", "1.5", "-1", "65536", "SYNTHETIC_SECRET", "Infinity"])(
@@ -45,6 +45,131 @@ const browserSettings = {
   WORKOS_COOKIE_PASSWORD: "c".repeat(32),
   WORKOS_ISSUER: "https://api.workos.com/",
 };
+
+const organizerSettings = {
+  DATABASE_URL: "postgresql://synthetic:password@localhost/atlas_test",
+  ORGANIZER_RUNTIME_URL: "https://organizer.example.test",
+  ORGANIZER_SERVICE_TOKEN: "synthetic-service-token-for-test-only",
+};
+
+it("configures note persistence independently of organizer", () => {
+  expect(readServerEnv({ DATABASE_URL: organizerSettings.DATABASE_URL })).toEqual({
+    port: 3001,
+    databaseUrl: organizerSettings.DATABASE_URL,
+  });
+  expect(() => readServerEnv({ DATABASE_URL: "SYNTHETIC_INVALID_DATABASE" })).toThrow(
+    /^Set DATABASE_URL to a valid PostgreSQL connection URL\.$/,
+  );
+});
+
+it("maps a complete organizer configuration alongside browser authentication", () => {
+  expect(
+    readServerEnv({
+      ...browserSettings,
+      ...organizerSettings,
+      ORGANIZER_DEPLOYMENT_PROTECTION_SECRET: "synthetic-bypass",
+      ORGANIZER_RESULT_RETENTION_MS: "1800000",
+    }),
+  ).toEqual({
+    port: 3001,
+    workos: { clientId: "client_atlasTest", issuer: "https://api.workos.com/" },
+    browserAuth: {
+      appOrigin: "https://app.example.test",
+      apiKey: "sk_test_fixture",
+      cookiePassword: "c".repeat(32),
+    },
+    databaseUrl: organizerSettings.DATABASE_URL,
+    organizer: {
+      connectionString: organizerSettings.DATABASE_URL,
+      runtimeUrl: organizerSettings.ORGANIZER_RUNTIME_URL,
+      serviceToken: organizerSettings.ORGANIZER_SERVICE_TOKEN,
+      deploymentProtectionSecret: "synthetic-bypass",
+      resultRetentionMs: 1800000,
+    },
+  });
+});
+
+it("defaults only the draft delivery lifetime, keeping metadata retention separate", () => {
+  expect(readServerEnv(organizerSettings)).toEqual({
+    port: 3001,
+    databaseUrl: organizerSettings.DATABASE_URL,
+    organizer: {
+      connectionString: organizerSettings.DATABASE_URL,
+      runtimeUrl: organizerSettings.ORGANIZER_RUNTIME_URL,
+      serviceToken: organizerSettings.ORGANIZER_SERVICE_TOKEN,
+      deploymentProtectionSecret: undefined,
+      resultRetentionMs: 900000,
+    },
+  });
+});
+
+it.each(["http://localhost:3100", "http://127.0.0.1:3100", "http://[::1]:3100"])(
+  "permits loopback organizer development at %s",
+  (runtimeUrl) => {
+    expect(
+      readServerEnv({ ...organizerSettings, ORGANIZER_RUNTIME_URL: runtimeUrl }),
+    ).toMatchObject({
+      organizer: { runtimeUrl },
+    });
+  },
+);
+
+it("rejects incomplete organizer settings without echoing values", () => {
+  for (const settings of [
+    { ORGANIZER_RUNTIME_URL: organizerSettings.ORGANIZER_RUNTIME_URL },
+    { ORGANIZER_SERVICE_TOKEN: "SYNTHETIC_SECRET" },
+    { ORGANIZER_RESULT_RETENTION_MS: "900000" },
+    { ORGANIZER_DEPLOYMENT_PROTECTION_SECRET: "SYNTHETIC_SECRET" },
+    { ...organizerSettings, ORGANIZER_RUNTIME_URL: undefined },
+    { ...organizerSettings, ORGANIZER_SERVICE_TOKEN: undefined },
+  ]) {
+    expect(() => readServerEnv(settings)).toThrow(
+      /^Set valid organizer runtime, service and retention settings\.$/,
+    );
+  }
+  for (const databaseUrl of [
+    undefined,
+    "SYNTHETIC_SECRET",
+    "https://user:SYNTHETIC_SECRET@db.example/atlas",
+    "postgresql://user:SYNTHETIC_SECRET@db.example/atlas?host=elsewhere",
+  ]) {
+    expect(() => readServerEnv({ ...organizerSettings, DATABASE_URL: databaseUrl })).toThrow(
+      /^Set DATABASE_URL to a valid PostgreSQL connection URL\.$/,
+    );
+  }
+});
+
+it.each([
+  "http://organizer.example.test",
+  "http://localhost.attacker.test",
+  "http://0.0.0.0:3000",
+  "https://user:SYNTHETIC_SECRET@organizer.example.test",
+  "https://organizer.example.test/path",
+  "https://organizer.example.test?token=SYNTHETIC_SECRET",
+  "https://organizer.example.test#SYNTHETIC_SECRET",
+  "SYNTHETIC_SECRET",
+])("rejects unsafe organizer endpoint %s without exposing it", (runtimeUrl) => {
+  expect(() => readServerEnv({ ...organizerSettings, ORGANIZER_RUNTIME_URL: runtimeUrl })).toThrow(
+    /^Set valid organizer runtime, service and retention settings\.$/,
+  );
+});
+
+it("rejects invalid organizer tokens and retention without exposing values", () => {
+  for (const overrides of [
+    { ORGANIZER_SERVICE_TOKEN: "SYNTHETIC_SECRET" },
+    { ORGANIZER_SERVICE_TOKEN: ` ${organizerSettings.ORGANIZER_SERVICE_TOKEN}` },
+    { ORGANIZER_SERVICE_TOKEN: "s".repeat(513) },
+    { ORGANIZER_DEPLOYMENT_PROTECTION_SECRET: "" },
+    { ORGANIZER_DEPLOYMENT_PROTECTION_SECRET: "SYNTHETIC_SECRET\n" },
+    ...["", "0", "-1", "1.5", " 1000", "Infinity", "2147483648", "SYNTHETIC_SECRET"].map(
+      (value) => ({ ORGANIZER_RESULT_RETENTION_MS: value }),
+    ),
+  ]) {
+    expect(() => readServerEnv({ ...organizerSettings, ...overrides })).toThrow(
+      /^Set valid organizer runtime, service and retention settings\.$/,
+    );
+  }
+});
 
 it("accepts the complete browser sign-in configuration", () => {
   expect(readServerEnv(browserSettings)).toEqual({
