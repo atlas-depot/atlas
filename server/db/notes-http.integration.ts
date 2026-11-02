@@ -270,6 +270,87 @@ it("rejects invalid creation/update payloads and missing creation keys without p
   expect((await createNoteStore(connection.db).read(f.owner, created.note.id))?.revision).toBe(1);
 });
 
+it.each([
+  ["title", "high surrogate", "\ud800"],
+  ["title", "low surrogate", "\udc00"],
+  ["title", "NUL", "\u0000"],
+  ["content", "high surrogate", "\ud800"],
+  ["content", "low surrogate", "\udc00"],
+  ["content", "NUL", "\u0000"],
+])(
+  "rejects %s containing %s before PostgreSQL writes or key reservation",
+  async (field, _label, text) => {
+    const f = await fixture();
+    const created = await f.create();
+    const store = createNoteStore(connection.db);
+    const receipts = await connection.db.select().from(noteCreateRequests);
+    const key = randomUUID();
+    const invalidCreate = await f.http.request(
+      "/notes",
+      json("POST", { ...source, [field]: text }, { "Idempotency-Key": key }),
+    );
+    expect.soft(invalidCreate.status).toBe(400);
+    await invalidCreate.text();
+    expect.soft(await store.list(f.owner)).toEqual([created.note]);
+    expect.soft(await connection.db.select().from(noteCreateRequests)).toEqual(receipts);
+    const invalidUpdate = await f.http.request(
+      `/notes/${created.note.id}`,
+      json(
+        "PUT",
+        { title: source.title, content: source.content, [field]: text },
+        { "If-Match": created.tag },
+      ),
+    );
+    expect.soft(invalidUpdate.status).toBe(400);
+    await invalidUpdate.text();
+    expect
+      .soft(await store.read(f.owner, created.note.id))
+      .toEqual({ note: created.note, revision: 1 });
+    const retry = await f.http.request("/notes", json("POST", source, { "Idempotency-Key": key }));
+    expect.soft(retry.status).toBe(201);
+    await retry.text();
+  },
+);
+
+it("rejects year zero before PostgreSQL writes or key reservation", async () => {
+  const f = await fixture();
+  const key = randomUUID();
+  const invalid = await f.http.request(
+    "/notes",
+    json("POST", { ...source, createdAt: "0000-01-01T00:00:00.000Z" }, { "Idempotency-Key": key }),
+  );
+  expect.soft(invalid.status).toBe(400);
+  await invalid.text();
+  expect(await createNoteStore(connection.db).list(f.owner)).toEqual([]);
+  expect(await connection.db.select().from(noteCreateRequests)).toEqual([]);
+  const retry = await f.http.request("/notes", json("POST", source, { "Idempotency-Key": key }));
+  expect(retry.status).toBe(201);
+  await retry.text();
+});
+
+it("round-trips valid Unicode source exactly through POST, PUT and fresh database reads", async () => {
+  const f = await fixture();
+  const text = "😀 𐐷 e\u0301 é \ufffd\n  Keep whitespace.  ";
+  const payload = { ...source, title: text, content: text };
+  const create = await f.http.request(
+    "/notes",
+    json("POST", payload, { "Idempotency-Key": randomUUID() }),
+  );
+  expect(create.status).toBe(201);
+  const created = noteSchema.parse(await create.json());
+  expect(created).toMatchObject(payload);
+  const reloaded = await f.listen(extraConnection());
+  expect(await (await reloaded.request(`/notes/${created.id}`)).json()).toEqual(created);
+  const edit = { title: `${text}\nEdited`, content: `Edited\n${text}` };
+  const update = await reloaded.request(
+    `/notes/${created.id}`,
+    json("PUT", edit, { "If-Match": create.headers.get("ETag")! }),
+  );
+  expect(update.status).toBe(200);
+  expect(await update.json()).toMatchObject(edit);
+  expect(await (await f.http.request(`/notes/${created.id}`)).json()).toMatchObject(edit);
+});
+
 it("coalesces concurrent creates and returns 409 for changed or deleted creation replays", async () => {
   const f = await fixture();
   const key = randomUUID();

@@ -29,12 +29,35 @@ describe("notes wire contract", () => {
     expect(updateNoteSchema.safeParse(input).success).toBe(false);
   });
 
-  it.each(["2026-10-28T21:30:00", "2026-10-28T21:30:00+03:00"])(
+  it.each(["2026-10-28T21:30:00", "2026-10-28T21:30:00+03:00", "0000-01-01T00:00:00.000Z"])(
     "rejects noncanonical or invalid creation time %s",
     (createdAt) => {
       expect(createNoteSchema.safeParse({ ...input, createdAt }).success).toBe(false);
     },
   );
+
+  it.each([
+    ["high surrogate", "\ud800"],
+    ["low surrogate", "\udc00"],
+    ["NUL", "\u0000"],
+  ])("rejects %s in either editable field without transforming it", (_label, text) => {
+    for (const field of ["title", "content"]) {
+      expect.soft(createNoteSchema.safeParse({ ...input, [field]: text }).success).toBe(false);
+      expect
+        .soft(updateNoteSchema.safeParse({ title: "", content: "", [field]: text }).success)
+        .toBe(false);
+    }
+  });
+
+  it("preserves supplementary Unicode, combining marks and literal replacement characters", () => {
+    const text = "😀 𐐷 e\u0301 é \ufffd\n  Keep whitespace.  ";
+    const valid = { ...input, title: text, content: text };
+    expect(createNoteSchema.parse(valid)).toEqual(valid);
+    expect(updateNoteSchema.parse({ title: text, content: text })).toEqual({
+      title: text,
+      content: text,
+    });
+  });
 
   it("bounds payloads and checks the five-field response", () => {
     const note = {
