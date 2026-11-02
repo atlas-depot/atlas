@@ -6,6 +6,7 @@ import {
   integer,
   jsonb,
   pgTable,
+  primaryKey,
   text,
   timestamp,
   uniqueIndex,
@@ -34,6 +35,19 @@ export const notes = pgTable(
     index("notes_owner_id_idx").on(table.ownerId),
     check("notes_revision_positive", sql`${table.revision} > 0`),
   ],
+);
+
+/** Content-free creation receipts survive note deletion to prevent duplicate retries. */
+export const noteCreateRequests = pgTable(
+  "note_create_requests",
+  {
+    ownerId: text("owner_id").notNull(),
+    key: uuid("key").notNull(),
+    payloadHash: text("payload_hash").notNull(),
+    // No cascading relation: deletion must not make a creation key reusable.
+    noteId: uuid("note_id").notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.ownerId, table.key] })],
 );
 
 export const organizeRuns = pgTable(

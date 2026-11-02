@@ -71,7 +71,7 @@ describe("WorkOS access-token boundary with synthetic signing keys", () => {
       await authenticate(new Request("http://atlas.test/api/notes?userId=user_bob", { headers })),
     ).toEqual({ userId: "user_alice" });
     const response = await createApp(authenticate).request("/api/notes", { headers });
-    expect(response.status).toBe(501);
+    expect(response.status).toBe(503);
     expect(response.headers.get("WWW-Authenticate")).toBeNull();
   });
 
@@ -125,7 +125,7 @@ describe("WorkOS access-token boundary with synthetic signing keys", () => {
       { timeout: 5_000, interval: 20 },
     );
     for (const [accessToken, expectedStatus] of [
-      [token(), 501],
+      [token(), 503],
       [token({}, otherKey.privateKey), 401],
     ] as const) {
       const response = await fetch(`${url}/api/notes`, {

@@ -24,9 +24,9 @@ describe("Hono authentication boundary", () => {
   it("allows authenticated requests to reach the note routes", async () => {
     const app = createApp(async () => ({ userId: "synthetic-user-a" }));
     const response = await app.request("/api/notes");
-    expect(response.status).toBe(501);
+    expect(response.status).toBe(503);
     expect(await response.json()).toEqual({
-      error: { code: "NOT_IMPLEMENTED", message: "Note storage is not connected yet." },
+      error: { code: "SERVICE_UNAVAILABLE", message: "Note storage is temporarily unavailable." },
     });
   });
 
@@ -125,7 +125,7 @@ describe("Hono authentication boundary", () => {
       "/api/notes",
       { headers: { Cookie: "atlas_session=valid-looking-cookie" } },
     );
-    expect(response.status).toBe(501);
+    expect(response.status).toBe(503);
     expect(browser).toHaveBeenCalledTimes(1);
     expect(bearer).not.toHaveBeenCalled();
   });
