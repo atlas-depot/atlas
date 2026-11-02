@@ -68,9 +68,9 @@ The Drizzle PostgreSQL schema lives in `server/db/schema.ts`. Generate a migrati
 
 Notes store a verified WorkOS owner ID, Markdown source, timestamps and a positive internal revision counter. Public field limits remain in `shared/notes.ts`; PostgreSQL text lengths do not measure UTF-16 code units. Owner/revision enforcement lives in the note operations, not the schema alone. API storage wiring is not connected yet.
 
-Set server-only `DATABASE_URL` in your ignored `.env` to your isolated development PostgreSQL database, then run `pnpm db:migrate`. This applies pending committed migrations and closes its connection pool on success or failure. Re-running it leaves already recorded migrations alone; it does not reset data. Migration failures exit nonzero without printing driver errors or connection details. The API still starts without a database setting because storage is not wired into its routes yet.
+Set server-only `DATABASE_URL` in your ignored `.env` to your isolated development PostgreSQL database, then run `pnpm db:migrate`. This applies pending committed migrations and closes its connection pool on success or failure. Re-running it leaves already recorded migrations alone; it does not reset data. Migration failures exit nonzero without printing driver errors or connection details. The API starts without a database setting when Organize is disabled; note CRUD wiring remains separate.
 
-The `pg` driver connects through Drizzle using a pool of at most five connections and a ten-second connection timeout. Use a pooled Neon URL for application traffic and a direct URL with `sslmode=verify-full` for migration commands, supplied through the same `DATABASE_URL` setting. The same driver can use an isolated local PostgreSQL database for credential-free verification. The connection owner must call `close()` when finished. Efe's account is the designated staging migration operator, including an agent acting through that account. Only that operator applies reviewed migrations to staging, one run at a time. This is an operating responsibility, not a restriction on other organization admins; no automatic startup migration or concurrent-runner coordination is implemented.
+The `pg` driver connects through Drizzle using a pool of at most five connections and a ten-second connection timeout. Use a pooled Neon URL for application traffic and a direct URL with `sslmode=verify-full` for migration commands, supplied through the same `DATABASE_URL` setting. The same driver can use an isolated local PostgreSQL database for credential-free verification. The connection owner must call `close()` when finished. The organizer backend owns a separate two-connection pool with a five-second row-lock timeout so slow runtime transport cannot consume the normal note API pool. Its caller closes the backend on shutdown. Efe's account is the designated staging migration operator, including an agent acting through that account. Only that operator applies reviewed migrations to staging, one run at a time. This is an operating responsibility, not a restriction on other organization admins; no automatic startup migration or concurrent-runner coordination is implemented.
 
 For synthetic development data, set `DATABASE_URL` in your ignored `.env` to your own isolated local database or Neon development branch, then run:
 
@@ -101,6 +101,27 @@ Drizzle Kit uses esbuild's packaged platform executable. `allowBuilds.esbuild: f
 On 2026-11-01, code at `4181a9b` was verified on `atlas-dev` / `dev-efe`, Neon PostgreSQL 18 in AWS Frankfurt, using Node 24.22.0. The direct connection used verified TLS. With `NODE_ENV=development`, the actual setup command applied the committed migration and inserted two synthetic notes; a second run inserted zero. Pooled CRUD verified owner isolation, concurrent updates with one winner, stale update/delete rejection, and committed creation/edit recovery in fresh Node processes after the writers exited. Only the generated smoke note was deleted; the two synthetic seed notes remain. Staging was not modified. This verifies storage and process restart, not WorkOS, HTTP/UI integration or a Neon compute restart.
 
 The Atlas organization is on Free. Its five development branches (`dev-efe`, `dev-talha`, `dev-onat`, `dev-iklim`, `dev-ali`) have distinct endpoints separate from `staging`; all six computes are fixed at 0.25 CU. The [current Free allowance](https://neon.com/blog/neon-free-plan-1-gb-per-project) is 10 branches, 100 CU-hours per project/month and 1 GB storage per project. The compute allowance is shared across this project's branches. Four active project members were verified; Ali's invitation is still pending, so #46's five-member access condition remains open. Current members are organization admins: branch data is separate, but per-branch console access isolation is not enforced.
+
+### Organizer run persistence
+
+The `organize_runs` migration adds owner-bound transient run records alongside notes. Apply it with the normal reviewed migration command. A partial unique index coalesces active work for one owner/note, including pending cleanup. The note relation deliberately does not cascade-delete cleanup references. Acknowledgement clears temporary content before remote retirement and successful cleanup leaves an expiring metadata tombstone. These records are not saved notes.
+
+`pnpm test:db` also exercises run recovery, concurrency, source revision/deletion races and cleanup using separate pools and Node processes. Runtime transport is mocked in database tests. See the [organizer](../agents/organizer/README.md) for the eve/Vercel build, private service and explicitly enabled maintenance settings. Organize HTTP routes use the existing authentication middleware; #51 still owns note CRUD wiring. Database tests inject synthetic authentication and mock runtime transport, so they do not establish live WorkOS or model behavior.
+
+### Organize HTTP contract
+
+Configure `DATABASE_URL`, `ORGANIZER_RUNTIME_URL` (an immutable private deployment URL) and `ORGANIZER_SERVICE_TOKEN` on the Hono API. Install the isolated organizer dependencies as well as root dependencies. Partial settings fail startup; with no organizer settings, authenticated Organize requests return `503`. The token and optional `ORGANIZER_DEPLOYMENT_PROTECTION_SECRET` stay server-only. `ORGANIZER_RESULT_RETENTION_MS` defaults to 900000 for undelivered results, independently of the 48-hour content-free accounting retention.
+
+All routes use the existing WorkOS Bearer/session boundary and cookie-origin checks. IDs must be UUIDs; requests take no body. The server loads the owned note and revision. Shared response schemas live in `shared/organize.ts`.
+
+| Request | Response |
+| --- | --- |
+| `POST /api/notes/:id/organize` | `202 { runId, status: "accepted" }`, or `cleanup_pending` for existing work awaiting retirement |
+| `GET /api/organize-runs/:id` | `200 { runId, ...state }`, including progress or a separate Markdown draft, sources and source revision/staleness |
+| `POST /api/organize-runs/:id/cancel` | `200` terminal state, or `202` while cleanup is pending |
+| `POST /api/organize-runs/:id/acknowledge` | `200` after retirement, `202` while cleanup is pending; `409` if still running |
+
+The consumer retains the editable draft before acknowledging it. Acknowledgement deletes temporary content and is not Save. Keep the `runId` to reconnect; a lost start response can safely retry the same owned note while its run remains active. `cleanup_pending` must be polled instead of launching another run. Inaccessible and missing resources return the same `404`; transient backend failures return sanitized `503`. No raw eve handles, runtime URLs, credentials or accounting records enter these responses. #53 owns the browser integration and explicit derivative Save.
 
 ## Tests and coverage
 
