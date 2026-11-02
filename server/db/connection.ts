@@ -44,12 +44,26 @@ export function readTestDatabaseUrl(environment: Record<string, string | undefin
 }
 
 /** The caller owns this pool and must close it when its work finishes. */
-export function openDatabase(connectionString: string) {
+export function openDatabase(
+  connectionString: string,
+  options: { max?: number; lockTimeoutMs?: number } = {},
+) {
+  const max = z
+    .number()
+    .int()
+    .min(1)
+    .max(5)
+    .parse(options.max ?? 5);
+  const lockTimeoutMs =
+    options.lockTimeoutMs === undefined
+      ? undefined
+      : z.number().int().min(1).max(60_000).parse(options.lockTimeoutMs);
   const pool = new Pool({
     connectionString,
-    max: 5,
+    max,
     connectionTimeoutMillis: 10_000,
     idleTimeoutMillis: 10_000,
+    ...(lockTimeoutMs === undefined ? {} : { lock_timeout: lockTimeoutMs }),
   });
   // Idle connections can fail outside a pending query. Do not log driver details.
   pool.on("error", () => console.error("An idle database connection failed."));
