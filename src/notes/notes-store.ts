@@ -1,6 +1,7 @@
 import { apiErrorSchema, ifMatchSchema } from "../../shared/http";
 import {
   createNoteSchema,
+  createNoteKeySchema,
   noteIdSchema,
   noteListSchema,
   noteSchema,
@@ -19,8 +20,9 @@ export interface NoteSnapshot {
 export interface NotesStore {
   list(): Promise<Note[]>;
   read(id: string): Promise<NoteSnapshot>;
-  create(input: CreateNote): Promise<NoteSnapshot>;
+  create(input: CreateNote, key: string): Promise<NoteSnapshot>;
   update(id: string, input: UpdateNote, etag: string): Promise<NoteSnapshot>;
+  delete(id: string, etag: string): Promise<void>;
 }
 
 export class NotesRequestError extends Error {
@@ -95,13 +97,16 @@ export function createNotesClient(
     async read(id) {
       return snapshot(await response(`/${noteIdSchema.parse(id)}`), id);
     },
-    async create(input) {
+    async create(input, key) {
       return snapshot(
         await response(
           "",
           {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
+            headers: {
+              "Content-Type": "application/json",
+              "Idempotency-Key": createNoteKeySchema.parse(key),
+            },
             body: JSON.stringify(createNoteSchema.parse(input)),
           },
           201,
@@ -116,6 +121,16 @@ export function createNotesClient(
           body: JSON.stringify(updateNoteSchema.parse(input)),
         }),
         id,
+      );
+    },
+    async delete(id, etag) {
+      await response(
+        `/${noteIdSchema.parse(id)}`,
+        {
+          method: "DELETE",
+          headers: { "If-Match": ifMatchSchema.parse(etag) },
+        },
+        204,
       );
     },
   };
