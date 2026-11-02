@@ -1,18 +1,18 @@
-import type { openDatabase } from "../../server/db/connection.ts";
+import { openDatabase } from "../../server/db/connection.ts";
 import { createOrganizeRunStore } from "../../server/db/organize-runs.ts";
 import { createDurableOrganizeRuns } from "../../server/organize-runs.ts";
 import { createDurableEveOrganizer } from "./durable-client.ts";
 
-/** The caller owns the database pool. Requests only dispatch or inspect durable eve work. */
+/** Own a small pool so bounded runtime waits cannot exhaust the application's note pool. */
 export function createOrganizerBackend({
-  db,
+  connectionString,
   runtimeUrl,
   serviceToken,
   deploymentProtectionSecret,
   resultRetentionMs,
   requestTimeoutMs = 15_000,
 }: {
-  db: ReturnType<typeof openDatabase>["db"];
+  connectionString: string;
   /** Immutable deployment URL, persisted before dispatch so a redeploy cannot redirect an old run. */
   runtimeUrl: string;
   serviceToken: string;
@@ -20,8 +20,9 @@ export function createOrganizerBackend({
   resultRetentionMs: number;
   requestTimeoutMs?: number;
 }) {
-  return createDurableOrganizeRuns({
-    store: createOrganizeRunStore(db),
+  const connection = openDatabase(connectionString, { max: 2, lockTimeoutMs: 5_000 });
+  const runs = createDurableOrganizeRuns({
+    store: createOrganizeRunStore(connection.db),
     runtimeUrl,
     runtimeFor: (baseUrl) =>
       createDurableEveOrganizer({
@@ -32,4 +33,5 @@ export function createOrganizerBackend({
       }),
     resultRetentionMs,
   });
+  return { ...runs, close: connection.close };
 }
