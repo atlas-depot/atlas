@@ -1,0 +1,1 @@
+ALTER TABLE "organize_runs" ADD COLUMN "usage" jsonb;

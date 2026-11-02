@@ -238,6 +238,7 @@ await test("finite inspection reconstructs a draft and finish time after a new c
     status: "draft",
     draft: { markdown: "# Kept source facts", sources: [] },
     completedAt,
+    usage: { complete: false },
   };
   assert.deepEqual(await first.adapter.inspect(reference), expected);
   assert.deepEqual(await restarted.adapter.inspect(reference), expected);
@@ -251,6 +252,7 @@ await test("sources come only from completed research for the accepted turn", as
     status: "draft",
     draft: { markdown: "# Kept source facts", sources: [source] },
     completedAt,
+    usage: { complete: false },
   });
   const otherTurn = research.map((value) => ({ ...value, scope: { turnId: "other-turn" } }));
   const without = fixture({ events: [consumed, ...otherTurn, ...finished] });
@@ -261,13 +263,25 @@ await test("sources come only from completed research for the accepted turn", as
 
 await test("unfinished research is progress, never a completed draft", async () => {
   const { adapter } = fixture({ events: [consumed, research[0]!] });
-  assert.deepEqual(await adapter.inspect(reference), { status: "running", phase: "researching" });
+  assert.deepEqual(await adapter.inspect(reference), {
+    status: "running",
+    phase: "researching",
+    phaseStartedAt: completedAt,
+    lastProgressAt: completedAt,
+    usage: { complete: false },
+  });
 });
 
 await test("a turn finishing before its delivery settles remains in progress", async () => {
   assert.deepEqual(
     await fixture({ events: [consumed, ...finished.slice(0, -1)] }).adapter.inspect(reference),
-    { status: "running", phase: "writing" },
+    {
+      status: "running",
+      phase: "writing",
+      phaseStartedAt: completedAt,
+      lastProgressAt: completedAt,
+      usage: { complete: false },
+    },
   );
 });
 
@@ -313,7 +327,7 @@ await test("invalid research metadata fails closed", async () => {
   );
   assert.deepEqual(
     await fixture({ events: [consumed, ...events, ...finished] }).adapter.inspect(reference),
-    { status: "failed", reason: "invalid_draft" },
+    { status: "failed", reason: "invalid_draft", usage: { complete: false } },
   );
 });
 
@@ -381,4 +395,242 @@ await test("deployment access supplements service auth and cannot follow redirec
     }),
     reference,
   );
+});
+
+function usageEvent(runId: string, inputTokens: number, outputTokens: number, costUsd?: number) {
+  return event({
+    type: "usage.recorded",
+    scope,
+    data: {
+      kind: "model",
+      owner: { runId },
+      usage: {
+        inputTokens,
+        outputTokens,
+        cacheReadTokens: 0,
+        cacheWriteTokens: 0,
+        ...(costUsd === undefined ? {} : { costUsd }),
+      },
+    },
+  });
+}
+
+await test("usage aggregates distinct outer models and research without counting replayed facts twice", async () => {
+  const outer = usageEvent("model-1", 20, 5, 0.01);
+  const researched = research.map((value) =>
+    value.type === "call.settled"
+      ? event({
+          ...value,
+          data: {
+            ...value.data,
+            output: {
+              text: "Sourced fact",
+              sources: [source],
+              usage: { inputTokens: 30, outputTokens: 7, costUsd: 0.02 },
+            },
+          },
+        })
+      : value,
+  );
+  const firstModel = event({
+    type: "model.settled",
+    scope,
+    data: { runId: "model-0", outcome: "completed", finishReason: "tool-calls" },
+  });
+  const firstUsage = usageEvent("model-0", 10, 2, 0.005);
+  const sessionTotal = event({
+    type: "usage.recorded",
+    scope,
+    data: {
+      kind: "model",
+      usage: {
+        inputTokens: 999,
+        outputTokens: 999,
+        cacheReadTokens: 0,
+        cacheWriteTokens: 0,
+        costUsd: 99,
+      },
+    },
+  });
+  const delegated = event({
+    type: "usage.recorded",
+    scope,
+    data: {
+      kind: "model",
+      owner: { callId: "research-1" },
+      usage: {
+        inputTokens: 30,
+        outputTokens: 7,
+        cacheReadTokens: 0,
+        cacheWriteTokens: 0,
+        costUsd: 0.02,
+      },
+    },
+  });
+  const events = [
+    consumed,
+    firstModel,
+    firstUsage,
+    ...researched,
+    delegated,
+    ...finished,
+    outer,
+    outer,
+    sessionTotal,
+  ];
+  const expected = { inputTokens: 60, outputTokens: 14, costUsd: 0.035, complete: true };
+  const result = await fixture({ events }).adapter.inspect(reference);
+  assert.deepEqual(result.usage, expected);
+  assert.deepEqual((await fixture({ events }).adapter.inspect(reference)).usage, expected);
+  assert.equal(result.status, "draft");
+  if (result.status === "draft") assert.deepEqual(result.draft.sources, [source]);
+});
+
+await test("unknown cost is absent, partial cost is explicit, and failed or cancelled work preserves reported usage", async () => {
+  const tokensOnly = usageEvent("model-1", 20, 5);
+  const base = [consumed, ...finished, tokensOnly];
+  assert.deepEqual((await fixture({ events: base }).adapter.inspect(reference)).usage, {
+    inputTokens: 20,
+    outputTokens: 5,
+    complete: false,
+  });
+  const knownResearch = research.map((value) =>
+    value.type === "call.settled"
+      ? event({
+          ...value,
+          data: {
+            ...value.data,
+            output: {
+              text: "Fact",
+              sources: [source],
+              usage: { inputTokens: 10, outputTokens: 2, costUsd: 0.02 },
+            },
+          },
+        })
+      : value,
+  );
+  const expected = { inputTokens: 30, outputTokens: 7, costUsd: 0.02, complete: false };
+  for (const outcome of ["failed", "cancelled"] as const) {
+    const events = [
+      consumed,
+      ...knownResearch,
+      ...finished.map((value) =>
+        value.type === "turn.settled"
+          ? event({ ...value, data: { ...value.data, outcome } })
+          : value,
+      ),
+      tokensOnly,
+    ];
+    const result = await fixture({ events }).adapter.inspect(reference);
+    assert.equal(result.status, outcome);
+    assert.deepEqual(result.usage, expected);
+  }
+});
+
+await test("malformed usage cannot produce negative, non-finite or unsafe metrics", async () => {
+  for (const inputTokens of [
+    -1,
+    Number.NaN,
+    Number.POSITIVE_INFINITY,
+    Number.MAX_SAFE_INTEGER + 1,
+  ]) {
+    const result = await fixture({
+      events: [consumed, ...finished, usageEvent("model-1", inputTokens, 5, 0.01)],
+    }).adapter.inspect(reference);
+    assert.deepEqual(result.usage, { complete: false });
+  }
+  for (const costUsd of [-1, Number.NaN, Number.POSITIVE_INFINITY]) {
+    const result = await fixture({
+      events: [consumed, ...finished, usageEvent("model-1", 10, 5, costUsd)],
+    }).adapter.inspect(reference);
+    assert.deepEqual(result.usage, { complete: false });
+  }
+});
+
+await test("running usage is provisional while another model has no settled metrics", async () => {
+  const requested = event({
+    type: "model.requested",
+    scope,
+    data: { runId: "model-2", owner: { turnId: "turn-1" } },
+  });
+  const events = [consumed, finished[0]!, usageEvent("model-1", 20, 5, 0.01), requested];
+  const result = await fixture({ events }).adapter.inspect(reference);
+  assert.equal(result.status, "running");
+  assert.deepEqual(result.usage, {
+    inputTokens: 20,
+    outputTokens: 5,
+    costUsd: 0.01,
+    complete: false,
+  });
+});
+
+await test("phase age and last progress come from durable events, including repeated research and reconnect", async () => {
+  const at = (value: SessionStreamEvent, seconds: number): SessionStreamEvent => ({
+    ...value,
+    meta: { ...value.meta, at: new Date(completedAt + seconds * 1000).toISOString() },
+  });
+  const events = [at(consumed, 0), at(research[0]!, 2)];
+  const expected = {
+    status: "running",
+    phase: "researching",
+    phaseStartedAt: completedAt + 2000,
+    lastProgressAt: completedAt + 2000,
+    usage: { complete: false },
+  };
+  assert.deepEqual(await fixture({ events }).adapter.inspect(reference), expected);
+  assert.deepEqual(await fixture({ events }).adapter.inspect(reference), expected);
+  events.push(
+    at(
+      event({
+        type: "call.progress",
+        scope,
+        data: { callId: "research-1", output: "Fetched source" },
+      }),
+      4,
+    ),
+  );
+  let result = await fixture({ events }).adapter.inspect(reference);
+  assert.equal(result.status, "running");
+  if (result.status === "running") {
+    assert.equal(result.phaseStartedAt, completedAt + 2000);
+    assert.equal(result.lastProgressAt, completedAt + 4000);
+  }
+  events.push(at(research[1]!, 6));
+  result = await fixture({ events }).adapter.inspect(reference);
+  assert.equal(result.status, "running");
+  if (result.status === "running") {
+    assert.equal(result.phase, "writing");
+    assert.equal(result.phaseStartedAt, completedAt + 6000);
+    assert.equal(result.lastProgressAt, completedAt + 6000);
+  }
+  const unrelated = at(
+    event({
+      type: "content.completed",
+      scope: { turnId: "other-turn" },
+      data: {
+        partId: "other",
+        runId: "other-model",
+        kind: "text",
+        phase: "reply",
+        value: "Other note",
+      },
+    }),
+    100,
+  );
+  const replay = await fixture({ events: [...events, unrelated] }).adapter.inspect(reference);
+  assert.deepEqual(replay, result);
+});
+
+await test("an admitted but unconsumed delivery exposes a stable starting timestamp", async () => {
+  const admitted = event({ type: "delivery.admitted", data: { deliveryId: reference.deliveryId } });
+  assert.deepEqual(await fixture({ events: [admitted] }).adapter.inspect(reference), {
+    status: "running",
+    phase: "starting",
+    phaseStartedAt: completedAt,
+    lastProgressAt: completedAt,
+  });
+  assert.deepEqual(await fixture({ events: [] }).adapter.inspect(reference), {
+    status: "running",
+    phase: "starting",
+  });
 });

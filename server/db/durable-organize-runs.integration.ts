@@ -3,7 +3,11 @@ import { randomUUID } from "node:crypto";
 import { promisify } from "node:util";
 import { Pool } from "pg";
 import { afterAll, afterEach, beforeAll, expect, it } from "vite-plus/test";
-import { createDurableOrganizeRuns, type DurableOrganizer } from "../organize-runs.ts";
+import {
+  createDurableOrganizeRuns,
+  ORGANIZE_METADATA_RETENTION_MS,
+  type DurableOrganizer,
+} from "../organize-runs.ts";
 import { openDatabase, readTestDatabaseUrl } from "./connection.ts";
 import { applyMigrations } from "./migrations.ts";
 import { createNoteStore } from "./notes.ts";
@@ -129,6 +133,7 @@ async function fixture() {
     note,
     noteStore,
     store,
+    runtime,
     manager,
     start,
     submissions,
@@ -138,6 +143,10 @@ async function fixture() {
     retired,
     destinations,
     inspections: () => inspections,
+    clock: () => clock,
+    observe: (next: Awaited<ReturnType<DurableOrganizer["inspect"]>>) => {
+      observation = next;
+    },
     duringInspection: (change: () => Promise<void>) => {
       duringInspection = change;
     },
@@ -195,6 +204,147 @@ it("reads five simultaneous runs without exhausting its five-connection pool", a
     }),
   );
   expect(results.map((result) => result.status)).toEqual(Array(5).fill("draft"));
+});
+
+it("persists available usage before retiring history and keeps only metadata for 48 hours", async () => {
+  const f = await fixture();
+  const runId = await f.start();
+  const usage = { inputTokens: 120, outputTokens: 35, costUsd: 0.004, complete: true };
+  f.observe({
+    status: "draft",
+    draft: { markdown: "Private generated text", sources: [] },
+    completedAt: f.clock(),
+    usage,
+  });
+  await f.manager().read(f.owner, runId);
+  expect((await f.store.read(f.owner, runId))?.usage).toEqual(usage);
+  expect(await f.manager().acknowledge(f.owner, runId)).toEqual({ status: "expired" });
+  const retired = await f.store.read(f.owner, runId);
+  expect(retired).toMatchObject({
+    usage,
+    input: null,
+    runtime: null,
+    state: { status: "expired" },
+    active: false,
+  });
+  expect(retired?.expiresAt).toBe(f.clock() + 48 * 60 * 60 * 1_000);
+  expect(ORGANIZE_METADATA_RETENTION_MS).toBe(48 * 60 * 60 * 1_000);
+  await f.store.purgeExpired();
+  expect(await f.store.read(f.owner, runId)).toBeDefined();
+  await connection.db.update(organizeRuns).set({ expiresAt: "2000-01-01T00:00:00Z" });
+  await f.store.purgeExpired();
+  expect(await f.store.read(f.owner, runId)).toBeUndefined();
+});
+
+it("collects partial usage on cancellation without requiring a browser read or double counting retries", async () => {
+  const f = await fixture();
+  const runId = await f.start();
+  const usage = { inputTokens: 40, outputTokens: 7, complete: false };
+  f.observe({ status: "running", phase: "writing", usage });
+  f.failCleanup(true);
+  expect(await f.manager().cancel(f.owner, runId)).toEqual({
+    status: "failed",
+    reason: "cleanup_failed",
+  });
+  expect((await f.store.read(f.owner, runId))?.usage).toEqual(usage);
+  expect(await f.manager().start(f.owner, f.note.note.id)).toEqual({
+    runId,
+    status: "cleanup_pending",
+  });
+  f.failCleanup(false);
+  expect(await f.manager(otherConnection.db).cancel(f.owner, runId)).toEqual({
+    status: "cancelled",
+  });
+  expect((await f.store.read(f.owner, runId))?.usage).toEqual(usage);
+  expect(f.submissions).toHaveLength(1);
+  const next = await f.manager().start(f.owner, f.note.note.id);
+  expect(next).not.toHaveProperty("status");
+  expect(next).not.toEqual({ runId });
+});
+
+it("derives stalled progress from runtime activity instead of resetting it on polls or reconnect", async () => {
+  const f = await fixture();
+  const runId = await f.start();
+  const lastProgressAt = f.clock();
+  f.observe({
+    status: "running",
+    phase: "researching",
+    phaseStartedAt: lastProgressAt,
+    lastProgressAt,
+  });
+  expect(await f.manager().read(f.owner, runId)).toEqual({
+    status: "running",
+    phase: "researching",
+    phaseStartedAt: lastProgressAt,
+    lastProgressAt,
+    stalled: false,
+  });
+  f.advance(180_000);
+  expect(await f.manager(otherConnection.db).read(f.owner, runId)).toMatchObject({
+    lastProgressAt,
+    stalled: true,
+  });
+  f.observe({
+    status: "running",
+    phase: "writing",
+    phaseStartedAt: f.clock(),
+    lastProgressAt: f.clock(),
+  });
+  expect(await f.manager().read(f.owner, runId)).toMatchObject({
+    phase: "writing",
+    stalled: false,
+  });
+  f.advance(600_000);
+  expect(await f.manager().read(f.owner, runId)).toMatchObject({ stalled: true });
+  expect(f.submissions).toHaveLength(1);
+});
+
+it("commits usage before remote retirement even when terminal database finalization rolls back", async () => {
+  const f = await fixture();
+  const runId = await f.start();
+  const usage = { inputTokens: 30, outputTokens: 4, complete: false };
+  f.observe({ status: "running", phase: "writing", usage });
+  const failing = createDurableOrganizeRuns({
+    store: {
+      ...f.store,
+      withRun: (owner, id, operate) =>
+        f.store.withRun(owner, id, (record, save, readSource) =>
+          operate(
+            record,
+            async (next) => {
+              if (!next.active) throw new Error("Injected terminal commit failure");
+              await save(next);
+            },
+            readSource,
+          ),
+        ),
+    },
+    runtimeUrl: origin,
+    runtimeFor: () => ({
+      ...f.runtime,
+      retire: async (ref) => {
+        // An independent connection sees committed counters before eve destroys its history.
+        expect(
+          (await createOrganizeRunStore(otherConnection.db).read(f.owner, runId))?.usage,
+        ).toEqual(usage);
+        return f.runtime.retire(ref);
+      },
+    }),
+    resultRetentionMs: 1_000,
+    now: f.clock,
+  });
+  await expect(failing.cancel(f.owner, runId)).rejects.toThrow("Injected terminal commit failure");
+  expect(f.retired.size).toBe(1);
+  expect(await f.store.read(f.owner, runId)).toMatchObject({
+    usage,
+    active: true,
+    input: null,
+    state: { status: "cleaning" },
+  });
+  expect(await f.manager(otherConnection.db).cancel(f.owner, runId)).toEqual({
+    status: "cancelled",
+  });
+  expect((await f.store.read(f.owner, runId))?.usage).toEqual(usage);
 });
 
 it.each(["edit", "delete"] as const)(
@@ -360,7 +510,10 @@ it("persists cleanup failure without content and retries after API replacement",
     cleanupTarget: { status: "expired" },
   });
   expect(pending?.runtime).not.toBeNull();
-  expect(await f.start(f.manager(otherConnection.db))).toBe(runId);
+  expect(await f.manager(otherConnection.db).start(f.owner, f.note.note.id)).toEqual({
+    runId,
+    status: "cleanup_pending",
+  });
   f.failCleanup(false);
   expect(await f.manager(otherConnection.db).acknowledge(f.owner, runId)).toEqual({
     status: "expired",
@@ -390,7 +543,7 @@ it("does not recreate a session when its successful retirement receipt was lost"
   expect(await f.manager().read(f.owner, runId)).toEqual({ status: "cancelled" });
   expect(await f.manager().acknowledge(f.owner, runId)).toEqual({ status: "cancelled" });
   expect(f.submissions).toEqual([runId]);
-  expect(f.inspections()).toBe(0);
+  expect(f.inspections()).toBe(2);
 });
 
 it("expires unobserved output from completion time and sweeps without a browser", async () => {

@@ -6,29 +6,33 @@ Install the root workspace with `pnpm install --frozen-lockfile`. Copy `.env.exa
 
 ## Durable execution and delivery
 
-Create `createOrganizerBackend` from `backend.ts` with the owned Drizzle connection, an immutable eve deployment URL, the private service token and `resultRetentionMs` (development default: 900,000 ms). The caller owns and closes the connection pool. Use a pooled Neon URL for requests and a direct URL for reviewed migrations. Apply the versioned migration with the root `db:migrate` command, never at request startup.
+Create `createOrganizerBackend` from `backend.ts` with a pooled PostgreSQL `connectionString`, an immutable eve deployment URL, the private service token and `resultRetentionMs` (development default: 900,000 ms). The backend owns a separate two-connection pool with a five-second row-lock wait limit; call `backend.close()` during shutdown. Never share the normal notes API pool with runtime transport calls. Use a pooled Neon URL for requests and a direct URL for reviewed migrations. Apply the versioned migration with the root `db:migrate` command, never at request startup.
 
 Neon stores owner-bound run handles, the exact source revision, a temporary input snapshot, runtime identity and delivery state. eve on Vercel Workflow owns execution. API shutdown does not cancel accepted work. There is no process-local run registry or second agent loop.
 
-| Operation                           | Behavior                                                                                            |
-| ----------------------------------- | --------------------------------------------------------------------------------------------------- |
-| `await start(ownerId, noteId)`      | Claims one active run per owned note across API instances, then dispatches it                       |
-| `await read(ownerId, runId)`        | Inspects existing work or returns the same temporary draft; never replaces an expired known session |
-| `await acknowledge(ownerId, runId)` | Only after the browser confirms receipt, erases the temporary draft and retires eve history         |
-| `await cancel(ownerId, runId)`      | Records cancellation, clears content and retires any known session without starting a replacement   |
-| `await sweep(limit)`                | Reconciles abandoned readers, expires completed results and retries cleanup                         |
+| Operation                           | Behavior                                                                                                  |
+| ----------------------------------- | --------------------------------------------------------------------------------------------------------- |
+| `await start(ownerId, noteId)`      | Claims or reuses one active run; returns `cleanup_pending` with its run ID while retirement is unfinished |
+| `await read(ownerId, runId)`        | Inspects existing work or returns the same temporary draft; never replaces an expired known session       |
+| `await acknowledge(ownerId, runId)` | Only after the browser confirms receipt, erases the temporary draft and retires eve history               |
+| `await cancel(ownerId, runId)`      | Records cancellation, clears content and retires any known session without starting a replacement         |
+| `await sweep(limit)`                | Reconciles abandoned readers, expires completed results and retries cleanup                               |
 
 Dispatch has two committed phases: allocate an empty session using Atlas's stable operation ID, persist that session ID, then send the immutable note to that fixed session using an idempotency key. A lost send response retries the same delivery. Allocation retries can leave empty idle sessions, but cannot submit a note or start a model. The installed eve 0.91 HTTP protocol supports these keys; its client serializer does not, so the small submission adapter uses validated HTTP responses.
 
-Runtime URLs are pinned before allocation, so an API redeploy cannot redirect an existing run to another deployment. Keep old deployments and the matching service credential available while their runs remain active. Short database row locks serialize dispatch, inspection and cleanup across API instances; no lock spans model generation. Source reads share that transaction's connection. Every delivery rechecks source access and revision, including after runtime inspection. The original note is never written.
+Runtime URLs are pinned before allocation, so an API redeploy cannot redirect an existing run to another deployment. Keep old deployments and the matching service credential available while their runs remain active. Short database row locks in the dedicated organizer pool serialize dispatch, inspection and cleanup across API instances; no lock spans model generation. Source reads share that transaction's connection. Every delivery rechecks source access and revision, including after runtime inspection. The original note is never written.
 
 Disconnecting a browser stops only that reader. Reconnect reads the existing handle. An unknown or expired handle must not automatically call `start`. A new explicit Organize action can create a new run after the previous one retires. Duplicate-run handling does not promise exactly-once provider billing when a provider completed a request before a runtime step's result was recorded.
 
 ## Cleanup and runtime bounds
 
-Acknowledgement, cancellation, failed output and expiry first persist cleanup intent and remove draft/input content, then end the remote session. An uncertain end response leaves a retryable cleanup reference; it never authorizes another generation. Successful retirement releases the active-note slot and leaves only a short-lived tombstone. The sweep deletes expired tombstones. Deleting a source note does not cascade away its cleanup reference.
+Acknowledgement, cancellation, failed output and expiry first persist cleanup intent and remove draft/input content, then end the remote session. An uncertain end response leaves a retryable cleanup reference; it never authorizes another generation. Successful retirement releases the active-note slot and leaves only content-free metadata for 48 hours, including available token/cost totals. The sweep deletes expired terminal metadata after that 48-hour window. This is separate from the 15-minute undelivered-draft window; acknowledgement still removes draft/input content immediately. Deleting a source note does not cascade away its cleanup reference.
 
 The `reconcile` schedule runs each minute when `ORGANIZER_MAINTENANCE_ENABLED=true`. It processes five oldest active records, rotating failed attempts so they cannot starve later work. Enable it only in the deployment responsible for that database environment. Previews leave it disabled. Without a running sweep, do not claim unattended Atlas cleanup; eve's idle timeout is only a fallback. Expiry is measured from the recorded generation completion, not the first reconnect.
+
+Usage is captured from durable model/research events before remote retirement, including cancellation without an attached reader. Replayed snapshots replace totals instead of adding them twice. Missing provider cost stays absent; `complete: false` identifies incomplete reported metrics. The installed eve version may omit OpenRouter outer-model cost, so these totals are not an invoice or a billing guarantee. Accounting unavailability does not postpone private-content cleanup.
+
+Running views expose durable `phaseStartedAt`/`lastProgressAt` when available. Polling does not reset them. `stalled` uses the existing 180-second research and 600-second model silence bounds; it signals the UI without restarting work. While `start` returns `cleanup_pending`, keep the returned handle and poll `read` to finish/retry cleanup. Only a later explicit Organize action after a terminal result starts a new run. A bounded database lock timeout is retryable and must not be displayed as a successful cancellation.
 
 The only model tool is `research`. It uses OpenRouter and returns provider source records, which remain separate from model prose. Research retries 429/502/503/504 at most three attempts with full jitter and `Retry-After`; broken streams and uncertain network failures are not blindly replayed. An opaque research call has a 180-second runtime deadline. A durable eve hook rejects the seventeenth model request. The installed eve model caller has a native 600-second first/chunk silence timeout. These runtime safeguards work without an attached browser; polling does not own cancellation timers.
 

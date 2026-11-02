@@ -1,7 +1,7 @@
 import { and, eq, inArray, lte, sql } from "drizzle-orm";
 import { z } from "zod";
 import { noteIdSchema } from "../../shared/notes.ts";
-import { generatedDraftSchema } from "../organize-note.ts";
+import { generatedDraftSchema, organizeUsageSchema, type OrganizeUsage } from "../organize-note.ts";
 import type { OrganizeRunState } from "../organize-runs.ts";
 import type { openDatabase } from "./connection.ts";
 import { storedNote, type StoredNote } from "./notes.ts";
@@ -43,6 +43,9 @@ const stateSchema = z.union([
   z.strictObject({
     status: z.literal("running"),
     phase: z.enum(["starting", "researching", "writing"]),
+    phaseStartedAt: z.number().int().nonnegative().safe().optional(),
+    lastProgressAt: z.number().int().nonnegative().safe().optional(),
+    stalled: z.boolean().optional(),
   }),
   z.strictObject({ status: z.enum(["not_found", "cancelled", "cleaning", "expired"]) }),
   z.strictObject({
@@ -64,6 +67,7 @@ export type OrganizeRunRecord = {
   input: z.infer<typeof inputSchema>;
   runtime: z.infer<typeof runtimeSchema>;
   state: OrganizeRunState;
+  usage: OrganizeUsage | null;
   active: boolean;
   cleanupTarget: RunTerminalState | null;
   expiresAt: number | null;
@@ -80,6 +84,7 @@ function fromRow(row: Row): OrganizeRunRecord {
     input: inputSchema.parse(row.input),
     runtime: runtimeSchema.parse(row.runtime),
     state: stateSchema.parse(row.state),
+    usage: organizeUsageSchema.nullable().parse(row.usage),
     active: row.active,
     cleanupTarget: terminalSchema.nullable().parse(row.cleanupTarget),
     expiresAt: row.expiresAt === null ? null : Date.parse(row.expiresAt),
@@ -213,6 +218,7 @@ export function createOrganizeRunStore(db: Database) {
                 input,
                 runtime,
                 state,
+                usage: organizeUsageSchema.nullable().parse(next.usage),
                 active: next.active,
                 cleanupTarget: terminalSchema.nullable().parse(next.cleanupTarget),
                 expiresAt,

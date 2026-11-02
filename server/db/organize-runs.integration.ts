@@ -231,7 +231,7 @@ it("keeps cleanup identity after source deletion and releases the active slot on
       runtime: null,
       cleanupTarget: null,
       state: { status: "expired" },
-      expiresAt: Date.now() - 1,
+      expiresAt: Date.parse("2000-01-01T00:00:00Z"),
     });
   });
   await store.purgeExpired();
@@ -300,7 +300,7 @@ it("persists empty allocation before submission and never changes a confirmed ru
 it("reconciles unobserved running records fairly and never purges active cleanup work", async () => {
   const run = await claimed("owner-pending");
   await store.withRun(run.ownerId, run.runId, async (record, save) => {
-    await save({ ...record, expiresAt: Date.now() - 1 });
+    await save({ ...record, expiresAt: Date.parse("2000-01-01T00:00:00Z") });
   });
   await store.purgeExpired();
   expect(await store.read(run.ownerId, run.runId)).toBeDefined();

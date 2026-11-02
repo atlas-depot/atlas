@@ -12,6 +12,7 @@ import {
   uuid,
 } from "drizzle-orm/pg-core";
 import type { OrganizeRunState } from "../organize-runs.ts";
+import type { OrganizeUsage } from "../organize-note.ts";
 import type { RunTerminalState } from "./organize-runs.ts";
 
 export const notes = pgTable(
@@ -47,6 +48,7 @@ export const organizeRuns = pgTable(
     input: jsonb("input").$type<{ title: string; content: string }>(),
     runtime: jsonb("runtime").$type<{ sessionId: string; deliveryId: string | null }>(),
     state: jsonb("state").$type<OrganizeRunState>().notNull(),
+    usage: jsonb("usage").$type<OrganizeUsage>(),
     active: boolean("active").notNull(),
     cleanupTarget: jsonb("cleanup_target").$type<RunTerminalState>(),
     expiresAt: timestamp("expires_at", { withTimezone: true, mode: "string" }),

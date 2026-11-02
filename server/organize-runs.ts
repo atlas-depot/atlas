@@ -3,14 +3,27 @@ import type {
   OrganizeRunRecord,
   RunTerminalState,
 } from "./db/organize-runs.ts";
-import { generatedDraftSchema, type GeneratedDraft } from "./organize-note.ts";
+import {
+  generatedDraftSchema,
+  organizeUsageSchema,
+  type GeneratedDraft,
+  type OrganizeUsage,
+} from "./organize-note.ts";
+
+export const ORGANIZE_METADATA_RETENTION_MS = 48 * 60 * 60 * 1_000;
 export type OrganizeRunState =
   | {
       status: "draft";
       draft: GeneratedDraft;
       source: { noteId: string; revision: number; stale: boolean };
     }
-  | { status: "running"; phase: "starting" | "researching" | "writing" }
+  | {
+      status: "running";
+      phase: "starting" | "researching" | "writing";
+      phaseStartedAt?: number;
+      lastProgressAt?: number;
+      stalled?: boolean;
+    }
   | { status: "not_found" | "cancelled" | "cleaning" | "expired" }
   | {
       status: "failed";
@@ -25,13 +38,18 @@ export type DurableOrganizer = {
     operationId: string;
     note: { title: string; content: string };
   }): Promise<(RuntimeReference & { deliveryId: string }) | { status: "expired" }>;
-  inspect(
-    reference: RuntimeReference & { deliveryId: string },
-  ): Promise<
-    | { status: "running"; phase: "starting" | "researching" | "writing" }
-    | { status: "draft"; draft: GeneratedDraft; completedAt?: number }
-    | { status: "cancelled" }
-    | { status: "failed"; reason: "generation_failed" | "invalid_draft" | "expired" }
+  inspect(reference: RuntimeReference & { deliveryId: string }): Promise<
+    (
+      | {
+          status: "running";
+          phase: "starting" | "researching" | "writing";
+          phaseStartedAt?: number;
+          lastProgressAt?: number;
+        }
+      | { status: "draft"; draft: GeneratedDraft; completedAt?: number }
+      | { status: "cancelled" }
+      | { status: "failed"; reason: "generation_failed" | "invalid_draft" | "expired" }
+    ) & { usage?: OrganizeUsage }
   >;
   retire(reference: RuntimeReference): Promise<{ status: "ended" | "expired" }>;
 };
@@ -56,8 +74,13 @@ export function createDurableOrganizeRuns({
     throw new Error("Organizer result retention must be a positive integer.");
   }
 
-  const view = (record?: OrganizeRunRecord): OrganizeRunState =>
-    structuredClone(record?.state ?? { status: "not_found" });
+  const view = (record?: OrganizeRunRecord): OrganizeRunState => {
+    const state: OrganizeRunState = structuredClone(record?.state ?? { status: "not_found" });
+    if (state.status !== "running" || state.lastProgressAt === undefined) return state;
+    // Match the existing research deadline and eve model silence timeout. Polls are not progress.
+    const silenceMs = state.phase === "researching" ? 180_000 : 600_000;
+    return { ...state, stalled: now() - state.lastProgressAt >= silenceMs };
+  };
 
   // The database lock serializes short transport operations, never model generation.
   // A lost acceptance response is reconciled using the persisted immutable operation.
@@ -137,9 +160,32 @@ export function createDurableOrganizeRuns({
   const finishCleanup = async (ownerId: string, runId: string): Promise<OrganizeRunState> => {
     const record = await store.read(ownerId, runId);
     if (!record?.active || !record.cleanupTarget) return view(record);
+    // Commit available accounting before ending a zero-retention session. A later finalization
+    // failure must not roll it back after the only remote copy has expired.
+    await store.withRun(ownerId, runId, async (current, save) => {
+      if (
+        !current.active ||
+        !current.cleanupTarget ||
+        !current.runtime?.deliveryId ||
+        current.cleanupTarget.status === "not_found"
+      )
+        return;
+      let usage: OrganizeUsage | undefined;
+      try {
+        const final = await runtimeFor(current.runtimeUrl).inspect({
+          ...current.runtime,
+          deliveryId: current.runtime.deliveryId,
+        });
+        if (final.usage) usage = organizeUsageSchema.parse(final.usage);
+      } catch {
+        // Unknown accounting does not postpone content cleanup or discard earlier reported totals.
+      }
+      if (usage) await save({ ...current, usage });
+    });
     return (
       (await store.withRun(ownerId, runId, async (current, save) => {
         if (!current.active || !current.cleanupTarget) return view(current);
+        const cleanupTarget = current.cleanupTarget;
         try {
           // Cancellation before allocation commits must never allocate or send work.
           if (current.runtime) await runtimeFor(current.runtimeUrl).retire(current.runtime);
@@ -154,11 +200,11 @@ export function createDurableOrganizeRuns({
         const retired: OrganizeRunRecord = {
           ...current,
           active: false,
-          state: current.cleanupTarget,
+          state: cleanupTarget,
           cleanupTarget: null,
           runtime: null,
           input: null,
-          expiresAt: now() + resultRetentionMs,
+          expiresAt: now() + ORGANIZE_METADATA_RETENTION_MS,
         };
         await save(retired);
         return view(retired);
@@ -196,6 +242,7 @@ export function createDurableOrganizeRuns({
           ...record.runtime,
           deliveryId: record.runtime.deliveryId,
         });
+        if (result.usage) record = { ...record, usage: organizeUsageSchema.parse(result.usage) };
         current = await readSource();
         if (!current) target = { status: "not_found" };
         else if (result.status === "draft") {
@@ -223,7 +270,8 @@ export function createDurableOrganizeRuns({
             }
           }
         } else if (result.status === "running") {
-          const next = { ...record, state: result };
+          const { usage: _usage, ...state } = result;
+          const next = { ...record, state };
           await save(next);
           return next;
         } else if (result.status === "failed") {
@@ -251,10 +299,12 @@ export function createDurableOrganizeRuns({
     async start(
       ownerId: string,
       noteId: string,
-    ): Promise<{ runId: string } | { status: "not_found" }> {
+    ): Promise<{ runId: string; status?: "cleanup_pending" } | { status: "not_found" }> {
       const record = await store.claim(ownerId, noteId, runtimeUrl);
       if (!record) return { status: "not_found" };
-      await ensureStarted(ownerId, record.runId);
+      if (record.cleanupTarget) return { runId: record.runId, status: "cleanup_pending" };
+      const started = await ensureStarted(ownerId, record.runId);
+      if (started?.cleanupTarget) return { runId: record.runId, status: "cleanup_pending" };
       return { runId: record.runId };
     },
     read,

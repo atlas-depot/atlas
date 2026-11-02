@@ -1,7 +1,11 @@
 import { Client, ClientError, type ClientSession, type SessionStreamEvent } from "eve/client";
 import { setTimeout as delay } from "node:timers/promises";
 import { z } from "zod";
-import { generatedDraftSchema, type GeneratedDraft } from "../../server/organize-note.ts";
+import {
+  generatedDraftSchema,
+  type GeneratedDraft,
+  type OrganizeUsage,
+} from "../../server/organize-note.ts";
 import { researchResultSchema } from "./research.ts";
 
 const referenceSchema = z.object({
@@ -10,11 +14,17 @@ const referenceSchema = z.object({
 });
 export type OrganizerReference = z.infer<typeof referenceSchema>;
 export type OrganizerAllocation = { sessionId: string; deliveryId: null };
-export type OrganizerObservation =
-  | { status: "running"; phase: "starting" | "researching" | "writing" }
+export type OrganizerObservation = (
+  | {
+      status: "running";
+      phase: "starting" | "researching" | "writing";
+      phaseStartedAt?: number;
+      lastProgressAt?: number;
+    }
   | { status: "draft"; draft: GeneratedDraft; completedAt: number }
   | { status: "cancelled" }
-  | { status: "failed"; reason: "generation_failed" | "invalid_draft" | "expired" };
+  | { status: "failed"; reason: "generation_failed" | "invalid_draft" | "expired" }
+) & { usage?: OrganizeUsage };
 
 type SessionReader = Pick<ClientSession, "snapshot" | "end">;
 type ReaderClient = { sessions: { attach(sessionId: string): SessionReader } };
@@ -202,8 +212,154 @@ function expired(error: unknown): boolean {
   return ClientError.is(error) && error.status === 410 && error.code === "session_expired";
 }
 
-/** Read only the accepted delivery's turn; narration, other turns and partial replies are not drafts. */
+/** Snapshot-derived metadata never advances merely because another reader polled. */
 function observeOrganizer(
+  events: readonly SessionStreamEvent[],
+  deliveryId: string,
+  maxModelCalls: number,
+): OrganizerObservation {
+  const result = observeDraft(events, deliveryId, maxModelCalls);
+  const consumed = events.find(
+    (event) => event.type === "delivery.consumed" && event.data.deliveryId === deliveryId,
+  );
+  const scoped =
+    consumed?.type === "delivery.consumed"
+      ? events.filter((event) => event.scope?.turnId === consumed.data.turnId)
+      : [];
+  const usage = observeUsage(scoped);
+  const progress = result.status === "running" ? observeProgress(events, scoped, deliveryId) : {};
+  return { ...result, ...progress, ...(usage ? { usage } : {}) };
+}
+
+const reportedUsageSchema = z.object({
+  inputTokens: z.number().int().nonnegative().safe().optional(),
+  outputTokens: z.number().int().nonnegative().safe().optional(),
+  costUsd: z.number().nonnegative().optional(),
+});
+type ReportedUsage = z.infer<typeof reportedUsageSchema>;
+
+/** Count each model run and research call once, never session totals plus their children. */
+function observeUsage(events: readonly SessionStreamEvent[]): OrganizeUsage | undefined {
+  const models = new Set<string>();
+  const research = new Set<string>();
+  const settledModels = new Set<string>();
+  const settledResearch = new Set<string>();
+  const modelUsage = new Map<string, ReportedUsage>();
+  const callUsage = new Map<string, ReportedUsage>();
+  const researchUsage = new Map<string, ReportedUsage>();
+  for (const event of events) {
+    if (
+      ["model.requested", "model.started", "model.retried", "model.settled"].includes(event.type) &&
+      "runId" in event.data &&
+      typeof event.data.runId === "string"
+    ) {
+      models.add(event.data.runId);
+      if (event.type === "model.settled") settledModels.add(event.data.runId);
+    }
+    if (
+      event.type === "call.requested" &&
+      event.data.capability.kind === "tool" &&
+      event.data.capability.name === "research"
+    )
+      research.add(event.data.callId);
+  }
+  for (const event of events) {
+    if (event.type === "usage.recorded") {
+      const parsed = reportedUsageSchema.safeParse(event.data.usage);
+      if (!parsed.success) continue;
+      const owner = event.data.owner;
+      if (owner && "runId" in owner && models.has(owner.runId))
+        modelUsage.set(owner.runId, parsed.data);
+      else if (owner && "callId" in owner && research.has(owner.callId))
+        callUsage.set(owner.callId, parsed.data);
+    } else if (event.type === "call.settled" && research.has(event.data.callId)) {
+      settledResearch.add(event.data.callId);
+      // Preserve reported spend even if source/draft validation subsequently fails.
+      const parsed = z.object({ usage: reportedUsageSchema }).safeParse(event.data.output);
+      if (parsed.success) researchUsage.set(event.data.callId, parsed.data.usage);
+    }
+  }
+  if (models.size + research.size === 0) return undefined;
+  const units = [
+    ...[...models].map((id) => modelUsage.get(id)),
+    ...[...research].map((id) => callUsage.get(id) ?? researchUsage.get(id)),
+  ];
+  const totals: OrganizeUsage = {
+    complete: settledModels.size === models.size && settledResearch.size === research.size,
+  };
+  for (const metric of ["inputTokens", "outputTokens", "costUsd"] as const) {
+    const reported = units.flatMap((unit) => (unit?.[metric] === undefined ? [] : [unit[metric]]));
+    if (reported.length !== units.length) totals.complete = false;
+    if (reported.length) {
+      const total = reported.reduce((sum, value) => sum + value, 0);
+      if (Number.isFinite(total) && (metric === "costUsd" || Number.isSafeInteger(total)))
+        totals[metric] = total;
+      else totals.complete = false;
+    }
+  }
+  return totals;
+}
+
+function observeProgress(
+  events: readonly SessionStreamEvent[],
+  scoped: readonly SessionStreamEvent[],
+  deliveryId: string,
+): { phaseStartedAt?: number; lastProgressAt?: number } {
+  const admitted = events.find(
+    (event) => event.type === "delivery.admitted" && event.data.deliveryId === deliveryId,
+  );
+  const consumed = events.find(
+    (event) => event.type === "delivery.consumed" && event.data.deliveryId === deliveryId,
+  );
+  const timestamp = (event: SessionStreamEvent | undefined) => {
+    const at = event ? Date.parse(event.meta.at) : Number.NaN;
+    return Number.isFinite(at) ? at : undefined;
+  };
+  let phase: "starting" | "researching" | "writing" = consumed ? "writing" : "starting";
+  let phaseStartedAt = timestamp(consumed ?? admitted);
+  let lastProgressAt = phaseStartedAt;
+  const pending = new Set<string>();
+  const meaningful = new Set([
+    "turn.started",
+    "turn.paused",
+    "turn.settled",
+    "model.requested",
+    "model.started",
+    "model.retried",
+    "model.settled",
+    "content.delta",
+    "content.completed",
+    "call.input",
+    "call.requested",
+    "call.started",
+    "call.progress",
+    "call.settled",
+  ]);
+  for (const event of scoped) {
+    const at = timestamp(event);
+    if (meaningful.has(event.type) && at !== undefined)
+      lastProgressAt = Math.max(lastProgressAt ?? at, at);
+    if (
+      event.type === "call.requested" &&
+      event.data.capability.kind === "tool" &&
+      event.data.capability.name === "research"
+    )
+      pending.add(event.data.callId);
+    else if (event.type === "call.settled") pending.delete(event.data.callId);
+    const next = pending.size ? "researching" : "writing";
+    if (next !== phase) {
+      phase = next;
+      phaseStartedAt = at;
+    }
+  }
+  return {
+    ...(phaseStartedAt === undefined ? {} : { phaseStartedAt }),
+    ...(lastProgressAt === undefined ? {} : { lastProgressAt }),
+  };
+}
+
+/** Read only the accepted delivery's turn; narration, other turns and partial replies are not drafts. */
+function observeDraft(
   events: readonly SessionStreamEvent[],
   deliveryId: string,
   maxModelCalls: number,
