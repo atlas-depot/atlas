@@ -623,7 +623,8 @@ export function NotesWorkspace({
                   />
                   {!valid && (
                     <p role="alert">
-                      Use a title of up to 256 characters and content of up to 100,000 characters.
+                      The text contains unsupported characters or is too long. Use up to 256
+                      characters for the title and 100,000 for the content. Your text is preserved.
                     </p>
                   )}
                   <div className="flex flex-wrap items-center gap-3">

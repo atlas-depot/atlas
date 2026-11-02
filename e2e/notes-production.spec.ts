@@ -979,3 +979,42 @@ test("creation replay conflict retains text and blocks a fresh creation key", as
   expect(keys[0]).toMatch(/^[0-9a-f-]{36}$/);
   expect(keys[1]).toBe(keys[0]);
 });
+
+test("unsupported text stays recoverable on mobile while normal Unicode can be saved", async ({
+  page,
+}, testInfo) => {
+  await page.setViewportSize({ width: 375, height: 812 });
+  let creates = 0;
+  await page.route("**/api/notes", (route) => {
+    if (route.request().method() !== "POST") return route.fulfill({ json: { notes: [] } });
+    creates++;
+    return route.fulfill({
+      status: 201,
+      json: { ...serverNote, ...createNoteSchema.parse(route.request().postDataJSON()) },
+      headers: { ETag: '"unicode-created"' },
+    });
+  });
+  await page.goto("/");
+  await page.getByRole("button", { name: "New note", exact: true }).click();
+  const source = page.getByRole("textbox", { name: "Markdown source" });
+  const unsupported = "Keep this\u0000draft";
+  await source.fill(unsupported);
+  await expect(source).toHaveValue(unsupported);
+  await expect(page.getByRole("alert")).toContainText("unsupported characters");
+  const save = page.getByRole("button", { name: "Save", exact: true });
+  await expect(save).toBeDisabled();
+  await page.screenshot({
+    path: testInfo.outputPath("unsupported-text-mobile.png"),
+    fullPage: true,
+  });
+  await page.keyboard.press("ControlOrMeta+s");
+  expect(creates).toBe(0);
+  const valid = "İstanbul, café, 中文 👩🏽‍💻";
+  await source.fill(valid);
+  await expect(page.getByRole("alert")).toHaveCount(0);
+  await expect(save).toBeEnabled();
+  await page.keyboard.press("ControlOrMeta+s");
+  await expect(page.getByRole("status")).toHaveText("Saved");
+  await expect(source).toHaveValue(valid);
+  expect(creates).toBe(1);
+});
