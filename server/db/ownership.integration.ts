@@ -2,31 +2,28 @@ import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { sql } from "drizzle-orm";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
-import type { Context, Env } from "hono";
-import { Hono } from "hono";
 import { Pool } from "pg";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vite-plus/test";
-import { ZodError } from "zod";
 import type { SessionUser } from "../../shared/auth.ts";
-import { apiError, apiErrorSchema, ifMatchSchema } from "../../shared/http.ts";
-import { noteIdSchema, noteListSchema, noteSchema, type Note } from "../../shared/notes.ts";
+import { apiErrorSchema } from "../../shared/http.ts";
+import { noteListSchema, noteSchema, type Note } from "../../shared/notes.ts";
 import { createApp } from "../app.ts";
 import { createAuthRoutes } from "../auth-routes.ts";
-import { createRequestAuthenticator, type AuthenticateRequest, type AuthEnv } from "../auth.ts";
+import { createRequestAuthenticator, type AuthenticateRequest } from "../auth.ts";
 import type { BrowserAuth } from "../browser-auth.ts";
 import { SESSION_COOKIE_NAME, readCookie } from "../cookies.ts";
 import { openDatabase, readTestDatabaseUrl } from "./connection.ts";
 import { createNoteStore } from "./notes.ts";
+import { noteCreateRequests, notes } from "./schema.ts";
 
 /**
  * Identity here is synthetic and mocked: this suite verifies that the verified
  * request identity scopes real PostgreSQL persistence. It does not verify WorkOS
  * token signatures or a live provider sign-in, which remain separate evidence.
  *
- * Production note routes still return 501 until #51. The adapter below mounts the
- * agreed note contract through createApp's protectedRoutes seam so #49 can exercise
- * the real auth middleware and database. Replace the adapter with the real routes
- * and keep these assertions when #51 lands.
+ * Requests use the production note routes and store with two independent database
+ * pools. Only the identity provider is replaced. No note handlers are reimplemented
+ * here, so ownership and concurrency assertions exercise the shipped API.
  */
 const appOrigin = "https://app.example.test";
 const aliceIdentity = { userId: "user_alice" } as const;
@@ -105,108 +102,6 @@ const browserAuth: BrowserAuth = {
   }),
 };
 
-function invalidRequest<E extends Env>(c: Context<E>) {
-  return c.json(apiError("VALIDATION_ERROR", "Invalid note request."), 400);
-}
-
-function notFound<E extends Env>(c: Context<E>) {
-  return c.json(apiError("NOT_FOUND", "Note not found."), 404);
-}
-
-function conflict<E extends Env>(c: Context<E>) {
-  return c.json(apiError("PRECONDITION_FAILED", "Note was updated by another client."), 412);
-}
-
-/**
- * The client copies the exact per-note tag into If-Match, so the adapter compares
- * opaque strings. Numeric coercion would accept "01", "0x1" or "1e0" as revision 1
- * and let a tag that was never issued for this note satisfy the precondition.
- */
-function readIfMatch(value: string | undefined) {
-  if (value === undefined) return { status: "missing" } as const;
-  return ifMatchSchema.safeParse(value).success
-    ? ({ status: "ok", tag: value } as const)
-    : ({ status: "invalid" } as const);
-}
-
-function revisionEtag(noteId: string, revision: number): string {
-  return `"${noteId}:${revision}"`;
-}
-
-/**
- * Test-only adapter for the agreed note contract. It is mounted through the real
- * app's protectedRoutes seam, not exported from production code.
- */
-function createPreparedNoteRoutes(store: ReturnType<typeof createNoteStore>) {
-  const routes = new Hono<AuthEnv>();
-  const ownerOf = (c: Context<AuthEnv>) => c.get("user").userId;
-
-  routes.post("/prepared/notes", async (c) => {
-    const body: unknown = await c.req.json().catch(() => undefined);
-    try {
-      const stored = await store.create(ownerOf(c), body);
-      return c.json(stored.note, 201, { ETag: revisionEtag(stored.note.id, stored.revision) });
-    } catch (error) {
-      if (error instanceof ZodError || error instanceof SyntaxError) return invalidRequest(c);
-      throw error;
-    }
-  });
-
-  routes.get("/prepared/notes", async (c) => c.json({ notes: await store.list(ownerOf(c)) }));
-
-  routes.get("/prepared/notes/:id", async (c) => {
-    const id = noteIdSchema.safeParse(c.req.param("id"));
-    if (!id.success) return invalidRequest(c);
-    const stored = await store.read(ownerOf(c), id.data);
-    if (!stored) return notFound(c);
-    return c.json(stored.note, 200, { ETag: revisionEtag(stored.note.id, stored.revision) });
-  });
-
-  routes.put("/prepared/notes/:id", async (c) => {
-    const id = noteIdSchema.safeParse(c.req.param("id"));
-    if (!id.success) return invalidRequest(c);
-    const expected = readIfMatch(c.req.header("If-Match"));
-    if (expected.status === "missing") {
-      return c.json(apiError("PRECONDITION_REQUIRED", "If-Match is required."), 428);
-    }
-    if (expected.status === "invalid") return invalidRequest(c);
-    const current = await store.read(ownerOf(c), id.data);
-    if (!current) return notFound(c);
-    if (expected.tag !== revisionEtag(current.note.id, current.revision)) return conflict(c);
-    const body: unknown = await c.req.json().catch(() => undefined);
-    try {
-      const result = await store.update(ownerOf(c), id.data, current.revision, body);
-      if (result.status === "not_found") return notFound(c);
-      if (result.status === "conflict") return conflict(c);
-      return c.json(result.value.note, 200, {
-        ETag: revisionEtag(result.value.note.id, result.value.revision),
-      });
-    } catch (error) {
-      if (error instanceof ZodError || error instanceof SyntaxError) return invalidRequest(c);
-      throw error;
-    }
-  });
-
-  routes.delete("/prepared/notes/:id", async (c) => {
-    const id = noteIdSchema.safeParse(c.req.param("id"));
-    if (!id.success) return invalidRequest(c);
-    const expected = readIfMatch(c.req.header("If-Match"));
-    if (expected.status === "missing") {
-      return c.json(apiError("PRECONDITION_REQUIRED", "If-Match is required."), 428);
-    }
-    if (expected.status === "invalid") return invalidRequest(c);
-    const current = await store.read(ownerOf(c), id.data);
-    if (!current) return notFound(c);
-    if (expected.tag !== revisionEtag(current.note.id, current.revision)) return conflict(c);
-    const result = await store.delete(ownerOf(c), id.data, current.revision);
-    if (result.status === "not_found") return notFound(c);
-    if (result.status === "conflict") return conflict(c);
-    return c.body(null, 204);
-  });
-
-  return routes;
-}
-
 const databaseName = `atlas_test_${randomUUID().replaceAll("-", "")}`;
 let admin: Pool;
 let connectionA: ReturnType<typeof openDatabase>;
@@ -227,11 +122,11 @@ beforeAll(async () => {
   appA = createApp(authenticateRequest, {
     appOrigin,
     authRoutes: createAuthRoutes(browserAuth, { appOrigin }),
-    protectedRoutes: createPreparedNoteRoutes(createNoteStore(connectionA.db)),
+    notes: createNoteStore(connectionA.db),
   });
   appB = createApp(authenticateRequest, {
     appOrigin,
-    protectedRoutes: createPreparedNoteRoutes(createNoteStore(connectionB.db)),
+    notes: createNoteStore(connectionB.db),
   });
 });
 
@@ -248,17 +143,22 @@ afterAll(async () => {
 });
 
 beforeEach(async () => {
-  await connectionA.db.execute(sql`TRUNCATE TABLE notes`);
+  await connectionA.db.execute(sql`TRUNCATE TABLE ${noteCreateRequests}, ${notes}`);
 });
 
 async function createNote(
   app: ReturnType<typeof createApp>,
   token: string,
   draft: typeof aliceDraft,
+  idempotencyKey: string = randomUUID(),
 ) {
-  const response = await app.request("/api/prepared/notes", {
+  const response = await app.request("/api/notes", {
     method: "POST",
-    headers: { ...authorization(token), "Content-Type": "application/json" },
+    headers: {
+      ...authorization(token),
+      "Content-Type": "application/json",
+      "Idempotency-Key": idempotencyKey,
+    },
     body: JSON.stringify(draft),
   });
   expect(response.status).toBe(201);
@@ -269,14 +169,14 @@ async function createNote(
 }
 
 async function listNotes(app: ReturnType<typeof createApp>, token: string): Promise<Note[]> {
-  const response = await app.request("/api/prepared/notes", { headers: authorization(token) });
+  const response = await app.request("/api/notes", { headers: authorization(token) });
   expect(response.status).toBe(200);
   const body: unknown = await response.json();
   return noteListSchema.parse(body).notes;
 }
 
 async function readNote(app: ReturnType<typeof createApp>, token: string, id: string) {
-  const response = await app.request(`/api/prepared/notes/${id}`, {
+  const response = await app.request(`/api/notes/${id}`, {
     headers: authorization(token),
   });
   expect(response.status).toBe(200);
@@ -293,7 +193,7 @@ async function updateNote(
   etag: string,
   input: { title: string; content: string },
 ) {
-  return app.request(`/api/prepared/notes/${id}`, {
+  return app.request(`/api/notes/${id}`, {
     method: "PUT",
     headers: {
       ...authorization(token),
@@ -310,7 +210,7 @@ async function deleteNote(
   id: string,
   etag: string,
 ) {
-  return app.request(`/api/prepared/notes/${id}`, {
+  return app.request(`/api/notes/${id}`, {
     method: "DELETE",
     headers: { ...authorization(token), "If-Match": etag },
   });
@@ -336,7 +236,7 @@ describe("authenticated note ownership and stale-write boundaries (synthetic ide
     expect(bobListText).not.toContain(aliceDraft.content);
     expect(bobListText).not.toContain("user_alice");
 
-    const crossRead = await appA.request(`/api/prepared/notes/${aliceNote.note.id}`, {
+    const crossRead = await appA.request(`/api/notes/${aliceNote.note.id}`, {
       headers: authorization("synthetic-bob"),
     });
     expect(crossRead.status).toBe(404);
@@ -345,7 +245,7 @@ describe("authenticated note ownership and stale-write boundaries (synthetic ide
     expect(crossReadText).not.toContain(aliceDraft.content);
     expect(crossReadText).not.toContain("user_alice");
 
-    const nonexistentRead = await appA.request(`/api/prepared/notes/${randomUUID()}`, {
+    const nonexistentRead = await appA.request(`/api/notes/${randomUUID()}`, {
       headers: authorization("synthetic-bob"),
     });
     expect(nonexistentRead.status).toBe(crossRead.status);
@@ -386,14 +286,95 @@ describe("authenticated note ownership and stale-write boundaries (synthetic ide
       aliceNote.note,
     );
 
-    const injected = await appA.request("/api/prepared/notes?userId=user_bob", {
+    const injected = await appA.request("/api/notes?userId=user_bob", {
       method: "POST",
-      headers: { ...authorization("synthetic-alice"), "Content-Type": "application/json" },
+      headers: {
+        ...authorization("synthetic-alice"),
+        "Content-Type": "application/json",
+        "Idempotency-Key": randomUUID(),
+      },
       body: JSON.stringify({ ...aliceDraft, title: "Injected", ownerId: "user_bob" }),
     });
     expect(injected.status).toBe(400);
     expect(await listNotes(appA, "synthetic-alice")).toHaveLength(1);
     expect(await listNotes(appA, "synthetic-bob")).toHaveLength(1);
+  });
+
+  it("converges concurrent create retries across database pools to one note", async () => {
+    const key = randomUUID();
+    const [first, second] = await Promise.all([
+      createNote(appA, "synthetic-alice", aliceDraft, key),
+      createNote(appB, "synthetic-alice", aliceDraft, key),
+    ]);
+
+    expect(second).toEqual(first);
+    expect(first.etag).toBe(`"${first.note.id}:1"`);
+    expect(await listNotes(appA, "synthetic-alice")).toEqual([first.note]);
+    expect(await readNote(appB, "synthetic-alice", first.note.id)).toEqual(first);
+  });
+
+  it("recovers a create whose committed response the client did not consume", async () => {
+    const key = randomUUID();
+    // Discard the response after the server has committed. This models an unknown
+    // client outcome without claiming to exercise a physical network disconnect.
+    const discarded = await appA.request("/api/notes", {
+      method: "POST",
+      headers: {
+        ...authorization("synthetic-alice"),
+        "Content-Type": "application/json",
+        "Idempotency-Key": key,
+      },
+      body: JSON.stringify(aliceDraft),
+    });
+    expect(discarded.status).toBe(201);
+    const committed = await listNotes(appB, "synthetic-alice");
+    expect(committed).toHaveLength(1);
+
+    const retry = await createNote(appB, "synthetic-alice", aliceDraft, key);
+    expect(retry.note).toEqual(committed[0]);
+    expect(retry.etag).toBe(discarded.headers.get("ETag"));
+    expect(await listNotes(appA, "synthetic-alice")).toEqual(committed);
+  });
+
+  it("scopes create keys by account without replaying changed, edited or deleted notes", async () => {
+    const key = randomUUID();
+    const alice = await createNote(appA, "synthetic-alice", aliceDraft, key);
+    const bob = await createNote(appB, "synthetic-bob", bobDraft, key);
+    expect(bob.note.id).not.toBe(alice.note.id);
+    expect(await listNotes(appA, "synthetic-alice")).toEqual([alice.note]);
+    expect(await listNotes(appB, "synthetic-bob")).toEqual([bob.note]);
+
+    async function rejectedRetry(draft: typeof aliceDraft) {
+      const response = await appB.request("/api/notes", {
+        method: "POST",
+        headers: {
+          ...authorization("synthetic-alice"),
+          "Content-Type": "application/json",
+          "Idempotency-Key": key,
+        },
+        body: JSON.stringify(draft),
+      });
+      expect(response.status).toBe(409);
+      expect(apiErrorSchema.parse((await response.json()) as unknown).error.code).toBe("CONFLICT");
+    }
+
+    await rejectedRetry({ ...aliceDraft, title: "Different create payload" });
+    expect(await readNote(appA, "synthetic-alice", alice.note.id)).toEqual(alice);
+
+    const updated = await updateNote(appA, "synthetic-alice", alice.note.id, alice.etag, {
+      title: "Edited after create",
+      content: "Newer content must not be replaced by a retry.",
+    });
+    expect(updated.status).toBe(200);
+    const latest = await readNote(appA, "synthetic-alice", alice.note.id);
+    await rejectedRetry(aliceDraft);
+    expect(await listNotes(appA, "synthetic-alice")).toEqual([latest.note]);
+
+    const deleted = await deleteNote(appA, "synthetic-alice", alice.note.id, latest.etag);
+    expect(deleted.status).toBe(204);
+    await rejectedRetry(aliceDraft);
+    expect(await listNotes(appA, "synthetic-alice")).toEqual([]);
+    expect(await createNote(appB, "synthetic-bob", bobDraft, key)).toEqual(bob);
   });
 
   it("fails closed for missing, expired and misdirected sessions", async () => {
@@ -402,13 +383,13 @@ describe("authenticated note ownership and stale-write boundaries (synthetic ide
       authorization("synthetic-expired"),
       { Cookie: sessionCookie("expired") },
     ]) {
-      const response = await appA.request("/api/prepared/notes", { headers });
+      const response = await appA.request("/api/notes", { headers });
       expect(response.status).toBe(401);
       expect(response.headers.get("WWW-Authenticate")).toBe('Bearer realm="atlas"');
       expect(await response.json()).toMatchObject({ error: { code: "UNAUTHENTICATED" } });
     }
 
-    const bearerPrecedence = await appA.request("/api/prepared/notes", {
+    const bearerPrecedence = await appA.request("/api/notes", {
       headers: {
         ...authorization("synthetic-expired"),
         Cookie: sessionCookie("session_alice"),
@@ -424,7 +405,7 @@ describe("authenticated note ownership and stale-write boundaries (synthetic ide
       authorization("synthetic-expired"),
       { Cookie: sessionCookie("expired") },
     ]) {
-      const response = await appA.request(`/api/prepared/notes/${aliceNote.note.id}`, { headers });
+      const response = await appA.request(`/api/notes/${aliceNote.note.id}`, { headers });
       expect(response.status).toBe(401);
       const text = await response.text();
       expect(text).not.toContain(aliceDraft.title);
@@ -437,19 +418,19 @@ describe("authenticated note ownership and stale-write boundaries (synthetic ide
     const aliceNote = await createNote(appA, "synthetic-alice", aliceDraft);
     const bobNote = await createNote(appA, "synthetic-bob", bobDraft);
 
-    const aliceView = await appA.request(`/api/prepared/notes/${aliceNote.note.id}`, {
+    const aliceView = await appA.request(`/api/notes/${aliceNote.note.id}`, {
       headers: { Cookie: sessionCookie("session_alice") },
     });
     expect(aliceView.status).toBe(200);
 
-    const bobListResponse = await appA.request("/api/prepared/notes", {
+    const bobListResponse = await appA.request("/api/notes", {
       headers: { Cookie: sessionCookie("session_bob") },
     });
     const bobNotes = noteListSchema.parse((await bobListResponse.json()) as unknown).notes;
     expect(bobNotes.map((note) => note.id)).toEqual([bobNote.note.id]);
     expect(JSON.stringify(bobNotes)).not.toContain(aliceDraft.content);
 
-    const switchedRead = await appA.request(`/api/prepared/notes/${aliceNote.note.id}`, {
+    const switchedRead = await appA.request(`/api/notes/${aliceNote.note.id}`, {
       headers: { Cookie: sessionCookie("session_bob") },
     });
     expect(switchedRead.status).toBe(404);
@@ -458,7 +439,7 @@ describe("authenticated note ownership and stale-write boundaries (synthetic ide
     expect(switchedReadText).not.toContain(aliceDraft.content);
     expect(switchedReadText).not.toContain("user_alice");
 
-    const bearerOverCookie = await appA.request(`/api/prepared/notes/${aliceNote.note.id}`, {
+    const bearerOverCookie = await appA.request(`/api/notes/${aliceNote.note.id}`, {
       headers: {
         ...authorization("synthetic-bob"),
         Cookie: sessionCookie("session_alice"),
@@ -478,12 +459,12 @@ describe("authenticated note ownership and stale-write boundaries (synthetic ide
       .find((cookie) => cookie.startsWith(`${SESSION_COOKIE_NAME}=;`));
     expect(cleared).toContain("Max-Age=0");
 
-    const afterLogout = await appA.request("/api/prepared/notes", {
+    const afterLogout = await appA.request("/api/notes", {
       headers: { Cookie: `${SESSION_COOKIE_NAME}=` },
     });
     expect(afterLogout.status).toBe(401);
 
-    const afterLogoutRead = await appA.request(`/api/prepared/notes/${aliceNote.note.id}`, {
+    const afterLogoutRead = await appA.request(`/api/notes/${aliceNote.note.id}`, {
       headers: { Cookie: `${SESSION_COOKIE_NAME}=` },
     });
     expect(afterLogoutRead.status).toBe(401);
@@ -498,9 +479,10 @@ describe("authenticated note ownership and stale-write boundaries (synthetic ide
       const headers: Record<string, string> = {
         Cookie: sessionCookie("session_alice"),
         "Content-Type": "application/json",
+        "Idempotency-Key": randomUUID(),
       };
       if (origin) headers.Origin = origin;
-      const response = await appA.request("/api/prepared/notes", {
+      const response = await appA.request("/api/notes", {
         method: "POST",
         headers,
         body: JSON.stringify(aliceDraft),
@@ -509,12 +491,13 @@ describe("authenticated note ownership and stale-write boundaries (synthetic ide
       expect(await response.json()).toMatchObject({ error: { code: "FORBIDDEN" } });
     }
 
-    const allowed = await appA.request("/api/prepared/notes", {
+    const allowed = await appA.request("/api/notes", {
       method: "POST",
       headers: {
         Cookie: sessionCookie("session_alice"),
         Origin: appOrigin,
         "Content-Type": "application/json",
+        "Idempotency-Key": randomUUID(),
       },
       body: JSON.stringify({ ...aliceDraft, title: "Allowed browser save" }),
     });
@@ -566,7 +549,7 @@ describe("authenticated note ownership and stale-write boundaries (synthetic ide
 
     const deleted = await deleteNote(appA, "synthetic-alice", created.note.id, stored.etag);
     expect(deleted.status).toBe(204);
-    const afterDelete = await appA.request(`/api/prepared/notes/${created.note.id}`, {
+    const afterDelete = await appA.request(`/api/notes/${created.note.id}`, {
       headers: authorization("synthetic-alice"),
     });
     expect(afterDelete.status).toBe(404);
@@ -575,7 +558,7 @@ describe("authenticated note ownership and stale-write boundaries (synthetic ide
   it("requires a strong If-Match and rejects malformed preconditions before writing", async () => {
     const created = await createNote(appA, "synthetic-alice", aliceDraft);
 
-    const missing = await appA.request(`/api/prepared/notes/${created.note.id}`, {
+    const missing = await appA.request(`/api/notes/${created.note.id}`, {
       method: "PUT",
       headers: { ...authorization("synthetic-alice"), "Content-Type": "application/json" },
       body: JSON.stringify({ title: "No precondition", content: "No precondition" }),
@@ -599,7 +582,7 @@ describe("authenticated note ownership and stale-write boundaries (synthetic ide
       );
     }
 
-    const missingDelete = await appA.request(`/api/prepared/notes/${created.note.id}`, {
+    const missingDelete = await appA.request(`/api/notes/${created.note.id}`, {
       method: "DELETE",
       headers: authorization("synthetic-alice"),
     });
@@ -612,7 +595,7 @@ describe("authenticated note ownership and stale-write boundaries (synthetic ide
     const created = await createNote(appA, "synthetic-alice", aliceDraft);
     const invalidId = "not-a-uuid";
 
-    const readInvalid = await appA.request(`/api/prepared/notes/${invalidId}`, {
+    const readInvalid = await appA.request(`/api/notes/${invalidId}`, {
       headers: authorization("synthetic-alice"),
     });
     expect(readInvalid.status).toBe(400);
@@ -626,7 +609,7 @@ describe("authenticated note ownership and stale-write boundaries (synthetic ide
     const deleteInvalid = await deleteNote(appA, "synthetic-alice", invalidId, created.etag);
     expect(deleteInvalid.status).toBe(400);
 
-    const malformedJson = await appA.request(`/api/prepared/notes/${created.note.id}`, {
+    const malformedJson = await appA.request(`/api/notes/${created.note.id}`, {
       method: "PUT",
       headers: {
         ...authorization("synthetic-alice"),
@@ -637,7 +620,7 @@ describe("authenticated note ownership and stale-write boundaries (synthetic ide
     });
     expect(malformedJson.status).toBe(400);
 
-    const injected = await appA.request(`/api/prepared/notes/${created.note.id}`, {
+    const injected = await appA.request(`/api/notes/${created.note.id}`, {
       method: "PUT",
       headers: {
         ...authorization("synthetic-alice"),
@@ -648,9 +631,13 @@ describe("authenticated note ownership and stale-write boundaries (synthetic ide
     });
     expect(injected.status).toBe(400);
 
-    const malformedCreate = await appA.request("/api/prepared/notes", {
+    const malformedCreate = await appA.request("/api/notes", {
       method: "POST",
-      headers: { ...authorization("synthetic-alice"), "Content-Type": "application/json" },
+      headers: {
+        ...authorization("synthetic-alice"),
+        "Content-Type": "application/json",
+        "Idempotency-Key": randomUUID(),
+      },
       body: "{",
     });
     expect(malformedCreate.status).toBe(400);
