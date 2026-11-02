@@ -8,11 +8,13 @@ import {
   type AuthEnv,
 } from "./auth.ts";
 import { createNoteRoutes } from "./notes.ts";
+import { createOrganizeRoutes, type OrganizeService } from "./organize-routes.ts";
 
 export type AppOptions = Readonly<{
   authRoutes?: Hono;
   protectedRoutes?: Hono<AuthEnv>;
   appOrigin?: string;
+  organizer?: OrganizeService;
 }>;
 
 export function createApp(authenticateRequest: AuthenticateRequest, options: AppOptions = {}) {
@@ -30,6 +32,7 @@ export function createApp(authenticateRequest: AuthenticateRequest, options: App
   const api = new Hono<AuthEnv>();
   api.use("*", requireAuth(authenticateRequest));
   api.route("/notes", createNoteRoutes());
+  api.route("/", createOrganizeRoutes(options.organizer));
   if (options.protectedRoutes) api.route("/", options.protectedRoutes);
   app.route("/api", api);
   app.notFound((c) => c.json(apiError("NOT_FOUND", "Route not found."), 404));

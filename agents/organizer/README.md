@@ -1,6 +1,6 @@
 # Private note organizer
 
-Preparation for [#50](https://github.com/atlas-depot/atlas/issues/50). Hono derives the owner from its verified session and calls this private eve service. Public HTTP wiring follows #51, browser receipt acknowledgement follows #53. No browser receives the service credential or raw eve session identifiers.
+Implements [#50](https://github.com/atlas-depot/atlas/issues/50). Hono derives the owner from its verified session and calls this private eve service through the [Organize HTTP contract](../../docs/development.md#organize-http-contract). #51 owns note CRUD; #53 owns browser receipt acknowledgement. No browser receives the service credential or raw eve session identifiers.
 
 Install the root workspace with `pnpm install --frozen-lockfile`. Copy `.env.example` here to `.env.local` and supply development credentials. Run `pnpm --dir agents/organizer dev`. The local service binds to `127.0.0.1:2027`. Model quality trials use synthetic notes and an explicitly budgeted provider key; routine tests never call paid models.
 
@@ -48,6 +48,6 @@ Set the database and maintenance settings only for the intended environment. `VE
 
 Run root checks, `pnpm test:db` against isolated local PostgreSQL, and organizer `check`/`test`. Database regressions cover cross-owner rejection, concurrent coalescing, actual process replacement, uncertain submission, source changes/deletion, cancelled/expired sessions and retryable cleanup. Adapter tests cover finite snapshots, citations and incomplete output. Real local eve with mocked model HTTP and live Neon development checks are reported separately from deployed Workflow and live model evidence.
 
-#51 still owns authenticated HTTP integration. #53 owns the editable draft, receipt acknowledgement, explicit Save and source rendering. #50 remains open until the full integrated and deployed acceptance checks pass.
+#51 owns note CRUD. #53 owns the editable draft, receipt acknowledgement, explicit Save and source rendering. Organize transport and its owner-scoped database operations belong to #50; HTTP/database tests are separate from live provider and browser verification.
 
 References: [eve transport](https://eve.dev/docs/channels/eve), [Vercel deployment](https://eve.dev/docs/guides/deployment/vercel), [OpenRouter search](https://openrouter.ai/docs/guides/features/server-tools/web-search), [Workflow retention](https://vercel.com/docs/workflows/retention).
