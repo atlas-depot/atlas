@@ -4,16 +4,26 @@ export const noteIdSchema = z.uuid();
 /** Account-scoped key for one logical creation, reused with the original payload. */
 export const createNoteKeySchema = z.uuid().transform((value) => value.toLowerCase());
 
+// Unicode mode matches lone surrogates, not valid supplementary characters.
+// PostgreSQL text cannot contain NUL. Reject unsupported text rather than replacing it.
+const noteTextSchema = z
+  .string()
+  .refine((value) => !value.includes("\0") && !/\p{Surrogate}/u.test(value), {
+    error: "Text must contain valid Unicode and no NUL characters.",
+  });
+
 /** Editable fields: preserve whitespace, allow empty drafts. Limits use UTF-16 code units. */
 export const noteContentSchema = z.strictObject({
-  title: z.string().max(256),
+  title: noteTextSchema.max(256),
   /** Markdown source, never rendered HTML. */
-  content: z.string().max(100_000),
+  content: noteTextSchema.max(100_000),
 });
 
 export const createNoteSchema = noteContentSchema.extend({
   /** Client creation instant in UTC; immutable after creation. Display in the user's locale. */
-  createdAt: z.iso.datetime(),
+  createdAt: z.iso.datetime().refine((value) => !value.startsWith("0000-"), {
+    error: "Creation time must use year 0001 or later.",
+  }),
 });
 export const updateNoteSchema = noteContentSchema;
 export const noteSchema = createNoteSchema.extend({
