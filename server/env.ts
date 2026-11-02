@@ -72,6 +72,7 @@ const browserSettings = ["APP_ORIGIN", "WORKOS_API_KEY", "WORKOS_COOKIE_PASSWORD
 
 export function readServerEnv(environment: Record<string, string | undefined>): {
   port: number;
+  databaseUrl?: string;
   organizer?: NonNullable<ReturnType<typeof readOrganizerEnv>>;
   workos?: { clientId: string; issuer: string };
   browserAuth?: { appOrigin: string; apiKey: string; cookiePassword: string };
@@ -82,7 +83,13 @@ export function readServerEnv(environment: Record<string, string | undefined>): 
     throw new Error("Invalid API_PORT: expected an integer from 0 to 65535.");
   }
   const organizer = readOrganizerEnv(environment);
-  const base = { port: parsed.data.API_PORT, ...(organizer ? { organizer } : {}) };
+  const databaseUrl =
+    environment.DATABASE_URL === undefined ? undefined : readDatabaseUrl(environment);
+  const base = {
+    port: parsed.data.API_PORT,
+    ...(databaseUrl ? { databaseUrl } : {}),
+    ...(organizer ? { organizer } : {}),
+  };
   if (browserSettings.some((name) => environment[name] !== undefined)) {
     const browser = browserAuthSchema.safeParse(environment);
     if (!browser.success) {

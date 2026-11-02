@@ -4,6 +4,8 @@ import { createApp } from "./app.ts";
 import { createAuthRoutes } from "./auth-routes.ts";
 import { createRequestAuthenticator } from "./auth.ts";
 import { createBrowserAuth } from "./browser-auth.ts";
+import { openDatabase } from "./db/connection.ts";
+import { createNoteStore } from "./db/notes.ts";
 import { readServerEnv } from "./env.ts";
 import { createBearerAuthenticator } from "./workos.ts";
 
@@ -13,7 +15,7 @@ async function main() {
     configuration = readServerEnv(process.env);
   } catch {
     console.error(
-      "Atlas API could not start. Check API_PORT, authentication and organizer configuration.",
+      "Atlas API could not start. Check API_PORT, authentication, database and organizer configuration.",
     );
     process.exitCode = 1;
     return;
@@ -38,7 +40,12 @@ async function main() {
         configuration.organizer,
       )
     : undefined;
+  const database = configuration.databaseUrl ? openDatabase(configuration.databaseUrl) : undefined;
+  const closeDatabases = async () => {
+    await Promise.all([database?.close(), organizer?.close()]);
+  };
   const app = createApp(authenticateRequest, {
+    notes: database ? createNoteStore(database.db) : undefined,
     organizer,
     appOrigin: browserAuth?.appOrigin,
     authRoutes:
@@ -56,7 +63,7 @@ async function main() {
     } else {
       console.error("Atlas API could not start. Check API_PORT and port availability.");
       process.exitCode = 1;
-      void organizer?.close().catch(() => {
+      void closeDatabases().catch(() => {
         console.error("Atlas API database shutdown failed.");
         process.exitCode = 1;
       });
@@ -70,7 +77,7 @@ async function main() {
     deadline.unref();
     server.close(async (error) => {
       try {
-        await organizer?.close();
+        await closeDatabases();
       } catch {
         process.exitCode = 1;
       }
@@ -83,6 +90,8 @@ async function main() {
 }
 
 void main().catch(() => {
-  console.error("Atlas API could not start. Check authentication and organizer configuration.");
+  console.error(
+    "Atlas API could not start. Check authentication, database and organizer configuration.",
+  );
   process.exitCode = 1;
 });
