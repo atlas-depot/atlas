@@ -4,7 +4,7 @@ import { readServerEnv } from "./env.ts";
 it("starts without unused provider credentials", () => {
   expect(readServerEnv({})).toEqual({ port: 3001 });
   expect(readServerEnv({ API_PORT: "0" })).toEqual({ port: 0 });
-  expect(readServerEnv({ API_PORT: "4317", DATABASE_URL: "unused" })).toEqual({ port: 4317 });
+  expect(readServerEnv({ API_PORT: "4317" })).toEqual({ port: 4317 });
 });
 
 it.each(["", " 3001", "1.5", "-1", "65536", "SYNTHETIC_SECRET", "Infinity"])(
@@ -52,11 +52,14 @@ const organizerSettings = {
   ORGANIZER_SERVICE_TOKEN: "synthetic-service-token-for-test-only",
 };
 
-it("leaves organizer disabled when only database configuration exists", () => {
-  expect(readServerEnv({ DATABASE_URL: organizerSettings.DATABASE_URL })).toEqual({ port: 3001 });
-  expect(readServerEnv({ DATABASE_URL: "SYNTHETIC_UNUSED_INVALID_DATABASE" })).toEqual({
+it("configures note persistence independently of organizer", () => {
+  expect(readServerEnv({ DATABASE_URL: organizerSettings.DATABASE_URL })).toEqual({
     port: 3001,
+    databaseUrl: organizerSettings.DATABASE_URL,
   });
+  expect(() => readServerEnv({ DATABASE_URL: "SYNTHETIC_INVALID_DATABASE" })).toThrow(
+    /^Set DATABASE_URL to a valid PostgreSQL connection URL\.$/,
+  );
 });
 
 it("maps a complete organizer configuration alongside browser authentication", () => {
@@ -75,6 +78,7 @@ it("maps a complete organizer configuration alongside browser authentication", (
       apiKey: "sk_test_fixture",
       cookiePassword: "c".repeat(32),
     },
+    databaseUrl: organizerSettings.DATABASE_URL,
     organizer: {
       connectionString: organizerSettings.DATABASE_URL,
       runtimeUrl: organizerSettings.ORGANIZER_RUNTIME_URL,
@@ -88,6 +92,7 @@ it("maps a complete organizer configuration alongside browser authentication", (
 it("defaults only the draft delivery lifetime, keeping metadata retention separate", () => {
   expect(readServerEnv(organizerSettings)).toEqual({
     port: 3001,
+    databaseUrl: organizerSettings.DATABASE_URL,
     organizer: {
       connectionString: organizerSettings.DATABASE_URL,
       runtimeUrl: organizerSettings.ORGANIZER_RUNTIME_URL,

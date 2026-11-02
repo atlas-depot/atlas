@@ -1,8 +1,15 @@
+import { createHash, randomUUID } from "node:crypto";
 import { and, desc, eq, sql } from "drizzle-orm";
 import { z } from "zod";
-import { createNoteSchema, noteIdSchema, updateNoteSchema, type Note } from "../../shared/notes.ts";
+import {
+  createNoteKeySchema,
+  createNoteSchema,
+  noteIdSchema,
+  updateNoteSchema,
+  type Note,
+} from "../../shared/notes.ts";
 import type { openDatabase } from "./connection.ts";
-import { notes } from "./schema.ts";
+import { noteCreateRequests, notes } from "./schema.ts";
 
 type Database = ReturnType<typeof openDatabase>["db"];
 type Row = typeof notes.$inferSelect;
@@ -40,6 +47,54 @@ export function createNoteStore(db: Database) {
         .values({ ...data, ownerId: owner, updatedAt: data.createdAt })
         .returning();
       return storedNote(row);
+    },
+
+    async createIdempotent(
+      ownerId: string,
+      key: string,
+      input: unknown,
+    ): Promise<{ status: "saved"; value: StoredNote } | { status: "conflict" }> {
+      const owner = ownerSchema.parse(ownerId);
+      const creationKey = createNoteKeySchema.parse(key);
+      const data = createNoteSchema.parse(input);
+      const payloadHash = createHash("sha256")
+        .update(JSON.stringify([data.title, data.content, data.createdAt]))
+        .digest("hex");
+      return db.transaction(
+        async (tx) => {
+          const noteId = randomUUID();
+          const [inserted] = await tx
+            .insert(noteCreateRequests)
+            .values({ ownerId: owner, key: creationKey, payloadHash, noteId })
+            .onConflictDoNothing({ target: [noteCreateRequests.ownerId, noteCreateRequests.key] })
+            .returning({ noteId: noteCreateRequests.noteId });
+          if (inserted) {
+            const [row] = await tx
+              .insert(notes)
+              .values({ ...data, id: noteId, ownerId: owner, updatedAt: data.createdAt })
+              .returning();
+            return { status: "saved", value: storedNote(row) };
+          }
+
+          // A separate Read Committed statement sees a concurrent insert's committed receipt.
+          const [receipt] = await tx
+            .select()
+            .from(noteCreateRequests)
+            .where(
+              and(eq(noteCreateRequests.ownerId, owner), eq(noteCreateRequests.key, creationKey)),
+            );
+          if (!receipt || receipt.payloadHash !== payloadHash) return { status: "conflict" };
+          const [row] = await tx
+            .select()
+            .from(notes)
+            .where(and(eq(notes.ownerId, owner), eq(notes.id, receipt.noteId)))
+            .for("share");
+          // Do not retain or reconstruct an earlier content snapshot after edits or deletion.
+          if (!row || row.revision !== 1) return { status: "conflict" };
+          return { status: "saved", value: storedNote(row) };
+        },
+        { isolationLevel: "read committed" },
+      );
     },
 
     async list(ownerId: string): Promise<Note[]> {

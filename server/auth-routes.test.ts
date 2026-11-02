@@ -350,7 +350,7 @@ describe("protected API origin boundary", () => {
           Origin: appOrigin,
         },
       });
-      expect(response.status).toBe(501);
+      expect(response.status).toBe(503);
       expect(authenticateRequest).toHaveBeenCalledTimes(1);
     },
   );
@@ -359,7 +359,7 @@ describe("protected API origin boundary", () => {
     const response = await createTestApp(fakeBrowserAuth()).request("/api/notes", {
       headers: { Cookie: `${SESSION_COOKIE_NAME}=session_fixture` },
     });
-    expect(response.status).toBe(501);
+    expect(response.status).toBe(503);
   });
 
   it.each(["POST", "PUT", "DELETE"] as const)(
@@ -377,7 +377,7 @@ describe("protected API origin boundary", () => {
           Authorization: "Bearer fake",
         },
       });
-      expect(response.status).toBe(501);
+      expect(response.status).toBe(503);
       expect(authenticateRequest).toHaveBeenCalledTimes(1);
     },
   );
@@ -417,7 +417,7 @@ describe("protected API origin boundary", () => {
     ).request("/api/notes", {
       headers: { Cookie: `${SESSION_COOKIE_NAME}=old` },
     });
-    expect(response.status).toBe(501);
+    expect(response.status).toBe(503);
     expect(response.headers.getSetCookie()).toEqual([sessionCookie]);
   });
 });
