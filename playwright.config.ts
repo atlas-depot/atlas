@@ -18,7 +18,7 @@ export default defineConfig({
   projects: [
     {
       name: "chromium",
-      testIgnore: "**/notes-production.spec.ts",
+      testIgnore: ["**/notes-production.spec.ts", "**/notes-api.spec.ts"],
       use: { ...devices["Desktop Chrome"] },
     },
     {

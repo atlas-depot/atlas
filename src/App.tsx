@@ -1,5 +1,5 @@
 import { lazy, Suspense } from "react";
-import { NotesWorkspace } from "./notes/NotesWorkspace";
+import { AuthenticatedNotes } from "./auth/AuthenticatedNotes";
 import { createNotesClient } from "./notes/notes-store";
 
 const notesClient = createNotesClient();
@@ -30,7 +30,7 @@ export function App() {
           <ExampleNotes />
         </Suspense>
       ) : (
-        <NotesWorkspace store={notesClient} />
+        <AuthenticatedNotes store={notesClient} />
       )}
     </>
   );

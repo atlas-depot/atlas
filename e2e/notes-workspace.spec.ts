@@ -359,6 +359,107 @@ test("controls and preview remain usable across laptop, tablet and narrow touch 
   await page.getByRole("button", { name: "Keep editing" }).click();
 });
 
+test("deleting asks for confirmation, warns about unsaved edits, and selects the next or empty state", async ({
+  page,
+}) => {
+  await page.goto("/");
+  const source = page.getByRole("textbox", { name: "Markdown source" });
+  await expect(source).toHaveValue(/Prepare the/);
+  await source.fill("Unsaved deletion draft");
+  await page.getByRole("button", { name: "Delete note", exact: true }).click();
+  const dialog = page.getByRole("alertdialog");
+  await expect(dialog).toContainText('"Project review"');
+  await expect(dialog).toContainText("Your unsaved changes will also be discarded.");
+  await expect(page.getByRole("button", { name: "Keep note", exact: true })).toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect(dialog).toHaveCount(0);
+  await expect(source).toHaveValue("Unsaved deletion draft");
+
+  await page.getByRole("button", { name: "Delete note", exact: true }).click();
+  await page.getByRole("button", { name: "Delete permanently", exact: true }).click();
+  await expect(page.getByRole("textbox", { name: "Title", exact: true })).toHaveValue(
+    "Reading notes",
+  );
+  await expect(source).toHaveValue(/Next steps/);
+  await expect(
+    page.getByRole("navigation", { name: "Notes" }).getByRole("button", { name: "Project review" }),
+  ).toHaveCount(0);
+
+  await page.getByRole("button", { name: "Delete note", exact: true }).click();
+  await page.getByRole("button", { name: "Delete permanently", exact: true }).click();
+  await expect(page.getByRole("textbox", { name: "Title", exact: true })).toHaveCount(0);
+  await expect(page.getByText("No notes yet. Create a new note to get started.")).toBeVisible();
+  await expect(page.getByRole("status")).toHaveText("Note deleted. No notes left.");
+  await expect(page.getByRole("button", { name: "New note", exact: true })).toBeFocused();
+});
+
+test("a stale delete keeps the note and requires comparison before a new confirmation", async ({
+  page,
+}) => {
+  await page.goto("/?notesExample=delete-conflict");
+  const source = page.getByRole("textbox", { name: "Markdown source" });
+  await source.fill("Local delete draft");
+  await page.getByRole("button", { name: "Delete note", exact: true }).click();
+  await page.getByRole("button", { name: "Delete permanently", exact: true }).click();
+  await expect(page.getByRole("alert")).toContainText(
+    "This note changed on the server. Nothing was deleted.",
+  );
+  await expect(source).toHaveValue("Local delete draft");
+  await expect(
+    page
+      .getByRole("navigation", { name: "Notes" })
+      .getByRole("button", { name: "Project review", exact: true }),
+  ).toBeVisible();
+  await expect(page.getByRole("button", { name: "Delete note", exact: true })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "Compare latest", exact: true })).toBeFocused();
+
+  await page.getByRole("button", { name: "Compare latest", exact: true }).click();
+  await expect(
+    page.getByText("A newer version saved by another client.", { exact: true }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "Use latest version", exact: true }).click();
+  await page.getByRole("button", { name: "Discard changes", exact: true }).click();
+  await expect(source).toHaveValue("A newer version saved by another client.");
+  await expect(page.getByRole("button", { name: "Delete note", exact: true })).toBeEnabled();
+
+  await page.getByRole("button", { name: "Delete note", exact: true }).click();
+  await page.getByRole("button", { name: "Delete permanently", exact: true }).click();
+  await expect(page.getByRole("textbox", { name: "Title", exact: true })).toHaveValue(
+    "Reading notes",
+  );
+  await expect(
+    page
+      .getByRole("navigation", { name: "Notes" })
+      .getByRole("button", { name: "Project review", exact: true }),
+  ).toHaveCount(0);
+});
+
+test("a failed delete keeps the note and can be retried", async ({ page }) => {
+  await page.goto("/?notesExample=delete-failure");
+  const source = page.getByRole("textbox", { name: "Markdown source" });
+  await page.getByRole("button", { name: "Delete note", exact: true }).click();
+  await page.getByRole("button", { name: "Delete permanently", exact: true }).click();
+  await expect(page.getByRole("alert")).toHaveText(
+    "Could not confirm deletion. Your text is preserved. Refresh the notes list before trying again; the note may already be gone.",
+  );
+  await expect(source).toHaveValue(/Prepare the/);
+  await expect(
+    page
+      .getByRole("navigation", { name: "Notes" })
+      .getByRole("button", { name: "Project review", exact: true }),
+  ).toBeVisible();
+  await expect(page.getByRole("button", { name: "Delete note", exact: true })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "Refresh notes", exact: true })).toBeFocused();
+
+  await page.getByRole("button", { name: "Refresh notes", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Delete note", exact: true })).toBeEnabled();
+  await page.getByRole("button", { name: "Delete note", exact: true }).click();
+  await page.getByRole("button", { name: "Delete permanently", exact: true }).click();
+  await expect(page.getByRole("textbox", { name: "Title", exact: true })).toHaveValue(
+    "Reading notes",
+  );
+});
+
 test("GFM task checkboxes keep native proportions while the title keeps its touch target", async ({
   page,
 }) => {

@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vite-plus/test";
 import { createNotesClient, NotesRequestError } from "./notes-store";
 
+const createKey = "a1000000-0000-4000-8000-000000000001";
 const id = "f0a10b01-4b98-4d4a-aabb-000000000001";
 const note = {
   id,
@@ -28,17 +29,39 @@ describe("notes REST client", () => {
     });
   });
 
+  it("deletes with If-Match and accepts an empty 204 response", async () => {
+    const request = vi.fn<typeof fetch>().mockResolvedValue(new Response(null, { status: 204 }));
+    const client = createNotesClient(request);
+    await expect(client.delete(id, '"opaque-17"')).resolves.toBeUndefined();
+    const [url, init] = request.mock.calls[0];
+    expect(url).toBe(`/api/notes/${id}`);
+    expect(init?.method).toBe("DELETE");
+    expect(new Headers(init?.headers).get("If-Match")).toBe('"opaque-17"');
+    expect(init?.body).toBeUndefined();
+  });
+
+  it("rejects unsafe delete inputs before dispatching", async () => {
+    const request = vi.fn<typeof fetch>();
+    const client = createNotesClient(request);
+    await expect(client.delete("not-a-uuid", '"v1"')).rejects.toThrow();
+    await expect(client.delete(id, 'W/"weak"')).rejects.toThrow();
+    expect(request).not.toHaveBeenCalled();
+  });
+
   it("creates without an ID and updates with only editable fields and If-Match", async () => {
     const request = vi
       .fn<typeof fetch>()
       .mockResolvedValueOnce(result('"created"', 201))
       .mockResolvedValueOnce(result('"updated"'));
     const client = createNotesClient(request);
-    const created = await client.create({
-      title: note.title,
-      content: note.content,
-      createdAt: note.createdAt,
-    });
+    const created = await client.create(
+      {
+        title: note.title,
+        content: note.content,
+        createdAt: note.createdAt,
+      },
+      createKey,
+    );
     expect(created.etag).toBe('"created"');
     const updated = await client.update(
       created.note.id,
@@ -49,6 +72,7 @@ describe("notes REST client", () => {
     const [createUrl, createInit] = request.mock.calls[0];
     expect(createUrl).toBe("/api/notes");
     expect(createInit?.method).toBe("POST");
+    expect(new Headers(createInit?.headers).get("Idempotency-Key")).toBe(createKey);
     if (typeof createInit?.body !== "string") throw new Error("Expected JSON creation body");
     expect(JSON.parse(createInit.body)).toEqual({
       title: "Original",
@@ -85,7 +109,7 @@ describe("notes REST client", () => {
       client.update(id, { title: "Bad tag", content: "" }, 'W/"weak"'),
     ).rejects.toThrow();
     await expect(
-      client.create({ title: "x".repeat(257), content: "", createdAt: note.createdAt }),
+      client.create({ title: "x".repeat(257), content: "", createdAt: note.createdAt }, createKey),
     ).rejects.toThrow();
     expect(request).not.toHaveBeenCalled();
   });
@@ -127,7 +151,7 @@ describe("notes REST client", () => {
 });
 
 describe("bounded notes requests", () => {
-  it.each(["list", "read", "create", "update"] as const)(
+  it.each(["list", "read", "create", "update", "delete"] as const)(
     "aborts a hung %s and ignores late success",
     async (operation) => {
       vi.useFakeTimers();
@@ -146,17 +170,22 @@ describe("bounded notes requests", () => {
             : operation === "read"
               ? client.read(id)
               : operation === "create"
-                ? client.create({
-                    title: note.title,
-                    content: note.content,
-                    createdAt: note.createdAt,
-                  })
-                : client.update(id, { title: note.title, content: note.content }, '"v1"');
+                ? client.create(
+                    {
+                      title: note.title,
+                      content: note.content,
+                      createdAt: note.createdAt,
+                    },
+                    createKey,
+                  )
+                : operation === "delete"
+                  ? client.delete(id, '"v1"')
+                  : client.update(id, { title: note.title, content: note.content }, '"v1"');
         const rejected = expect(pending).rejects.toThrow("timed out");
         await vi.advanceTimersByTimeAsync(100);
         await rejected;
         expect(request.mock.calls[0][1]?.signal?.aborted).toBe(true);
-        finish(result('"late"'));
+        finish(operation === "delete" ? new Response(null, { status: 204 }) : result('"late"'));
       } finally {
         vi.useRealTimers();
       }
@@ -189,9 +218,27 @@ it("does not automatically retry a create whose response is lost after the write
   });
   const client = createNotesClient(request);
   await expect(
-    client.create({ title: note.title, content: note.content, createdAt: note.createdAt }),
+    client.create(
+      { title: note.title, content: note.content, createdAt: note.createdAt },
+      createKey,
+    ),
   ).rejects.toThrow();
   expect(committed).toHaveLength(1);
   expect(request.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(1);
   expect(await client.list()).toEqual([note]);
+});
+
+it("rejects an invalid creation key before dispatch and retains typed replay conflicts", async () => {
+  const request = vi.fn<typeof fetch>();
+  const client = createNotesClient(request);
+  const input = { title: note.title, content: note.content, createdAt: note.createdAt };
+  await expect(client.create(input, "not-a-uuid")).rejects.toThrow();
+  expect(request).not.toHaveBeenCalled();
+  request.mockResolvedValue(
+    Response.json({ error: { code: "CONFLICT", message: "private detail" } }, { status: 409 }),
+  );
+  await expect(client.create(input, createKey)).rejects.toMatchObject({
+    status: 409,
+    code: "CONFLICT",
+  });
 });
