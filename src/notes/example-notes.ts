@@ -1,5 +1,10 @@
 import { apiError, ifMatchSchema } from "../../shared/http";
-import { createNoteSchema, updateNoteSchema, type Note } from "../../shared/notes";
+import {
+  createNoteKeySchema,
+  createNoteSchema,
+  updateNoteSchema,
+  type Note,
+} from "../../shared/notes";
 import { createNotesClient } from "./notes-store";
 
 const exampleNotes: Note[] = [
@@ -26,6 +31,7 @@ export function createPreviewStore(scenario: string | null) {
     (scenario === "empty" ? [] : exampleNotes).map((note) => [note.id, { ...note }]),
   );
   const versions = new Map([...notes.keys()].map((id) => [id, 1]));
+  const creations = new Map<string, { fingerprint: string; noteId: string }>();
   let failLoad = scenario === "load-failure";
   let failSave = scenario === "save-failure";
   let failDelete = scenario === "delete-failure";
@@ -110,11 +116,22 @@ export function createPreviewStore(scenario: string | null) {
       return fail(400, "VALIDATION_ERROR");
     }
     if (method === "POST" && id === null) {
+      const key = createNoteKeySchema.safeParse(new Headers(init?.headers).get("Idempotency-Key"));
+      if (!key.success) return fail(400, "VALIDATION_ERROR");
       const parsed = createNoteSchema.safeParse(body);
       if (!parsed.success) return fail(400, "VALIDATION_ERROR");
+      const fingerprint = JSON.stringify(parsed.data);
+      const creation = creations.get(key.data);
+      if (creation) {
+        const existing = notes.get(creation.noteId);
+        if (creation.fingerprint !== fingerprint || !existing || versions.get(existing.id) !== 1)
+          return fail(409, "CONFLICT");
+        return noteResponse(existing, 201);
+      }
       const note = { ...parsed.data, id: crypto.randomUUID(), updatedAt: parsed.data.createdAt };
       notes.set(note.id, note);
       versions.set(note.id, 1);
+      creations.set(key.data, { fingerprint, noteId: note.id });
       return noteResponse(note, 201);
     }
     if (method === "PUT" && id !== null) {

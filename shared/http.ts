@@ -18,6 +18,7 @@ export const apiErrorSchema = z.strictObject({
       "VALIDATION_ERROR",
       "UNAUTHENTICATED",
       "FORBIDDEN",
+      "CONFLICT",
       "NOT_FOUND",
       "PRECONDITION_REQUIRED",
       "PRECONDITION_FAILED",

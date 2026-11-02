@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { SessionUser } from "../../shared/auth";
 import { Button } from "@/components/ui/button";
 import { NotesWorkspace } from "@/notes/NotesWorkspace";
@@ -18,54 +18,73 @@ export function AuthenticatedNotes({ store }: { store: NotesStore }) {
   const [session, setSession] = useState<SessionState>({ kind: "loading" });
   const [attempt, setAttempt] = useState(0);
   const requestId = useRef(0);
-
-  useEffect(() => {
-    let active = true;
-    void (async () => {
-      const id = ++requestId.current;
-      try {
-        const user = await sessionClient.read();
-        if (active && id === requestId.current)
-          setSession(user ? { kind: "ready", user } : { kind: "signed-out" });
-      } catch {
-        if (active && id === requestId.current)
-          setSession((current) =>
-            current.kind === "ready" || current.kind === "signed-out"
-              ? current
-              : { kind: "failed" },
-          );
-      }
-    })();
-    return () => {
-      active = false;
+  const verifiedUserId = useRef<string | null>(null);
+  const accountId = session.kind === "ready" ? session.user.id : null;
+  const [sessionCheck, setSessionCheck] = useState<"checking" | "verified" | "failed">("checking");
+  // The ref closes the gap before React renders the disabled controls on focus.
+  const guardedStore = useMemo<NotesStore>(() => {
+    const requireVerified = () => {
+      if (accountId === null || verifiedUserId.current !== accountId)
+        throw new Error("Confirm your session before requesting notes.");
     };
-  }, [attempt]);
+    return {
+      list: async () => {
+        requireVerified();
+        return store.list();
+      },
+      read: async (id) => {
+        requireVerified();
+        return store.read(id);
+      },
+      create: async (input, key) => {
+        requireVerified();
+        return store.create(input, key);
+      },
+      update: async (id, input, etag) => {
+        requireVerified();
+        return store.update(id, input, etag);
+      },
+      delete: async (id, etag) => {
+        requireVerified();
+        return store.delete(id, etag);
+      },
+    };
+  }, [store, accountId]);
 
   useEffect(() => {
     let active = true;
     const refresh = () => {
+      const id = ++requestId.current;
+      verifiedUserId.current = null;
+      setSessionCheck("checking");
       void (async () => {
-        const id = ++requestId.current;
         try {
           const user = await sessionClient.read();
-          if (active && id === requestId.current)
+          if (active && id === requestId.current) {
+            verifiedUserId.current = user?.id ?? null;
+            setSessionCheck("verified");
             setSession(user ? { kind: "ready", user } : { kind: "signed-out" });
+          }
         } catch {
-          if (active && id === requestId.current)
+          if (active && id === requestId.current) {
+            setSessionCheck("failed");
             setSession((current) =>
               current.kind === "ready" || current.kind === "signed-out"
                 ? current
                 : { kind: "failed" },
             );
+          }
         }
       })();
     };
+    refresh();
     window.addEventListener("focus", refresh);
     return () => {
       active = false;
+      verifiedUserId.current = null;
       window.removeEventListener("focus", refresh);
     };
-  }, []);
+  }, [attempt]);
 
   if (session.kind === "loading") {
     return (
@@ -128,7 +147,23 @@ export function AuthenticatedNotes({ store }: { store: NotesStore }) {
           </Button>
         </form>
       </header>
-      <NotesWorkspace key={session.user.id} store={store} />
+      {sessionCheck !== "verified" && (
+        <div className="space-y-3 px-4 pt-4 sm:px-6">
+          <p role={sessionCheck === "failed" ? "alert" : "status"}>
+            {sessionCheck === "checking"
+              ? "Checking your session. Note requests are paused."
+              : "Could not confirm your session. Your draft is preserved; note requests are paused."}
+          </p>
+          {sessionCheck === "failed" && (
+            <Button onClick={() => setAttempt((value) => value + 1)}>Retry session check</Button>
+          )}
+        </div>
+      )}
+      <NotesWorkspace
+        key={session.user.id}
+        store={guardedStore}
+        requestsEnabled={sessionCheck === "verified"}
+      />
     </div>
   );
 }

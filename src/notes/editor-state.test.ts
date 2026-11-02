@@ -7,6 +7,7 @@ describe("editor recovery and save state", () => {
     [401, "unauthenticated"],
     [403, "forbidden"],
     [404, "missing"],
+    [409, "creation-conflict"],
     [412, "conflict"],
     [501, "unavailable"],
     [500, "failed"],
@@ -80,4 +81,8 @@ it("describes delete failures without implying the note was removed", () => {
   expect(failureMessage("missing", "delete")).toBe(
     "This note is no longer available. Your unsaved text is preserved. Refresh the notes list or keep your text as a new note.",
   );
+});
+
+it("keeps creation replay conflicts separate from editable-note revision conflicts", () => {
+  expect(failureMessage("creation-conflict", "save")).toContain("saving a duplicate is blocked");
 });

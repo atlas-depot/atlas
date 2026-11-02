@@ -23,6 +23,7 @@ import {
   failureMessage,
   hasUnsavedChanges,
   savingMessage,
+  sameContent,
   type RequestFailure,
 } from "./editor-state";
 
@@ -37,15 +38,20 @@ type SaveState = "idle" | "saving" | RequestFailure;
 export function NotesWorkspace({
   store,
   example = false,
+  requestsEnabled = true,
 }: {
   store: NotesStore;
   example?: boolean;
+  requestsEnabled?: boolean;
 }) {
   const [notes, setNotes] = useState<Note[]>([]);
   const [loadState, setLoadState] = useState<"loading" | "ready" | RequestFailure>("loading");
   const [loadAttempt, setLoadAttempt] = useState(0);
   const [draft, setDraft] = useState<Draft | null>(null);
   const [saved, setSaved] = useState<NoteSnapshot | null>(null);
+  const [pendingCreation, setPendingCreation] = useState<{ key: string; input: CreateNote } | null>(
+    null,
+  );
   const [saveState, setSaveState] = useState<SaveState>("idle");
   const [openingId, setOpeningId] = useState<string | null>(null);
   const [readFailure, setReadFailure] = useState<ReadFailure | null>(null);
@@ -71,7 +77,8 @@ export function NotesWorkspace({
   const valid =
     draft !== null &&
     noteContentSchema.safeParse({ title: draft.title, content: draft.content }).success;
-  const busy = saveState === "saving" || openingId !== null || refreshing || deleting;
+  const busy =
+    !requestsEnabled || saveState === "saving" || openingId !== null || refreshing || deleting;
   const loadFailureKind =
     loadState === "unauthenticated" || loadState === "unavailable" ? loadState : null;
   const recoveryKind =
@@ -83,7 +90,8 @@ export function NotesWorkspace({
       : loadState !== "loading" && loadState !== "ready"
         ? loadState
         : null);
-  const blocked = recoveryKind === "unauthenticated" || recoveryKind === "unavailable";
+  const blocked =
+    !requestsEnabled || recoveryKind === "unauthenticated" || recoveryKind === "unavailable";
 
   const writeBlocked = blocked || writesForbidden || loadState === "forbidden";
   const deleteBlocked =
@@ -109,6 +117,7 @@ export function NotesWorkspace({
       current.map((note) => (note.id === snapshot.note.id ? snapshot.note : note)),
     );
     setSaved(snapshot);
+    setPendingCreation(null);
     setSaveState("idle");
     setComparison(null);
     setReadFailure(null);
@@ -161,14 +170,14 @@ export function NotesWorkspace({
   }, [store, loadAttempt, applySnapshot, clearPrivateCache]);
 
   useEffect(() => {
-    if (!dirty && saveState !== "saving") return;
+    if (!dirty && saveState !== "saving" && pendingCreation === null) return;
     const warn = (event: BeforeUnloadEvent) => {
       event.preventDefault();
       event.returnValue = "";
     };
     window.addEventListener("beforeunload", warn);
     return () => window.removeEventListener("beforeunload", warn);
-  }, [dirty, saveState]);
+  }, [dirty, saveState, pendingCreation]);
 
   useEffect(() => {
     const target =
@@ -191,7 +200,7 @@ export function NotesWorkspace({
   }, [deleteFailure, deleteNotice]);
 
   async function openNote(id: string, compare = false) {
-    if (busyRef.current) return;
+    if (!requestsEnabled || busyRef.current) return;
     busyRef.current = true;
     setOpeningId(id);
     setReadFailure(null);
@@ -222,6 +231,7 @@ export function NotesWorkspace({
       busyRef.current ||
       writeBlocked ||
       deleteFailure !== null ||
+      saveState === "creation-conflict" ||
       saveState === "conflict" ||
       saveState === "missing"
     )
@@ -232,14 +242,35 @@ export function NotesWorkspace({
     setSavingSnapshot(snapshot);
     setReadFailure(null);
     setDeleteNotice(null);
+    let savedId = saved?.note.id;
     try {
-      const result = saved
-        ? await store.update(
-            saved.note.id,
+      let result: NoteSnapshot;
+      if (saved) {
+        result = await store.update(
+          saved.note.id,
+          { title: snapshot.title, content: snapshot.content },
+          saved.etag,
+        );
+      } else {
+        const creation = pendingCreation ?? { key: crypto.randomUUID(), input: snapshot };
+        setPendingCreation(creation);
+        result = await store.create(creation.input, creation.key);
+        // Keep the recovered identity even if saving the newer edits subsequently fails.
+        savedId = result.note.id;
+        setSaved(result);
+        setNotes((current) => [
+          result.note,
+          ...current.filter((note) => note.id !== result.note.id),
+        ]);
+        setPendingCreation(null);
+        if (!sameContent(snapshot, creation.input)) {
+          result = await store.update(
+            result.note.id,
             { title: snapshot.title, content: snapshot.content },
-            saved.etag,
-          )
-        : await store.create(snapshot);
+            result.etag,
+          );
+        }
+      }
       setNotes((current) => [result.note, ...current.filter((note) => note.id !== result.note.id)]);
       setSaved(result);
       // Advance the identity/ETag, but acknowledge only the submitted text, not newer edits.
@@ -251,8 +282,8 @@ export function NotesWorkspace({
       const kind = classifyFailure(error);
       setSaveState(kind);
       if (kind === "forbidden") setWritesForbidden(true);
-      if (kind === "missing" && saved)
-        setNotes((current) => current.filter((note) => note.id !== saved.note.id));
+      if (kind === "missing" && savedId)
+        setNotes((current) => current.filter((note) => note.id !== savedId));
       if (kind === "unauthenticated") clearPrivateCache();
     } finally {
       busyRef.current = false;
@@ -260,6 +291,7 @@ export function NotesWorkspace({
     }
   }, [
     draft,
+    pendingCreation,
     dirty,
     valid,
     saved,
@@ -281,6 +313,7 @@ export function NotesWorkspace({
   }, [save, pending, deleteOpen]);
 
   function select(selection: Selection) {
+    if (!requestsEnabled) return;
     setPending(null);
     if (selection.kind === "read") {
       void openNote(selection.id);
@@ -290,6 +323,7 @@ export function NotesWorkspace({
     else {
       setDraft({ title: "", content: "", createdAt: new Date().toISOString() });
       setSaved(null);
+      setPendingCreation(null);
       setSaveState("idle");
       setReadFailure(null);
       setComparison(null);
@@ -306,12 +340,12 @@ export function NotesWorkspace({
       (selection.kind === "read" && selection.id === saved?.note.id)
     )
       return;
-    if (dirty) setPending(selection);
+    if (dirty || pendingCreation !== null) setPending(selection);
     else select(selection);
   }
 
   async function refreshNotes() {
-    if (busyRef.current) return;
+    if (!requestsEnabled || busyRef.current) return;
     busyRef.current = true;
     setRefreshing(true);
     try {
@@ -341,6 +375,7 @@ export function NotesWorkspace({
   function keepAsNew() {
     if (!draft) return;
     setSaved(null);
+    setPendingCreation(null);
     setSaveState("idle");
     setReadFailure(null);
     setComparison(null);
@@ -355,6 +390,7 @@ export function NotesWorkspace({
     setNotes(remaining);
     setDraft(null);
     setSaved(null);
+    setPendingCreation(null);
     setSaveState("idle");
     setReadFailure(null);
     setComparison(null);
@@ -426,7 +462,7 @@ export function NotesWorkspace({
                       : "Saving..."
                     : saveState !== "idle"
                       ? saveState === "failed" && saved === null
-                        ? "Could not confirm creation. Your text is preserved. Check the notes list before trying again; the note may already exist."
+                        ? "Could not confirm creation. Your text is preserved. The note may already exist. Save again to recover the same creation without duplicating it."
                         : failureMessage(saveState, "save")
                       : (deleteNotice ??
                         (dirty
@@ -471,7 +507,7 @@ export function NotesWorkspace({
           Refresh notes
         </Button>
       )}
-      {saveState === "failed" &&
+      {(saveState === "failed" || saveState === "creation-conflict") &&
         saved === null &&
         !readFailure &&
         !blocked &&
@@ -482,6 +518,7 @@ export function NotesWorkspace({
         )}
       {loadState === "failed" && (
         <Button
+          disabled={busy}
           onClick={() => {
             if (draft) {
               void refreshNotes();
@@ -597,6 +634,7 @@ export function NotesWorkspace({
                         writeBlocked ||
                         deleteFailure !== null ||
                         !valid ||
+                        saveState === "creation-conflict" ||
                         saveState === "conflict" ||
                         saveState === "missing"
                       }

@@ -1,4 +1,5 @@
 import { readFile, readdir } from "node:fs/promises";
+import { createNoteSchema, updateNoteSchema, type Note, type CreateNote } from "../shared/notes.ts";
 import { expect, test } from "@playwright/test";
 
 const browserUser = {
@@ -514,7 +515,7 @@ test("a lost create response offers list reconciliation without automatically cr
   const title = page.getByRole("textbox", { name: "Title", exact: true });
   await title.fill("A");
   await page.getByRole("button", { name: "Save", exact: true }).click();
-  await expect(page.getByRole("alert")).toContainText("the note may already exist");
+  await expect(page.getByRole("alert")).toContainText("note may already exist");
   await page.getByRole("button", { name: "Refresh notes", exact: true }).click();
   await expect(
     page.getByRole("navigation", { name: "Notes" }).getByRole("button", { name: "A", exact: true }),
@@ -762,4 +763,219 @@ test("a 401 list refresh overrides a stale read failure and blocks writes", asyn
   await expect(page.getByRole("button", { name: "Refresh notes", exact: true })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Retry opening", exact: true })).toHaveCount(0);
   await expect(source).toHaveValue("Unsaved A must survive");
+});
+
+test("session revalidation blocks private requests until the account is confirmed", async ({
+  page,
+}) => {
+  let releaseSession!: () => void;
+  const heldSession = new Promise<void>((resolve) => {
+    releaseSession = resolve;
+  });
+  let revalidating = false;
+  let privateRequests = 0;
+  const creationKeys: string[] = [];
+  await page.route("**/api/auth/session", async (route) => {
+    if (revalidating) await heldSession;
+    await route.fulfill({
+      json: {
+        user: revalidating
+          ? { ...browserUser, id: "user_bob", email: "bob@example.test" }
+          : browserUser,
+      },
+    });
+  });
+  await page.route("**/api/notes", (route) => {
+    if (revalidating) privateRequests++;
+    if (route.request().method() === "POST") {
+      creationKeys.push(route.request().headers()["idempotency-key"]);
+      if (creationKeys.length === 1) return route.abort("failed");
+      return route.fulfill({
+        status: 201,
+        json: { ...serverNote, ...createNoteSchema.parse(route.request().postDataJSON()) },
+        headers: { ETag: '"bob-created"' },
+      });
+    }
+    return route.fulfill({ json: { notes: [] } });
+  });
+  await page.goto("/");
+  await page.getByRole("button", { name: "New note", exact: true }).click();
+  const source = page.getByRole("textbox", { name: "Markdown source" });
+  await source.fill("Alice private draft");
+  await page.keyboard.press("ControlOrMeta+s");
+  await expect(page.getByRole("alert")).toContainText("Could not confirm creation");
+  revalidating = true;
+  await page.evaluate(`
+    window.dispatchEvent(new Event('focus'));
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 's', ctrlKey: true, cancelable: true }));
+  `);
+  const save = page.getByRole("button", { name: "Save", exact: true });
+  await expect(save).toBeDisabled();
+  await page.keyboard.press("ControlOrMeta+s");
+  await expect(source).toHaveValue("Alice private draft");
+  expect(privateRequests).toBe(0);
+  releaseSession();
+  await expect(page.getByText("Signed in as bob@example.test")).toBeVisible();
+  await expect(source).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "New note", exact: true })).toBeEnabled();
+  await page.getByRole("button", { name: "New note", exact: true }).click();
+  await source.fill("Bob separate draft");
+  await page.keyboard.press("ControlOrMeta+s");
+  await expect(page.getByRole("status")).toHaveText("Saved");
+  expect(creationKeys).toHaveLength(2);
+  expect(creationKeys[1]).not.toBe(creationKeys[0]);
+});
+
+test("failed session revalidation preserves a mobile draft and blocks writes until retry", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 375, height: 812 });
+  let sessionFails = false;
+  let creates = 0;
+  await page.route("**/api/auth/session", (route) =>
+    route.fulfill(
+      sessionFails
+        ? { status: 503, json: { error: { code: "INTERNAL_ERROR", message: "Try later" } } }
+        : { json: { user: browserUser } },
+    ),
+  );
+  await page.route("**/api/notes", (route) => {
+    if (route.request().method() === "POST") {
+      creates++;
+      const input = route.request().postDataJSON();
+      return route.fulfill({
+        status: 201,
+        json: { ...serverNote, ...input },
+        headers: { ETag: '"new"' },
+      });
+    }
+    return route.fulfill({ json: { notes: [] } });
+  });
+  await page.goto("/");
+  await page.getByRole("button", { name: "New note", exact: true }).click();
+  const source = page.getByRole("textbox", { name: "Markdown source" });
+  await source.fill("Keep my draft while offline");
+  sessionFails = true;
+  await page.evaluate("window.dispatchEvent(new Event('focus'))");
+  const retry = page.getByRole("button", { name: "Retry session check" });
+  await expect(retry).toBeVisible();
+  await expect(source).toHaveValue("Keep my draft while offline");
+  await expect(page.getByRole("button", { name: "Save", exact: true })).toBeDisabled();
+  await page.keyboard.press("ControlOrMeta+s");
+  expect(creates).toBe(0);
+  sessionFails = false;
+  await retry.click();
+  await expect(page.getByRole("button", { name: "Save", exact: true })).toBeEnabled();
+  await expect(source).toHaveValue("Keep my draft while offline");
+  await page.keyboard.press("ControlOrMeta+s");
+  await expect(page.getByRole("status")).toHaveText("Saved");
+  expect(creates).toBe(1);
+  expect(await page.evaluate("document.documentElement.scrollWidth <= window.innerWidth")).toBe(
+    true,
+  );
+});
+
+for (const failFirstUpdate of [false, true]) {
+  test(`lost creation recovers its original snapshot and newer edits (update failure: ${failFirstUpdate})`, async ({
+    page,
+  }) => {
+    let committed: Note | null = null;
+    let original: CreateNote | null = null;
+    const keys: string[] = [];
+    let postCount = 0;
+    let putCount = 0;
+    let releaseReplay!: () => void;
+    const replay = new Promise<void>((resolve) => {
+      releaseReplay = resolve;
+    });
+    await page.route("**/api/notes", async (route) => {
+      if (route.request().method() !== "POST")
+        return route.fulfill({ json: { notes: committed ? [committed] : [] } });
+      const input = createNoteSchema.parse(route.request().postDataJSON());
+      keys.push(route.request().headers()["idempotency-key"]);
+      postCount++;
+      if (postCount === 1) {
+        original = input;
+        committed = { ...serverNote, ...input };
+        return route.abort("failed");
+      }
+      expect(input).toEqual(original);
+      expect(keys[1]).toBe(keys[0]);
+      await replay;
+      return route.fulfill({ status: 201, json: committed, headers: { ETag: '"created"' } });
+    });
+    await page.route(`**/api/notes/${firstId}`, (route) => {
+      if (route.request().method() === "PUT") {
+        expect(route.request().headers()["if-match"]).toBe(
+          putCount === 0 || failFirstUpdate ? '"created"' : '"updated-1"',
+        );
+        if (putCount === 0 && failFirstUpdate) {
+          putCount++;
+          return route.fulfill({
+            status: 500,
+            json: { error: { code: "INTERNAL_ERROR", message: "Retry" } },
+          });
+        }
+        const input = updateNoteSchema.parse(route.request().postDataJSON());
+        committed = { ...serverNote, ...committed, ...input };
+        putCount++;
+      }
+      return route.fulfill({ json: committed, headers: { ETag: `"updated-${putCount}"` } });
+    });
+    await page.goto("/");
+    await page.getByRole("button", { name: "New note", exact: true }).click();
+    const source = page.getByRole("textbox", { name: "Markdown source" });
+    await source.fill("Original submitted text");
+    await page.getByRole("button", { name: "Save", exact: true }).click();
+    await expect(page.getByRole("alert")).toContainText("Could not confirm creation");
+    await source.fill("New text before retry");
+    await page.keyboard.press("ControlOrMeta+s");
+    await expect.poll(() => postCount).toBe(2);
+    await source.fill("Even newer text during replay");
+    releaseReplay();
+    if (failFirstUpdate) await expect(page.getByRole("alert")).toContainText("Save failed");
+    else await expect(page.getByRole("status")).toHaveText("Unsaved changes");
+    await expect(source).toHaveValue("Even newer text during replay");
+    expect(committed).toMatchObject({
+      content: failFirstUpdate ? "Original submitted text" : "New text before retry",
+    });
+    expect(putCount).toBe(1);
+    await page.keyboard.press("ControlOrMeta+s");
+    await expect(page.getByRole("status")).toHaveText("Saved");
+    expect(postCount).toBe(2);
+    expect(putCount).toBe(2);
+    await page.reload();
+    await expect(source).toHaveValue("Even newer text during replay");
+  });
+}
+
+test("creation replay conflict retains text and blocks a fresh creation key", async ({ page }) => {
+  const keys: string[] = [];
+  await page.route("**/api/notes", (route) => {
+    if (route.request().method() !== "POST") return route.fulfill({ json: { notes: [] } });
+    keys.push(route.request().headers()["idempotency-key"]);
+    return keys.length === 1
+      ? route.abort("failed")
+      : route.fulfill({
+          status: 409,
+          json: { error: { code: "CONFLICT", message: "Replay unavailable" } },
+        });
+  });
+  await page.goto("/");
+  await page.getByRole("button", { name: "New note", exact: true }).click();
+  const source = page.getByRole("textbox", { name: "Markdown source" });
+  await source.fill("Preserve this draft");
+  await page.keyboard.press("ControlOrMeta+s");
+  await expect(page.getByRole("alert")).toContainText("Could not confirm creation");
+  await source.fill("Preserve the newer draft too");
+  await page.keyboard.press("ControlOrMeta+s");
+  await expect(page.getByRole("alert")).toContainText("Could not reconcile this creation");
+  await expect(source).toHaveValue("Preserve the newer draft too");
+  await expect(page.getByRole("button", { name: "Save", exact: true })).toBeDisabled();
+  await page.keyboard.press("ControlOrMeta+s");
+  await page.getByRole("button", { name: "Refresh notes", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Save", exact: true })).toBeDisabled();
+  expect(keys).toHaveLength(2);
+  expect(keys[0]).toMatch(/^[0-9a-f-]{36}$/);
+  expect(keys[1]).toBe(keys[0]);
 });

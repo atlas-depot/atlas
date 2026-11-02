@@ -33,3 +33,5 @@ export const noteListSchema = z.strictObject({ notes: z.array(noteSchema) });
 export type Note = z.infer<typeof noteSchema>;
 export type CreateNote = z.infer<typeof createNoteSchema>;
 export type UpdateNote = z.infer<typeof updateNoteSchema>;
+
+export const createNoteKeySchema = z.uuid().transform((value) => value.toLowerCase());

@@ -5,6 +5,7 @@ export type RequestFailure =
   | "forbidden"
   | "missing"
   | "unavailable"
+  | "creation-conflict"
   | "conflict"
   | "failed";
 export type EditableContent = { title: string; content: string };
@@ -19,6 +20,8 @@ export function classifyFailure(error: unknown): RequestFailure {
       return "forbidden";
     case 404:
       return "missing";
+    case 409:
+      return "creation-conflict";
     case 412:
       return "conflict";
     case 501:
@@ -65,6 +68,8 @@ export function failureMessage(
       return "This note is no longer available. Your unsaved text is preserved. Refresh the notes list or keep your text as a new note.";
     case "unavailable":
       return "Your notes are not available yet. Please try again later.";
+    case "creation-conflict":
+      return "Could not reconcile this creation. The original note or creation request has changed. Your text is preserved. Refresh the notes list to inspect existing notes; saving a duplicate is blocked.";
     case "conflict":
       return operation === "delete"
         ? "This note changed on the server. Nothing was deleted. Compare the latest version before trying again."
