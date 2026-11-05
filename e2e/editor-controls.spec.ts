@@ -134,8 +134,18 @@ for (const scenario of [
     await page.setViewportSize({ width: scenario.width, height: 900 });
     const state = await openDocument(page, [code("text", scenario.source)]);
     const picker = page.getByRole("combobox", { name: "Code language", exact: true });
-    await picker.click();
+    await picker.focus();
+    await picker.press("Enter");
     const search = page.getByRole("combobox", { name: "Search code languages" });
+    await expect(search).toBeFocused();
+    await expect(search).toHaveCSS("outline-style", "solid");
+    await expect(search).toHaveCSS("outline-width", "2px");
+    await expect(search).toHaveCSS(
+      "outline-color",
+      await search.evaluate(
+        (element) => element.ownerDocument.defaultView!.getComputedStyle(element).color,
+      ),
+    );
     await search.fill(scenario.language === "python" ? "py" : "typescript");
     await expect(page.getByRole("option", { name: scenario.label, exact: true })).toBeVisible();
     if (scenario.language === "python")
