@@ -119,6 +119,9 @@ test("VS Code clipboard preserves literal code, malformed metadata and selection
 }) => {
   const errors: string[] = [];
   page.on("pageerror", (error) => errors.push(error.message));
+  page.on("console", (message) => {
+    if (message.type() === "error") errors.push(message.text());
+  });
   for (const metadata of [
     JSON.stringify({ mode: "javascript" }),
     JSON.stringify({ mode: 'bad"<tag>' }),

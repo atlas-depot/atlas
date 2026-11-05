@@ -129,9 +129,9 @@ All routes use the existing WorkOS Bearer/session boundary and cookie-origin che
 | `POST /api/organize-runs/:id/handoff` | `200` temporary draft and ETag; retries return the same draft without extending its lifetime |
 | `GET /api/organize-work` | Owner-scoped active run handles and unexpired drafts for reconnect/reload |
 | `GET /api/note-drafts/:id` | `200` draft and ETag, including stale/deleted source flags |
-| `PUT /api/note-drafts/:id` | `{ title, content }` plus `If-Match`; persists edits without extending expiry |
-| `DELETE /api/note-drafts/:id` | Empty body plus `If-Match`; discards the temporary draft |
-| `POST /api/note-drafts/:id/save` | `{ title, content }` plus `If-Match`; `201` separate permanent note and ETag |
+| `PUT /api/note-drafts/:id`, `{ title, content }` plus `If-Match` | `200` full draft and ETag, with expiry unchanged |
+| `DELETE /api/note-drafts/:id`, empty body plus `If-Match` | `204` after discarding the temporary draft |
+| `POST /api/note-drafts/:id/save`, `{ title, content }` plus `If-Match` | `201` separate permanent note and ETag |
 
 The browser hands off a completed result before editing it. Handoff records the temporary copy and cleanup intent in one transaction; cleanup failure cannot erase the copy and maintenance retries retirement. A source can have only one unresolved draft. Another Organize returns `409` until Save or Discard resolves it. A changed source is flagged stale; source deletion after handoff does not prevent saving the draft separately.
 
