@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { and, desc, eq, sql } from "drizzle-orm";
 import { z } from "zod";
+import { canonicalJson, documentContentSchema } from "../../shared/document.ts";
 import {
   createNoteKeySchema,
   createNoteSchema,
@@ -28,7 +29,7 @@ export function storedNote(row: Row): StoredNote {
     note: {
       id: row.id,
       title: row.title,
-      content: row.content,
+      content: documentContentSchema.parse(row.content),
       createdAt: new Date(row.createdAt).toISOString(),
       updatedAt: new Date(row.updatedAt).toISOString(),
     },
@@ -58,7 +59,7 @@ export function createNoteStore(db: Database) {
       const creationKey = createNoteKeySchema.parse(key);
       const data = createNoteSchema.parse(input);
       const payloadHash = createHash("sha256")
-        .update(JSON.stringify([data.title, data.content, data.createdAt]))
+        .update(canonicalJson([data.title, data.content, data.createdAt]))
         .digest("hex");
       return db.transaction(
         async (tx) => {

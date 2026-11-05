@@ -1,6 +1,7 @@
 import { and, eq, inArray, lte, sql } from "drizzle-orm";
 import { z } from "zod";
 import { noteIdSchema } from "../../shared/notes.ts";
+import { organizerContent } from "../../shared/document.ts";
 import { generatedDraftSchema, organizeUsageSchema, type OrganizeUsage } from "../organize-note.ts";
 import type { OrganizeRunState } from "../organize-runs.ts";
 import type { openDatabase } from "./connection.ts";
@@ -129,7 +130,7 @@ export function createOrganizeRunStore(db: Database) {
             noteId: id,
             sourceRevision: note.revision,
             runtimeUrl: target,
-            input: { title: note.title, content: note.content },
+            input: { title: note.title, content: organizerContent(storedNote(note).note.content) },
             state: { status: "running", phase: "starting" },
             active: true,
           })

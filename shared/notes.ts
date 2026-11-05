@@ -1,22 +1,15 @@
 import { z } from "zod";
+import { documentContentSchema, noteTextSchema } from "./document.ts";
 
 export const noteIdSchema = z.uuid();
 /** Account-scoped key for one logical creation, reused with the original payload. */
 export const createNoteKeySchema = z.uuid().transform((value) => value.toLowerCase());
 
-// Unicode mode matches lone surrogates, not valid supplementary characters.
-// PostgreSQL text cannot contain NUL. Reject unsupported text rather than replacing it.
-const noteTextSchema = z
-  .string()
-  .refine((value) => !value.includes("\0") && !/\p{Surrogate}/u.test(value), {
-    error: "Text must contain valid Unicode and no NUL characters.",
-  });
-
 /** Editable fields: preserve whitespace, allow empty drafts. Limits use UTF-16 code units. */
 export const noteContentSchema = z.strictObject({
   title: noteTextSchema.max(256),
-  /** Markdown source, never rendered HTML. */
-  content: noteTextSchema.max(100_000),
+  /** Legacy Markdown or a versioned block document, never rendered HTML. */
+  content: documentContentSchema,
 });
 
 export const createNoteSchema = noteContentSchema.extend({

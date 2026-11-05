@@ -9,7 +9,7 @@ The [agreed sprint scope](https://github.com/atlas-depot/atlas/issues/45) record
 | Area | Decision |
 | --- | --- |
 | Client | React/TypeScript with Vite+. Web/PWA first; PWA setup remains unimplemented |
-| UI components | shadcn components built on Base UI; react-markdown with remark-gfm for safe note preview |
+| UI components | BlockNote with its Base UI-backed shadcn adapter for rich note editing; react-markdown with remark-gfm for legacy Markdown preview |
 | API | Hono on Node 24, REST and shared Zod schemas |
 | Authentication | WorkOS AuthKit with hosted Google and email/password sign-in, server callback and HttpOnly session cookie; the API also accepts verified WorkOS Bearer access tokens |
 | Database | Neon PostgreSQL with Drizzle, one remote branch per developer, shared staging and separate production |
@@ -20,7 +20,7 @@ File storage, connector adapters, memory storage and the product model remain op
 
 ## Current delivery scope
 
-The notes sprint covers online personal notes, explicit Save, Markdown source and preview, followed by a user-triggered AI draft kept separate from the original. In #50, the agent may choose to restructure, shorten, expand or research the note without asking for approval for each public web search. Offline synchronization, live collaboration, PDF import, account connectors, workspace-wide search and richer generated views remain outside this batch.
+The notes sprint covers online personal notes, explicit Save, rich block editing, followed by a user-triggered AI draft kept separate from the original. New note content uses versioned BlockNote JSON with stable block IDs. Existing Markdown remains a string until an explicit edit and Save converts it. File storage and knowledge exchange formats such as OKF are separate concerns; the editor does not prescribe a universal artifact format. In #50, the agent may choose to restructure, shorten, expand or research the note without asking for approval for each public web search. Offline synchronization, live collaboration, PDF import, account connectors, workspace-wide search and richer generated views remain outside this batch.
 
 The executable provides public health and authentication routes plus a protected API boundary. Protected API requests without a verified Bearer token or browser session are rejected. Tests inject a trusted identity; authenticated note operations return `501` until persistence is connected. Terminal invalid or expired sessions return `401`; a successful browser refresh returns `200` with a resealed cookie. Rejected cookie-origin checks return `403`. Provider outages during verification or refresh return `500`; logout falls back to clearing the local cookie and redirecting to `APP_ORIGIN` when WorkOS cannot confirm the session.
 

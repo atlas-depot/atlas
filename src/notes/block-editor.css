@@ -1,0 +1,43 @@
+.note-detail[data-editor-mode="rich"] {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.rich-note-editor {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.rich-note-editor .bn-container {
+  font-family: inherit;
+  color: var(--foreground);
+}
+
+.rich-note-editor .bn-editor {
+  min-height: 16rem;
+  padding: 1rem 2.5rem;
+  font-size: 1rem;
+  background: transparent;
+}
+
+.rich-note-editor .bn-editor h1 {
+  font-size: 1.5rem;
+}
+
+.rich-note-editor .bn-editor h2 {
+  font-size: 1.25rem;
+}
+
+.rich-note-editor .bn-editor h3 {
+  font-size: 1.125rem;
+}
+
+.rich-note-editor .bn-editor pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 480px) {
+  .rich-note-editor .bn-editor {
+    padding-inline: 1.75rem 0.5rem;
+  }
+}

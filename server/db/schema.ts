@@ -15,6 +15,7 @@ import {
 import type { OrganizeRunState } from "../organize-runs.ts";
 import type { OrganizeUsage } from "../organize-note.ts";
 import type { RunTerminalState } from "./organize-runs.ts";
+import type { NoteContent } from "../../shared/document.ts";
 
 export const notes = pgTable(
   "notes",
@@ -23,7 +24,7 @@ export const notes = pgTable(
     /** Verified WorkOS identity; never taken from a note payload. */
     ownerId: text("owner_id").notNull(),
     title: text("title").notNull(),
-    content: text("content").notNull(),
+    content: jsonb("content").$type<NoteContent>().notNull(),
     /** Supplied by the client on creation and immutable in note operations. */
     createdAt: timestamp("created_at", { withTimezone: true, mode: "string" }).notNull(),
     /** Initially createdAt; successful edits supply the server timestamp. */

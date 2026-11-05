@@ -1,4 +1,9 @@
 import { NotesRequestError } from "./notes-store";
+import {
+  blockNoteDocumentSchema,
+  canonicalNoteContent,
+  type NoteContent,
+} from "../../shared/document";
 
 export type RequestFailure =
   | "unauthenticated"
@@ -8,7 +13,15 @@ export type RequestFailure =
   | "creation-conflict"
   | "conflict"
   | "failed";
-export type EditableContent = { title: string; content: string };
+export type EditableContent = { title: string; content: NoteContent };
+
+export function emptyNoteDocument() {
+  return blockNoteDocumentSchema.parse({
+    format: "blocknote",
+    schemaVersion: 1,
+    blocks: [{ id: crypto.randomUUID(), type: "paragraph", props: {}, content: [], children: [] }],
+  });
+}
 
 /** Error classes drive recovery; provider text must never become UI copy. */
 export function classifyFailure(error: unknown): RequestFailure {
@@ -32,13 +45,29 @@ export function classifyFailure(error: unknown): RequestFailure {
 }
 
 export function sameContent(left: EditableContent, right: EditableContent) {
-  return left.title === right.title && left.content === right.content;
+  return (
+    left.title === right.title &&
+    typeof left.content === typeof right.content &&
+    canonicalNoteContent(left.content) === canonicalNoteContent(right.content)
+  );
 }
 
 /** An untouched blank draft is disposable, although explicit Save may create an empty note. */
 export function hasUnsavedChanges(draft: EditableContent | null, saved: EditableContent | null) {
   if (!draft) return false;
-  return saved ? !sameContent(draft, saved) : draft.title !== "" || draft.content !== "";
+  if (saved) return !sameContent(draft, saved);
+  if (draft.title !== "") return true;
+  if (typeof draft.content === "string") return draft.content !== "";
+  const blocks = draft.content.blocks;
+  return (
+    blocks.length !== 1 ||
+    blocks[0].type !== "paragraph" ||
+    blocks[0].children.length !== 0 ||
+    blocks[0].content.length !== 0 ||
+    blocks[0].props.backgroundColor !== "default" ||
+    blocks[0].props.textColor !== "default" ||
+    blocks[0].props.textAlignment !== "left"
+  );
 }
 
 export function savingMessage(current: EditableContent, submitted: EditableContent) {

@@ -1,9 +1,8 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -17,6 +16,7 @@ import {
 import { noteContentSchema, type CreateNote } from "../../shared/notes";
 import type { Note } from "../../shared/notes";
 import { MarkdownPreview } from "./MarkdownPreview";
+import { NoteContentView } from "./NoteContentView";
 import type { NoteSnapshot, NotesStore } from "./notes-store";
 import {
   classifyFailure,
@@ -24,6 +24,7 @@ import {
   hasUnsavedChanges,
   savingMessage,
   sameContent,
+  emptyNoteDocument,
   type RequestFailure,
 } from "./editor-state";
 
@@ -34,6 +35,9 @@ type Selection =
   | { kind: "replace"; snapshot: NoteSnapshot };
 type ReadFailure = { id: string; compare: boolean; kind: RequestFailure };
 type SaveState = "idle" | "saving" | RequestFailure;
+const BlockNoteEditor = lazy(() =>
+  import("./BlockNoteEditor").then((module) => ({ default: module.BlockNoteEditor })),
+);
 
 export function NotesWorkspace({
   store,
@@ -48,6 +52,9 @@ export function NotesWorkspace({
   const [loadState, setLoadState] = useState<"loading" | "ready" | RequestFailure>("loading");
   const [loadAttempt, setLoadAttempt] = useState(0);
   const [draft, setDraft] = useState<Draft | null>(null);
+  const [editorKey, setEditorKey] = useState(0);
+  const [editorMode, setEditorMode] = useState<"loading" | "rich" | "source">("loading");
+  const [editorValid, setEditorValid] = useState(true);
   const [saved, setSaved] = useState<NoteSnapshot | null>(null);
   const [pendingCreation, setPendingCreation] = useState<{ key: string; input: CreateNote } | null>(
     null,
@@ -73,8 +80,9 @@ export function NotesWorkspace({
   const deleteRefreshRef = useRef<HTMLButtonElement>(null);
   const deleteCancelRef = useRef<HTMLButtonElement>(null);
   const deleteButtonRef = useRef<HTMLButtonElement>(null);
-  const dirty = hasUnsavedChanges(draft, saved?.note ?? null);
+  const dirty = !editorValid || hasUnsavedChanges(draft, saved?.note ?? null);
   const valid =
+    editorValid &&
     draft !== null &&
     noteContentSchema.safeParse({ title: draft.title, content: draft.content }).success;
   const busy =
@@ -108,6 +116,9 @@ export function NotesWorkspace({
   }, []);
 
   const applySnapshot = useCallback((snapshot: NoteSnapshot) => {
+    setEditorKey((key) => key + 1);
+    setEditorMode("loading");
+    setEditorValid(true);
     setDraft({
       title: snapshot.note.title,
       content: snapshot.note.content,
@@ -321,7 +332,10 @@ export function NotesWorkspace({
     }
     if (selection.kind === "replace") applySnapshot(selection.snapshot);
     else {
-      setDraft({ title: "", content: "", createdAt: new Date().toISOString() });
+      setEditorKey((key) => key + 1);
+      setEditorMode("loading");
+      setEditorValid(true);
+      setDraft({ title: "", content: emptyNoteDocument(), createdAt: new Date().toISOString() });
       setSaved(null);
       setPendingCreation(null);
       setSaveState("idle");
@@ -594,7 +608,7 @@ export function NotesWorkspace({
             )}
           </nav>
           {draft && (
-            <div className="note-detail">
+            <div className="note-detail" data-editor-mode={editorMode}>
               <Card>
                 <CardHeader>
                   <CardTitle>
@@ -611,16 +625,18 @@ export function NotesWorkspace({
                     disabled={openingId !== null || deleting}
                     onChange={(event) => setDraft({ ...draft, title: event.target.value })}
                   />
-                  <Label htmlFor="note-content">Markdown source</Label>
-                  <Textarea
-                    id="note-content"
-                    value={draft.content}
-                    maxLength={100_000}
-                    rows={6}
-                    className="note-source"
-                    disabled={openingId !== null || deleting}
-                    onChange={(event) => setDraft({ ...draft, content: event.target.value })}
-                  />
+                  <Suspense fallback={<p>Opening editor...</p>}>
+                    <BlockNoteEditor
+                      key={editorKey}
+                      initialContent={draft.content}
+                      disabled={openingId !== null || deleting}
+                      onChange={(content) =>
+                        setDraft((current) => (current ? { ...current, content } : current))
+                      }
+                      onModeChange={setEditorMode}
+                      onValidityChange={setEditorValid}
+                    />
+                  </Suspense>
                   {!valid && (
                     <p role="alert">
                       The text contains unsupported characters or is too long. Use up to 256
@@ -667,20 +683,22 @@ export function NotesWorkspace({
                   </div>
                 </CardContent>
               </Card>
-              <Card>
-                <CardHeader>
-                  <CardTitle>
-                    <h2>Preview</h2>
-                  </CardTitle>
-                </CardHeader>
-                <CardContent>
-                  {draft.content ? (
-                    <MarkdownPreview content={draft.content} />
-                  ) : (
-                    <p>Write Markdown to see a preview.</p>
-                  )}
-                </CardContent>
-              </Card>
+              {editorMode === "source" && typeof draft.content === "string" && (
+                <Card>
+                  <CardHeader>
+                    <CardTitle>
+                      <h2>Preview</h2>
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    {draft.content ? (
+                      <MarkdownPreview content={draft.content} />
+                    ) : (
+                      <p>Write Markdown to see a preview.</p>
+                    )}
+                  </CardContent>
+                </Card>
+              )}
               {comparison && (
                 <Card className="note-comparison">
                   <CardHeader>
@@ -690,7 +708,7 @@ export function NotesWorkspace({
                   </CardHeader>
                   <CardContent className="space-y-3">
                     <p>{comparison.note.title || "Untitled note"}</p>
-                    <MarkdownPreview content={comparison.note.content} />
+                    <NoteContentView content={comparison.note.content} />
                     <Button
                       variant="outline"
                       disabled={busy || blocked}
