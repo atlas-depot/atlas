@@ -92,7 +92,7 @@ function MarkdownNoteEditor(props: EditorProps & { source: string }) {
         maxLength={100_000}
         rows={6}
         className="note-source"
-        disabled={props.disabled}
+        readOnly={props.disabled}
         onChange={(event) => {
           setSource(event.target.value);
           props.onChange(event.target.value);
