@@ -7,6 +7,7 @@ import type { OrganizeRunState } from "./organize-runs.ts";
 const noteId = "00000000-0000-4000-8000-000000000001";
 const runId = "00000000-0000-4000-8000-000000000002";
 const ownerId = "synthetic-owner";
+const sourceTag = JSON.stringify(`${noteId}:1`);
 const endpoints = [
   ["POST", `/notes/${noteId}/organize`, "start"],
   ["GET", `/organize-runs/${runId}`, "read"],
@@ -42,10 +43,10 @@ describe("organizer HTTP boundary", () => {
     const response = await app(backend).request(`/api/notes/${noteId}/organize`, {
       method: "POST",
       body: "",
-      headers: { "Content-Length": "0" },
+      headers: { "Content-Length": "0", "If-Match": sourceTag },
     });
     expect(response.status).toBe(202);
-    expect(backend.start).toHaveBeenCalledWith(ownerId, noteId);
+    expect(backend.start).toHaveBeenCalledWith(ownerId, noteId, sourceTag);
   });
 
   it("rejects and cancels a chunked payload without waiting for its end", async () => {
@@ -83,21 +84,32 @@ describe("organizer HTTP boundary", () => {
 
   it.each(endpoints)("requires authentication for %s %s", async (method, path) => {
     const backend = service();
-    const response = await app(backend, false).request(`/api${path}`, { method });
+    const response = await app(backend, false).request(`/api${path}`, {
+      method,
+      headers: { "If-Match": sourceTag },
+    });
     expect(response.status).toBe(401);
     for (const operation of Object.values(backend)) expect(operation).not.toHaveBeenCalled();
     // Absence of configuration must not become an anonymous capability probe.
-    expect((await app(undefined, false).request(`/api${path}`, { method })).status).toBe(401);
+    expect(
+      (
+        await app(undefined, false).request(`/api${path}`, {
+          method,
+          headers: { "If-Match": sourceTag },
+        })
+      ).status,
+    ).toBe(401);
   });
 
   it.each(endpoints)("uses only the verified owner for %s %s", async (method, path, action) => {
     const backend = service();
     const response = await app(backend).request(`/api${path}?ownerId=forged&userId=forged`, {
       method,
-      headers: { "X-User-Id": "forged" },
+      headers: { "X-User-Id": "forged", "If-Match": sourceTag },
     });
     expect(response.status).toBe(action === "start" ? 202 : 200);
-    expect(backend[action]).toHaveBeenCalledWith(ownerId, action === "start" ? noteId : runId);
+    if (action === "start") expect(backend.start).toHaveBeenCalledWith(ownerId, noteId, sourceTag);
+    else expect(backend[action]).toHaveBeenCalledWith(ownerId, runId);
   });
 
   it.each(endpoints)("rejects malformed IDs before %s %s service access", async (method, path) => {
@@ -131,10 +143,15 @@ describe("organizer HTTP boundary", () => {
   it.each(endpoints)(
     "returns sanitized 503 when %s %s is unavailable or throws",
     async (method, path, action) => {
-      expect((await app().request(`/api${path}`, { method })).status).toBe(503);
+      expect(
+        (await app().request(`/api${path}`, { method, headers: { "If-Match": sourceTag } })).status,
+      ).toBe(503);
       const backend = service();
       backend[action].mockRejectedValue(new Error("SYNTHETIC_SECRET_PRIVATE_RUNTIME"));
-      const response = await app(backend).request(`/api${path}`, { method });
+      const response = await app(backend).request(`/api${path}`, {
+        method,
+        headers: { "If-Match": sourceTag },
+      });
       expect(response.status).toBe(503);
       expect(await response.json()).toEqual({
         error: { code: "SERVICE_UNAVAILABLE", message: "Organizer is temporarily unavailable." },
@@ -147,7 +164,10 @@ describe("organizer HTTP boundary", () => {
     async (method, path, action) => {
       const backend = service();
       backend[action].mockResolvedValue({ status: "not_found" });
-      const response = await app(backend).request(`/api${path}`, { method });
+      const response = await app(backend).request(`/api${path}`, {
+        method,
+        headers: { "If-Match": sourceTag },
+      });
       expect(response.status).toBe(404);
       expect(await response.json()).toEqual({
         error: { code: "NOT_FOUND", message: "Resource not found." },
@@ -159,10 +179,18 @@ describe("organizer HTTP boundary", () => {
     const backend = service();
     const routes = app(backend);
     expect(
-      await (await routes.request(`/api/notes/${noteId}/organize`, { method: "POST" })).json(),
+      await (
+        await routes.request(`/api/notes/${noteId}/organize`, {
+          method: "POST",
+          headers: { "If-Match": sourceTag },
+        })
+      ).json(),
     ).toEqual({ runId, status: "accepted" });
     backend.start.mockResolvedValue({ runId, status: "cleanup_pending" });
-    const response = await routes.request(`/api/notes/${noteId}/organize`, { method: "POST" });
+    const response = await routes.request(`/api/notes/${noteId}/organize`, {
+      method: "POST",
+      headers: { "If-Match": sourceTag },
+    });
     expect(response.status).toBe(202);
     expect(await response.json()).toEqual({ runId, status: "cleanup_pending" });
   });
@@ -257,7 +285,12 @@ describe("organizer HTTP boundary", () => {
     expect(await response.json()).toMatchObject({ error: { code: "SERVICE_UNAVAILABLE" } });
     backend.start.mockResolvedValue({ runId: "private-invalid-id" });
     expect(
-      (await app(backend).request(`/api/notes/${noteId}/organize`, { method: "POST" })).status,
+      (
+        await app(backend).request(`/api/notes/${noteId}/organize`, {
+          method: "POST",
+          headers: { "If-Match": sourceTag },
+        })
+      ).status,
     ).toBe(503);
   });
 

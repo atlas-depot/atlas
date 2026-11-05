@@ -1,3 +1,4 @@
+import { expectEditorContent, paragraphDocument } from "./notes-editor.ts";
 import { readFile, readdir } from "node:fs/promises";
 import { createNoteSchema, updateNoteSchema, type Note, type CreateNote } from "../shared/notes.ts";
 import { expect, test } from "@playwright/test";
@@ -10,6 +11,9 @@ const browserUser = {
 };
 
 test.beforeEach(async ({ page }) => {
+  await page.route("**/api/organize-work", (route) =>
+    route.fulfill({ json: { runs: [], drafts: [] } }),
+  );
   await page.route("**/api/auth/session", (route) =>
     route.fulfill({ json: { user: browserUser } }),
   );
@@ -99,7 +103,8 @@ test("signing out clears private note content", async ({ page }) => {
   });
   await page.setViewportSize({ width: 375, height: 812 });
   await page.goto("/");
-  await expect(page.getByRole("textbox", { name: "Markdown source" })).toHaveValue(
+  await expectEditorContent(
+    page.getByRole("textbox", { name: /^(Markdown source|Note content)$/ }),
     "Private note content",
   );
   const signOut = page.getByRole("button", { name: "Sign out", exact: true });
@@ -124,8 +129,8 @@ test("signing out keeps the dirty beforeunload guard", async ({ page }) => {
     route.fulfill({ json: privateNote, headers: { ETag: '"private-v1"' } }),
   );
   await page.goto("/");
-  const source = page.getByRole("textbox", { name: "Markdown source" });
-  await expect(source).toHaveValue("Private note content");
+  const source = page.getByRole("textbox", { name: /^(Markdown source|Note content)$/ });
+  await expectEditorContent(source, "Private note content");
   await source.fill("Keep this unsaved sign-out draft");
   const warning = page.waitForEvent("dialog");
   const signOut = page.getByRole("button", { name: "Sign out", exact: true }).click();
@@ -133,7 +138,7 @@ test("signing out keeps the dirty beforeunload guard", async ({ page }) => {
   expect(dialog.type()).toBe("beforeunload");
   await dialog.dismiss();
   await signOut.catch(() => undefined);
-  await expect(source).toHaveValue("Keep this unsaved sign-out draft");
+  await expectEditorContent(source, "Keep this unsaved sign-out draft");
 });
 
 test("an account change remounts the workspace and ignores the previous account's pending read", async ({
@@ -189,18 +194,18 @@ test("an account change remounts the workspace and ignores the previous account'
   );
 
   await page.goto("/");
-  const source = page.getByRole("textbox", { name: "Markdown source" });
-  await expect(source).toHaveValue("Alice first content");
+  const source = page.getByRole("textbox", { name: /^(Markdown source|Note content)$/ });
+  await expectEditorContent(source, "Alice first content");
   await page.getByRole("button", { name: "Alice second", exact: true }).click();
   account = "bob";
   await page.evaluate("window.dispatchEvent(new Event('focus'))");
   await expect(page.getByText("Signed in as bob@example.test")).toBeVisible();
-  await expect(source).toHaveValue("Bob content");
+  await expectEditorContent(source, "Bob content");
   await expect(page.getByRole("button", { name: "Alice second", exact: true })).toHaveCount(0);
 
   releasePendingRead();
   await expect.poll(() => previousReadFinished).toBe(true);
-  await expect(source).toHaveValue("Bob content");
+  await expectEditorContent(source, "Bob content");
   await expect(page.getByText("Signed in as bob@example.test")).toBeVisible();
 });
 
@@ -236,20 +241,20 @@ test("production editor opens and updates through actual HTTP requests with If-M
     }
     expect(route.request().method()).toBe("PUT");
     expect(route.request().headers()["if-match"]).toBe(updates === 0 ? '"http-v1"' : '"http-v2"');
-    const payload: unknown = route.request().postDataJSON();
-    expect(payload).toEqual({
+    const payload = updateNoteSchema.parse(route.request().postDataJSON());
+    expect(payload).toMatchObject({
       title: "HTTP contract",
-      content: updates === 0 ? "First HTTP edit" : "Second HTTP edit",
+      content: paragraphDocument(updates === 0 ? "First HTTP edit" : "Second HTTP edit"),
     });
     updates++;
     await route.fulfill({
-      json: { ...note, content: updates === 1 ? "First HTTP edit" : "Second HTTP edit" },
+      json: { ...note, ...payload },
       headers: { ETag: updates === 1 ? '"http-v2"' : '"http-v3"' },
     });
   });
   await page.goto("/");
-  const source = page.getByRole("textbox", { name: "Markdown source" });
-  await expect(source).toHaveValue("Individual HTTP source");
+  const source = page.getByRole("textbox", { name: /^(Markdown source|Note content)$/ });
+  await expectEditorContent(source, "Individual HTTP source");
   await expect(
     page
       .getByRole("navigation", { name: "Notes" })
@@ -305,8 +310,8 @@ test("a forbidden read does not block the current draft or another allowed note"
   );
   await page.setViewportSize({ width: 375, height: 812 });
   await page.goto("/");
-  const source = page.getByRole("textbox", { name: "Markdown source" });
-  await expect(source).toHaveValue("Original text");
+  const source = page.getByRole("textbox", { name: /^(Markdown source|Note content)$/ });
+  await expectEditorContent(source, "Original text");
   const shortButton = page.getByRole("button", { name: "A", exact: true });
   expect((await shortButton.boundingBox())?.width).toBeGreaterThanOrEqual(44);
   await page.getByRole("button", { name: "Forbidden", exact: true }).click();
@@ -317,7 +322,7 @@ test("a forbidden read does not block the current draft or another allowed note"
   await page.getByRole("button", { name: "New note", exact: true }).click();
   await page.getByRole("button", { name: "Discard changes", exact: true }).click();
   await shortButton.click();
-  await expect(source).toHaveValue("Original text");
+  await expectEditorContent(source, "Original text");
 });
 
 test("initial missing read removes the entry and gives recovery that exists", async ({ page }) => {
@@ -358,11 +363,14 @@ test("adopting a conflict version synchronizes its changed title in the sidebar"
     });
   });
   await page.goto("/");
-  await page.getByRole("textbox", { name: "Markdown source" }).fill("Local edit");
+  await page.getByRole("textbox", { name: /^(Markdown source|Note content)$/ }).fill("Local edit");
   await page.getByRole("button", { name: "Save", exact: true }).click();
   await page.getByRole("button", { name: "Compare latest" }).click();
   await page.getByRole("button", { name: "Retry opening", exact: true }).click();
-  await expect(page.getByRole("textbox", { name: "Markdown source" })).toHaveValue("Local edit");
+  await expectEditorContent(
+    page.getByRole("textbox", { name: /^(Markdown source|Note content)$/ }),
+    "Local edit",
+  );
   await expect(page.getByRole("alertdialog")).toHaveCount(0);
   await page.getByRole("button", { name: "Use latest version" }).click();
   await page.getByRole("button", { name: "Discard changes", exact: true }).click();
@@ -397,7 +405,9 @@ for (const operation of ["list", "read", "save"] as const) {
     });
     await page.goto("/");
     if (operation === "save") {
-      await page.getByRole("textbox", { name: "Markdown source" }).fill("Preserve stalled edit");
+      await page
+        .getByRole("textbox", { name: /^(Markdown source|Note content)$/ })
+        .fill("Preserve stalled edit");
       await page.getByRole("button", { name: "Save", exact: true }).click();
     }
     await expect.poll(() => stalled).toBe(true);
@@ -413,7 +423,8 @@ for (const operation of ["list", "read", "save"] as const) {
       await expect(page.getByRole("button", { name: "Retry loading" })).toBeEnabled();
     else await expect(page.getByRole("button", { name: "New note", exact: true })).toBeEnabled();
     if (operation === "save")
-      await expect(page.getByRole("textbox", { name: "Markdown source" })).toHaveValue(
+      await expectEditorContent(
+        page.getByRole("textbox", { name: /^(Markdown source|Note content)$/ }),
         "Preserve stalled edit",
       );
   });
@@ -433,18 +444,18 @@ test("a missing different note preserves the current draft and offers only appli
     route.fulfill({ status: 404, json: { error: { code: "NOT_FOUND", message: "Missing" } } }),
   );
   await page.goto("/");
-  const source = page.getByRole("textbox", { name: "Markdown source" });
-  await expect(source).toHaveValue("Original text");
+  const source = page.getByRole("textbox", { name: /^(Markdown source|Note content)$/ });
+  await expectEditorContent(source, "Original text");
   await page.getByRole("button", { name: "Deleted elsewhere", exact: true }).click();
   await expect(page.getByRole("alert")).toContainText("Your current text is unchanged.");
-  await expect(source).toHaveValue("Original text");
+  await expectEditorContent(source, "Original text");
   await expect(page.getByRole("button", { name: "Deleted elsewhere", exact: true })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Keep as new note", exact: true })).toHaveCount(0);
   await source.fill("Edit the still-existing note");
   await expect(page.getByRole("button", { name: "Save", exact: true })).toBeEnabled();
   await page.getByRole("button", { name: "New note", exact: true }).click();
   await page.getByRole("button", { name: "Keep editing" }).click();
-  await expect(source).toHaveValue("Edit the still-existing note");
+  await expectEditorContent(source, "Edit the still-existing note");
 });
 
 test("a forbidden list describes loading access rather than a save failure", async ({ page }) => {
@@ -481,8 +492,8 @@ test("retrying a failed different-note read requires confirmation before replaci
       : route.fulfill({ json: other, headers: { ETag: '"b1"' } });
   });
   await page.goto("/");
-  const source = page.getByRole("textbox", { name: "Markdown source" });
-  await expect(source).toHaveValue("Original text");
+  const source = page.getByRole("textbox", { name: /^(Markdown source|Note content)$/ });
+  await expectEditorContent(source, "Original text");
   await page.getByRole("button", { name: "B", exact: true }).click();
   await expect(page.getByRole("alert")).toContainText("Could not open note");
   await source.fill("Unsaved A must survive");
@@ -491,11 +502,11 @@ test("retrying a failed different-note read requires confirmation before replaci
   await expect(page.getByRole("alertdialog")).toBeVisible();
   expect(otherReads).toBe(1);
   await page.getByRole("button", { name: "Keep editing", exact: true }).click();
-  await expect(source).toHaveValue("Unsaved A must survive");
+  await expectEditorContent(source, "Unsaved A must survive");
   await expect(page.getByRole("textbox", { name: "Title", exact: true })).toHaveValue("A");
   await page.getByRole("button", { name: "Retry opening", exact: true }).click();
   await page.getByRole("button", { name: "Discard changes", exact: true }).click();
-  await expect(source).toHaveValue("Original B");
+  await expectEditorContent(source, "Original B");
   expect(otherReads).toBe(2);
 });
 
@@ -548,15 +559,15 @@ test("a 401 delete blocks writes, keeps the draft and offers sign-in", async ({ 
       : route.fulfill({ json: serverNote, headers: { ETag: '"v1"' } }),
   );
   await page.goto("/");
-  const source = page.getByRole("textbox", { name: "Markdown source" });
-  await expect(source).toHaveValue("Original text");
+  const source = page.getByRole("textbox", { name: /^(Markdown source|Note content)$/ });
+  await expectEditorContent(source, "Original text");
   await source.fill("Unsaved delete draft");
   await page.getByRole("button", { name: "Delete note", exact: true }).click();
   await page.getByRole("button", { name: "Delete permanently", exact: true }).click();
   await expect(page.getByRole("alert")).toContainText("Your session has ended.");
   await expect(page.getByRole("link", { name: "Sign in again", exact: true })).toBeFocused();
   await expect(page.getByRole("navigation", { name: "Notes" }).getByRole("button")).toHaveCount(0);
-  await expect(source).toHaveValue("Unsaved delete draft");
+  await expectEditorContent(source, "Unsaved delete draft");
   await expect(page.getByRole("button", { name: "Save", exact: true })).toBeDisabled();
 });
 
@@ -586,21 +597,21 @@ test("delete sends the current ETag and selects the next, previous, or empty sta
   }
 
   await page.goto("/");
-  const source = page.getByRole("textbox", { name: "Markdown source" });
-  await expect(source).toHaveValue("First content");
+  const source = page.getByRole("textbox", { name: /^(Markdown source|Note content)$/ });
+  await expectEditorContent(source, "First content");
   await page.getByRole("button", { name: "Delete note", exact: true }).click();
   await expect(page.getByRole("alertdialog")).toContainText('"A"');
   await page.getByRole("button", { name: "Delete permanently", exact: true }).click();
   await expect(page.getByRole("textbox", { name: "Title", exact: true })).toHaveValue("B");
-  await expect(source).toHaveValue("Second content");
+  await expectEditorContent(source, "Second content");
   await expect(page.getByRole("button", { name: "A", exact: true })).toHaveCount(0);
 
   await page.getByRole("button", { name: "C", exact: true }).click();
-  await expect(source).toHaveValue("Third content");
+  await expectEditorContent(source, "Third content");
   await page.getByRole("button", { name: "Delete note", exact: true }).click();
   await page.getByRole("button", { name: "Delete permanently", exact: true }).click();
   await expect(page.getByRole("textbox", { name: "Title", exact: true })).toHaveValue("B");
-  await expect(source).toHaveValue("Second content");
+  await expectEditorContent(source, "Second content");
   await expect(page.getByRole("button", { name: "C", exact: true })).toHaveCount(0);
 
   await page.getByRole("button", { name: "Delete note", exact: true }).click();
@@ -640,15 +651,15 @@ test("a stale delete keeps the note and requires a fresh comparison and confirma
   });
 
   await page.goto("/");
-  const source = page.getByRole("textbox", { name: "Markdown source" });
-  await expect(source).toHaveValue("Original text");
+  const source = page.getByRole("textbox", { name: /^(Markdown source|Note content)$/ });
+  await expectEditorContent(source, "Original text");
   await source.fill("Local delete draft");
   await page.getByRole("button", { name: "Delete note", exact: true }).click();
   await page.getByRole("button", { name: "Delete permanently", exact: true }).click();
   await expect(page.getByRole("alert")).toContainText(
     "This note changed on the server. Nothing was deleted.",
   );
-  await expect(source).toHaveValue("Local delete draft");
+  await expectEditorContent(source, "Local delete draft");
   await expect(page.getByRole("button", { name: "A", exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "Delete note", exact: true })).toBeDisabled();
   await expect(page.getByRole("button", { name: "Save", exact: true })).toBeDisabled();
@@ -658,7 +669,7 @@ test("a stale delete keeps the note and requires a fresh comparison and confirma
   await expect(page.getByRole("button", { name: "Delete note", exact: true })).toBeDisabled();
   await page.getByRole("button", { name: "Use latest version", exact: true }).click();
   await page.getByRole("button", { name: "Discard changes", exact: true }).click();
-  await expect(source).toHaveValue("A newer server version");
+  await expectEditorContent(source, "A newer server version");
   await expect(page.getByRole("textbox", { name: "Title", exact: true })).toHaveValue("A renamed");
   await expect(page.getByRole("button", { name: "Delete note", exact: true })).toBeEnabled();
 
@@ -676,8 +687,8 @@ test("deleting an already missing note keeps the draft and offers recovery", asy
       : route.fulfill({ json: serverNote, headers: { ETag: '"v1"' } }),
   );
   await page.goto("/");
-  const source = page.getByRole("textbox", { name: "Markdown source" });
-  await expect(source).toHaveValue("Original text");
+  const source = page.getByRole("textbox", { name: /^(Markdown source|Note content)$/ });
+  await expectEditorContent(source, "Original text");
   await page.getByRole("button", { name: "Delete note", exact: true }).click();
   await page.getByRole("button", { name: "Delete permanently", exact: true }).click();
   await expect(page.getByRole("alert")).toHaveText(
@@ -685,7 +696,7 @@ test("deleting an already missing note keeps the draft and offers recovery", asy
   );
   await expect(page.getByRole("button", { name: "A", exact: true })).toHaveCount(0);
   await expect(page.getByRole("textbox", { name: "Title", exact: true })).toHaveValue("A");
-  await expect(source).toHaveValue("Original text");
+  await expectEditorContent(source, "Original text");
   await expect(page.getByRole("button", { name: "Delete note", exact: true })).toBeDisabled();
   await expect(page.getByRole("button", { name: "Refresh notes", exact: true })).toBeVisible();
   const keepAsNew = page.getByRole("button", { name: "Keep as new note", exact: true });
@@ -693,7 +704,7 @@ test("deleting an already missing note keeps the draft and offers recovery", asy
   await keepAsNew.click();
   await expect(page.getByRole("textbox", { name: "Title", exact: true })).toHaveValue("A");
   await expect(page.getByRole("textbox", { name: "Title", exact: true })).toBeFocused();
-  await expect(source).toHaveValue("Original text");
+  await expectEditorContent(source, "Original text");
   await expect(page.getByRole("button", { name: "Save", exact: true })).toBeEnabled();
 });
 
@@ -711,13 +722,13 @@ test("an unconfirmed delete preserves the draft and offers list reconciliation",
   });
   await page.goto("/");
   const title = page.getByRole("textbox", { name: "Title", exact: true });
-  const source = page.getByRole("textbox", { name: "Markdown source" });
-  await expect(source).toHaveValue("Original text");
+  const source = page.getByRole("textbox", { name: /^(Markdown source|Note content)$/ });
+  await expectEditorContent(source, "Original text");
   await source.fill("Uncertain delete draft");
   await page.getByRole("button", { name: "Delete note", exact: true }).click();
   await page.getByRole("button", { name: "Delete permanently", exact: true }).click();
   await expect(page.getByRole("alert")).toContainText("Could not confirm deletion.");
-  await expect(source).toHaveValue("Uncertain delete draft");
+  await expectEditorContent(source, "Uncertain delete draft");
   await expect(page.getByRole("button", { name: "Delete note", exact: true })).toBeDisabled();
   await expect(page.getByRole("button", { name: "Save", exact: true })).toBeDisabled();
 
@@ -726,7 +737,7 @@ test("an unconfirmed delete preserves the draft and offers list reconciliation",
   await expect(page.getByRole("alert")).toHaveText(
     "This note is no longer available. Your unsaved text is preserved. Refresh the notes list or keep your text as a new note.",
   );
-  await expect(source).toHaveValue("Uncertain delete draft");
+  await expectEditorContent(source, "Uncertain delete draft");
   await expect(page.getByRole("button", { name: "Delete note", exact: true })).toBeDisabled();
   await expect(page.getByRole("button", { name: "Keep as new note", exact: true })).toBeVisible();
   await expect(title).toBeFocused();
@@ -750,8 +761,8 @@ test("a 401 list refresh overrides a stale read failure and blocks writes", asyn
     route.fulfill({ status: 404, json: { error: { code: "NOT_FOUND", message: "Missing" } } }),
   );
   await page.goto("/");
-  const source = page.getByRole("textbox", { name: "Markdown source" });
-  await expect(source).toHaveValue("Original text");
+  const source = page.getByRole("textbox", { name: /^(Markdown source|Note content)$/ });
+  await expectEditorContent(source, "Original text");
   await page.getByRole("button", { name: "B", exact: true }).click();
   await expect(page.getByRole("alert")).toContainText("This note is no longer available");
   await source.fill("Unsaved A must survive");
@@ -762,7 +773,7 @@ test("a 401 list refresh overrides a stale read failure and blocks writes", asyn
   await expect(page.getByRole("button", { name: "Save", exact: true })).toBeDisabled();
   await expect(page.getByRole("button", { name: "Refresh notes", exact: true })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Retry opening", exact: true })).toHaveCount(0);
-  await expect(source).toHaveValue("Unsaved A must survive");
+  await expectEditorContent(source, "Unsaved A must survive");
 });
 
 test("session revalidation blocks private requests until the account is confirmed", async ({
@@ -800,7 +811,7 @@ test("session revalidation blocks private requests until the account is confirme
   });
   await page.goto("/");
   await page.getByRole("button", { name: "New note", exact: true }).click();
-  const source = page.getByRole("textbox", { name: "Markdown source" });
+  const source = page.getByRole("textbox", { name: /^(Markdown source|Note content)$/ });
   await source.fill("Alice private draft");
   await page.keyboard.press("ControlOrMeta+s");
   await expect(page.getByRole("alert")).toContainText("Could not confirm creation");
@@ -812,7 +823,7 @@ test("session revalidation blocks private requests until the account is confirme
   const save = page.getByRole("button", { name: "Save", exact: true });
   await expect(save).toBeDisabled();
   await page.keyboard.press("ControlOrMeta+s");
-  await expect(source).toHaveValue("Alice private draft");
+  await expectEditorContent(source, "Alice private draft");
   expect(privateRequests).toBe(0);
   releaseSession();
   await expect(page.getByText("Signed in as bob@example.test")).toBeVisible();
@@ -853,20 +864,20 @@ test("failed session revalidation preserves a mobile draft and blocks writes unt
   });
   await page.goto("/");
   await page.getByRole("button", { name: "New note", exact: true }).click();
-  const source = page.getByRole("textbox", { name: "Markdown source" });
+  const source = page.getByRole("textbox", { name: /^(Markdown source|Note content)$/ });
   await source.fill("Keep my draft while offline");
   sessionFails = true;
   await page.evaluate("window.dispatchEvent(new Event('focus'))");
   const retry = page.getByRole("button", { name: "Retry session check" });
   await expect(retry).toBeVisible();
-  await expect(source).toHaveValue("Keep my draft while offline");
+  await expectEditorContent(source, "Keep my draft while offline");
   await expect(page.getByRole("button", { name: "Save", exact: true })).toBeDisabled();
   await page.keyboard.press("ControlOrMeta+s");
   expect(creates).toBe(0);
   sessionFails = false;
   await retry.click();
   await expect(page.getByRole("button", { name: "Save", exact: true })).toBeEnabled();
-  await expect(source).toHaveValue("Keep my draft while offline");
+  await expectEditorContent(source, "Keep my draft while offline");
   await page.keyboard.press("ControlOrMeta+s");
   await expect(page.getByRole("status")).toHaveText("Saved");
   expect(creates).toBe(1);
@@ -924,7 +935,7 @@ for (const failFirstUpdate of [false, true]) {
     });
     await page.goto("/");
     await page.getByRole("button", { name: "New note", exact: true }).click();
-    const source = page.getByRole("textbox", { name: "Markdown source" });
+    const source = page.getByRole("textbox", { name: /^(Markdown source|Note content)$/ });
     await source.fill("Original submitted text");
     await page.getByRole("button", { name: "Save", exact: true }).click();
     await expect(page.getByRole("alert")).toContainText("Could not confirm creation");
@@ -935,9 +946,11 @@ for (const failFirstUpdate of [false, true]) {
     releaseReplay();
     if (failFirstUpdate) await expect(page.getByRole("alert")).toContainText("Save failed");
     else await expect(page.getByRole("status")).toHaveText("Unsaved changes");
-    await expect(source).toHaveValue("Even newer text during replay");
+    await expectEditorContent(source, "Even newer text during replay");
     expect(committed).toMatchObject({
-      content: failFirstUpdate ? "Original submitted text" : "New text before retry",
+      content: paragraphDocument(
+        failFirstUpdate ? "Original submitted text" : "New text before retry",
+      ),
     });
     expect(putCount).toBe(1);
     await page.keyboard.press("ControlOrMeta+s");
@@ -945,7 +958,7 @@ for (const failFirstUpdate of [false, true]) {
     expect(postCount).toBe(2);
     expect(putCount).toBe(2);
     await page.reload();
-    await expect(source).toHaveValue("Even newer text during replay");
+    await expectEditorContent(source, "Even newer text during replay");
   });
 }
 
@@ -963,14 +976,14 @@ test("creation replay conflict retains text and blocks a fresh creation key", as
   });
   await page.goto("/");
   await page.getByRole("button", { name: "New note", exact: true }).click();
-  const source = page.getByRole("textbox", { name: "Markdown source" });
+  const source = page.getByRole("textbox", { name: /^(Markdown source|Note content)$/ });
   await source.fill("Preserve this draft");
   await page.keyboard.press("ControlOrMeta+s");
   await expect(page.getByRole("alert")).toContainText("Could not confirm creation");
   await source.fill("Preserve the newer draft too");
   await page.keyboard.press("ControlOrMeta+s");
   await expect(page.getByRole("alert")).toContainText("Could not reconcile this creation");
-  await expect(source).toHaveValue("Preserve the newer draft too");
+  await expectEditorContent(source, "Preserve the newer draft too");
   await expect(page.getByRole("button", { name: "Save", exact: true })).toBeDisabled();
   await page.keyboard.press("ControlOrMeta+s");
   await page.getByRole("button", { name: "Refresh notes", exact: true }).click();
@@ -996,10 +1009,10 @@ test("unsupported text stays recoverable on mobile while normal Unicode can be s
   });
   await page.goto("/");
   await page.getByRole("button", { name: "New note", exact: true }).click();
-  const source = page.getByRole("textbox", { name: "Markdown source" });
+  const source = page.getByRole("textbox", { name: /^(Markdown source|Note content)$/ });
   const unsupported = "Keep this\u0000draft";
   await source.fill(unsupported);
-  await expect(source).toHaveValue(unsupported);
+  await expectEditorContent(source, unsupported);
   await expect(page.getByRole("alert")).toContainText("unsupported characters");
   const save = page.getByRole("button", { name: "Save", exact: true });
   await expect(save).toBeDisabled();
@@ -1015,6 +1028,80 @@ test("unsupported text stays recoverable on mobile while normal Unicode can be s
   await expect(save).toBeEnabled();
   await page.keyboard.press("ControlOrMeta+s");
   await expect(page.getByRole("status")).toHaveText("Saved");
-  await expect(source).toHaveValue(valid);
+  await expectEditorContent(source, valid);
   expect(creates).toBe(1);
+});
+
+test("opening and undo preserve the original Markdown until an actual edit is saved", async ({
+  page,
+}, testInfo) => {
+  let note: Note = { ...serverNote, content: "Original text\n\n" };
+  let writes = 0;
+  await page.route("**/api/notes", (route) => route.fulfill({ json: { notes: [note] } }));
+  await page.route(`**/api/notes/${firstId}`, (route) => {
+    if (route.request().method() === "PUT") {
+      note = { ...note, ...updateNoteSchema.parse(route.request().postDataJSON()) };
+      writes++;
+    }
+    return route.fulfill({ json: note, headers: { ETag: `"v${writes}"` } });
+  });
+  await page.goto("/");
+  const editor = page.getByRole("textbox", { name: "Note content", exact: true });
+  const save = page.getByRole("button", { name: "Save", exact: true });
+  await expectEditorContent(editor, "Original text");
+  await editor.click();
+  await page.keyboard.press("ControlOrMeta+z");
+  await expectEditorContent(editor, "Original text");
+  await expect(save).toBeDisabled();
+  await page.keyboard.press("End");
+  await page.keyboard.type(" edited");
+  await expect(save).toBeEnabled();
+  await page.keyboard.press("ControlOrMeta+z");
+  await expectEditorContent(editor, "Original text");
+  await expect(save).toBeDisabled();
+  await page.getByRole("textbox", { name: "Title", exact: true }).fill("Renamed only");
+  await save.click();
+  await expect(page.getByRole("status")).toHaveText("Saved");
+  expect(note.content).toBe("Original text\n\n");
+  await editor.fill("Edited in blocks");
+  await save.click();
+  await expect(page.getByRole("status")).toHaveText("Saved");
+  expect(note.content).toEqual(paragraphDocument("Edited in blocks"));
+  await page.reload();
+  await expectEditorContent(editor, "Edited in blocks");
+  await expect(save).toBeDisabled();
+  for (const width of [1440, 375, 320]) {
+    await page.setViewportSize({ width, height: 900 });
+    expect(await page.evaluate("document.documentElement.scrollWidth <= window.innerWidth")).toBe(
+      true,
+    );
+    await expect(page.getByRole("heading", { name: "Preview", exact: true })).toHaveCount(0);
+    await page.screenshot({
+      path: testInfo.outputPath(`block-editor-${width}.png`),
+      fullPage: true,
+    });
+  }
+});
+
+test("legacy import preserves remote media and raw HTML as inert source", async ({ page }) => {
+  const content =
+    '# Legacy\n\n![remote](https://untrusted.example.test/tracker.png)\n\n<script>window.atlasInjected = true</script>\n\n<div onclick="alert(1)">Custom HTML</div>';
+  const note = { ...serverNote, content };
+  let remoteRequests = 0;
+  await page.route("https://untrusted.example.test/**", (route) => {
+    remoteRequests++;
+    return route.abort();
+  });
+  await page.route("**/api/notes", (route) => route.fulfill({ json: { notes: [note] } }));
+  await page.route(`**/api/notes/${firstId}`, (route) =>
+    route.fulfill({ json: note, headers: { ETag: '"legacy"' } }),
+  );
+  await page.goto("/");
+  await expect(page.getByRole("textbox", { name: "Markdown source", exact: true })).toHaveValue(
+    content,
+  );
+  await expect(page.getByRole("button", { name: "Save", exact: true })).toBeDisabled();
+  expect(remoteRequests).toBe(0);
+  expect(await page.evaluate("window.atlasInjected")).toBeUndefined();
+  await expect(page.locator(".markdown-preview img, .markdown-preview script")).toHaveCount(0);
 });

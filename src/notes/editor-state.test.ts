@@ -1,8 +1,39 @@
 import { describe, expect, it } from "vite-plus/test";
-import { classifyFailure, failureMessage, hasUnsavedChanges, savingMessage } from "./editor-state";
+import {
+  classifyFailure,
+  emptyNoteDocument,
+  failureMessage,
+  hasUnsavedChanges,
+  sameContent,
+  savingMessage,
+} from "./editor-state";
 import { NotesRequestError } from "./notes-store";
 
 describe("editor recovery and save state", () => {
+  it("recognizes blank structured drafts but preserves formatting and block edits", () => {
+    const content = emptyNoteDocument();
+    expect(hasUnsavedChanges({ title: "", content }, null)).toBe(false);
+    const formatted = structuredClone(content);
+    if (formatted.blocks[0].type !== "paragraph") throw new Error("Expected paragraph");
+    formatted.blocks[0].props.backgroundColor = "red";
+    expect(hasUnsavedChanges({ title: "", content: formatted }, null)).toBe(true);
+    const extraBlock = structuredClone(content);
+    extraBlock.blocks.push({ ...extraBlock.blocks[0], id: "second" });
+    expect(hasUnsavedChanges({ title: "", content: extraBlock }, null)).toBe(true);
+  });
+  it("compares document values, while preserving format and stable block identity", () => {
+    const content = emptyNoteDocument();
+    const copy = {
+      blocks: content.blocks,
+      schemaVersion: content.schemaVersion,
+      format: content.format,
+    };
+    expect(sameContent({ title: "", content }, { title: "", content: copy })).toBe(true);
+    expect(sameContent({ title: "", content }, { title: "", content: "" })).toBe(false);
+    expect(sameContent({ title: "", content }, { title: "", content: emptyNoteDocument() })).toBe(
+      false,
+    );
+  });
   it.each([
     [401, "unauthenticated"],
     [403, "forbidden"],
