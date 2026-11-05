@@ -16,6 +16,7 @@ export function OrganizeWorkspace({
   canStart,
   prepareSource,
   onSaved,
+  onCheckNotes,
   client,
 }: {
   client: OrganizeClient;
@@ -25,6 +26,7 @@ export function OrganizeWorkspace({
   canStart: boolean;
   prepareSource: () => Promise<NoteSnapshot | undefined>;
   onSaved: (note: NoteSnapshot) => void;
+  onCheckNotes: () => Promise<void>;
 }) {
   const [runs, setRuns] = useState<Run[]>([]);
   const [drafts, setDrafts] = useState<NoteDraft[]>([]);
@@ -34,6 +36,7 @@ export function OrganizeWorkspace({
   const [starting, setStarting] = useState(false);
   const startingRef = useRef(false);
   const finishedDrafts = useRef(new Set<string>());
+  const finishedRuns = useRef(new Set<string>());
   const alive = useRef(true);
   const enabledRef = useRef(enabled);
   useEffect(() => {
@@ -51,7 +54,15 @@ export function OrganizeWorkspace({
     try {
       const result = await client.list();
       if (!alive.current) return;
-      setRuns(result.runs);
+      // Recovery is a snapshot, not authority to erase newer local handles.
+      setRuns((current) => [
+        ...current,
+        ...result.runs.filter(
+          (run) =>
+            !finishedRuns.current.has(run.runId) &&
+            !current.some((item) => item.runId === run.runId),
+        ),
+      ]);
       // Missing remote records may have unsaved local edits. Keep their panels
       // until an explicit save/discard; their own reads explain expiry/deletion.
       setDrafts((current) => [
@@ -82,11 +93,13 @@ export function OrganizeWorkspace({
       const snapshot = await prepareSource();
       if (!snapshot || !alive.current || !enabledRef.current) return;
       const result = await client.start(snapshot.note.id, snapshot.etag);
-      if (alive.current)
+      if (alive.current) {
+        finishedRuns.current.delete(result.runId);
         setRuns((current) => [
           ...current.filter((run) => run.runId !== result.runId),
           { runId: result.runId, noteId: snapshot.note.id },
         ]);
+      }
     } catch (cause) {
       if (!alive.current) return;
       if (cause instanceof NotesRequestError && cause.status === 412)
@@ -111,6 +124,7 @@ export function OrganizeWorkspace({
   }
 
   const receiveDraft = useCallback((runId: string, draft: NoteDraft) => {
+    finishedRuns.current.add(runId);
     setRuns((current) => current.filter((run) => run.runId !== runId));
     if (!finishedDrafts.current.has(draft.id))
       setDrafts((current) => [...current.filter((item) => item.id !== draft.id), draft]);
@@ -154,12 +168,16 @@ export function OrganizeWorkspace({
           onRetry={
             source?.note.id === run.noteId && canStart
               ? () => {
+                  finishedRuns.current.add(run.runId);
                   setRuns((current) => current.filter((item) => item.runId !== run.runId));
                   void start();
                 }
               : undefined
           }
-          onDismiss={() => setRuns((current) => current.filter((item) => item.runId !== run.runId))}
+          onDismiss={() => {
+            finishedRuns.current.add(run.runId);
+            setRuns((current) => current.filter((item) => item.runId !== run.runId));
+          }}
         />
       ))}
       <div className="ai-draft-list">
@@ -169,6 +187,12 @@ export function OrganizeWorkspace({
             initial={draft}
             client={client}
             enabled={enabled}
+            onCheckNotes={onCheckNotes}
+            onClosed={() => {
+              finishedDrafts.current.add(draft.id);
+              setDrafts((current) => current.filter((item) => item.id !== draft.id));
+              setNotice("AI draft panel closed. Saved notes were not changed.");
+            }}
             onSaved={(note) => {
               finishedDrafts.current.add(draft.id);
               setDrafts((current) => current.filter((item) => item.id !== draft.id));

@@ -29,12 +29,16 @@ export function AIDraftPanel({
   enabled,
   onSaved,
   onDiscarded,
+  onClosed,
+  onCheckNotes,
 }: {
   initial: NoteDraft;
   client: OrganizeClient;
   enabled: boolean;
   onSaved: (note: NoteSnapshot) => void;
   onDiscarded: () => void;
+  onClosed: () => void;
+  onCheckNotes: () => Promise<void>;
 }) {
   const [remote, setRemote] = useState(initial);
   const [content, setContent] = useState<UpdateNote>({
@@ -46,8 +50,10 @@ export function AIDraftPanel({
   const [saving, setSaving] = useState(false);
   const [savePending, setSavePending] = useState(false);
   const [action, setAction] = useState<"save" | "discard" | null>(null);
-  const [error, setError] = useState<"conflict" | "missing" | "failed" | null>(null);
-  const [confirm, setConfirm] = useState<"discard" | "reload" | null>(null);
+  const [error, setError] = useState<"conflict" | "missing" | "failed" | "save-conflict" | null>(
+    null,
+  );
+  const [confirm, setConfirm] = useState<"discard" | "reload" | "close" | null>(null);
   const [editorKey, setEditorKey] = useState(0);
   const current = useRef(content);
   const latest = useRef(remote);
@@ -239,10 +245,16 @@ export function AIDraftPanel({
         if (alive.current) onDiscarded();
       }
     } catch (cause) {
+      if (kind === "save" && cause instanceof NotesRequestError && cause.status === 409) {
+        // The receipt may already refer to a created note that changed or was
+        // deleted. Keep the exact attempt, never fall back to draft autosave.
+        if (alive.current) setError("save-conflict");
+        return;
+      }
       if (
         kind === "save" &&
         cause instanceof NotesRequestError &&
-        [400, 404, 409, 412, 422, 428].includes(cause.status)
+        [400, 404, 412, 422, 428].includes(cause.status)
       ) {
         pendingSave.current = null;
         if (alive.current) setSavePending(false);
@@ -302,11 +314,13 @@ export function AIDraftPanel({
         <span role="status" className="text-sm text-muted-foreground">
           {action === "save"
             ? "Saving as a new note..."
-            : saving
-              ? "Saving draft..."
-              : dirty
-                ? "Draft changes not saved"
-                : "Draft saved"}
+            : savePending
+              ? "Save not confirmed"
+              : saving
+                ? "Saving draft..."
+                : dirty
+                  ? "Draft changes not saved"
+                  : "Draft saved"}
         </span>
         <div className="flex flex-wrap gap-3">
           <Button
@@ -315,13 +329,19 @@ export function AIDraftPanel({
           >
             Save as new note
           </Button>
-          <Button
-            variant="outline"
-            disabled={disabled || savePending}
-            onClick={() => setConfirm("discard")}
-          >
-            Discard draft
-          </Button>
+          {error === "save-conflict" ? (
+            <Button variant="outline" disabled={disabled} onClick={() => setConfirm("close")}>
+              Close panel
+            </Button>
+          ) : (
+            <Button
+              variant="outline"
+              disabled={disabled || savePending}
+              onClick={() => setConfirm("discard")}
+            >
+              Discard draft
+            </Button>
+          )}
         </div>
       </header>
       <p className="text-sm text-muted-foreground">
@@ -338,15 +358,21 @@ export function AIDraftPanel({
       {error && (
         <div className="space-y-2">
           <p role="alert">
-            {error === "conflict"
-              ? "This draft changed elsewhere. Your edits are preserved."
-              : error === "missing"
-                ? "This draft expired or was removed. Your text is still here; copy it before leaving."
-                : savePending
-                  ? "Could not confirm the new note was saved. Retry to recover the same note."
-                  : "Could not save the draft. Your edits are preserved."}
+            {error === "save-conflict"
+              ? "This draft may already have been saved. The saved note may have changed or been deleted. Check your notes before closing this panel. Your text is still here."
+              : error === "conflict"
+                ? "This draft changed elsewhere. Your edits are preserved."
+                : error === "missing"
+                  ? "This draft expired or was removed. Your text is still here; copy it before leaving."
+                  : savePending
+                    ? "Could not confirm the new note was saved. Retry to recover the same note."
+                    : "Could not save the draft. Your edits are preserved."}
           </p>
-          {error === "conflict" ? (
+          {error === "save-conflict" ? (
+            <Button variant="outline" disabled={disabled} onClick={() => void onCheckNotes()}>
+              Check saved notes
+            </Button>
+          ) : error === "conflict" ? (
             <Button variant="outline" disabled={disabled} onClick={() => setConfirm("reload")}>
               Reload saved draft
             </Button>
@@ -412,21 +438,36 @@ export function AIDraftPanel({
         <AlertDialogContent className="notes-dialog">
           <AlertDialogHeader>
             <AlertDialogTitle>
-              {confirm === "reload" ? "Replace local draft edits?" : "Discard AI draft?"}
+              {confirm === "close"
+                ? "Close this draft panel?"
+                : confirm === "reload"
+                  ? "Replace local draft edits?"
+                  : "Discard AI draft?"}
             </AlertDialogTitle>
             <AlertDialogDescription>
-              {confirm === "reload"
-                ? "Reloading replaces your local edits with the saved draft."
-                : "This removes the generated draft and your edits. Your original note stays unchanged."}
+              {confirm === "close"
+                ? "This closes your local copy and ends save recovery. Copy any text you need first. Saved notes will not be changed."
+                : confirm === "reload"
+                  ? "Reloading replaces your local edits with the saved draft."
+                  : "This removes the generated draft and your edits. Your original note stays unchanged."}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Keep editing</AlertDialogCancel>
+            <AlertDialogCancel>
+              {confirm === "close" ? "Keep panel open" : "Keep editing"}
+            </AlertDialogCancel>
             <AlertDialogAction
               variant="destructive"
-              onClick={() => void (confirm === "reload" ? reload() : finish("discard"))}
+              onClick={() => {
+                if (confirm === "close") onClosed();
+                else void (confirm === "reload" ? reload() : finish("discard"));
+              }}
             >
-              {confirm === "reload" ? "Reload draft" : "Discard permanently"}
+              {confirm === "close"
+                ? "Close panel"
+                : confirm === "reload"
+                  ? "Reload draft"
+                  : "Discard permanently"}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
