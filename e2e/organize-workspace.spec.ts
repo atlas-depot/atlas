@@ -768,10 +768,7 @@ for (const settled of [false, true]) {
     releaseList?.();
     await (await received).finished();
     await page.evaluate(
-      () =>
-        new Promise<void>((resolve) => {
-          requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
-        }),
+      "new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))",
     );
     if (settled) {
       await expect(progress).toHaveCount(0);
