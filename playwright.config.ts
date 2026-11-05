@@ -21,13 +21,20 @@ export default defineConfig({
       testIgnore: [
         "**/notes-production.spec.ts",
         "**/notes-api.spec.ts",
+        "**/editor-controls.spec.ts",
+        "**/code-paste.spec.ts",
         "**/organize-workspace.spec.ts",
       ],
       use: { ...devices["Desktop Chrome"] },
     },
     {
       name: "production",
-      testMatch: ["**/notes-production.spec.ts", "**/organize-workspace.spec.ts"],
+      testMatch: [
+        "**/notes-production.spec.ts",
+        "**/organize-workspace.spec.ts",
+        "**/editor-controls.spec.ts",
+        "**/code-paste.spec.ts",
+      ],
       use: { ...devices["Desktop Chrome"], baseURL: "http://127.0.0.1:4178" },
     },
   ],

@@ -1,0 +1,102 @@
+.note-code-block {
+  position: relative;
+  width: 100%;
+}
+.note-code-block code {
+  display: block;
+  min-height: 1lh;
+}
+.code-language-picker {
+  position: absolute;
+  top: 8px;
+  left: 12px;
+}
+.code-language-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 28px;
+  padding: 2px 8px;
+  border: 0;
+  border-radius: 4px;
+  color: #bac2de;
+  background: transparent;
+  font:
+    12px Inter,
+    sans-serif;
+  cursor: pointer;
+}
+.code-language-trigger:hover {
+  background: #313244;
+  color: #cdd6f4;
+}
+.code-language-trigger:focus-visible {
+  outline: 2px solid #cba6f7;
+  outline-offset: 2px;
+}
+.code-language-positioner {
+  z-index: 60;
+  max-width: calc(100vw - 24px);
+}
+.code-language-popup {
+  width: min(280px, calc(100vw - 24px));
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--popover);
+  color: var(--popover-foreground);
+  box-shadow: 0 8px 30px #2824291a;
+  font:
+    13px Inter,
+    sans-serif;
+  overflow: hidden;
+}
+.code-language-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+  color: var(--muted-foreground);
+}
+.code-language-search input {
+  width: 100%;
+  min-width: 0;
+  background: transparent;
+  border: 0;
+  outline: 0;
+  color: var(--foreground);
+  font: inherit;
+}
+.code-language-list {
+  max-height: min(300px, var(--available-height));
+  overflow-y: auto;
+  padding: 4px;
+  overscroll-behavior: contain;
+}
+.code-language-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 32px;
+  padding: 6px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+.code-language-item[data-highlighted] {
+  background: var(--accent);
+  color: var(--accent-foreground);
+}
+.code-language-empty {
+  padding: 12px;
+  color: var(--muted-foreground);
+}
+.code-language-empty:empty {
+  display: none;
+}
+@media (max-width: 600px) {
+  .code-language-trigger,
+  .code-language-item {
+    min-height: 36px;
+  }
+}

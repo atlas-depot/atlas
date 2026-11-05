@@ -1,5 +1,11 @@
 import { useEffect, useRef, useState } from "react";
-import { BlockNoteSchema, defaultBlockSpecs } from "@blocknote/core";
+import { ArrowUUpLeftIcon } from "@phosphor-icons/react/dist/csr/ArrowUUpLeft";
+import { ArrowUUpRightIcon } from "@phosphor-icons/react/dist/csr/ArrowUUpRight";
+import { Button } from "@/components/ui/button";
+import { noteSchema as schema } from "./editor-schema";
+import { noteSyntaxHighlighting } from "./code-theme";
+import { createCodePasteHandler } from "./code-detection";
+import { AtlasEditorControls, atlasShadcnComponents } from "./editor-controls";
 import { useCreateBlockNote } from "@blocknote/react";
 import { BlockNoteView } from "@blocknote/shadcn";
 import { Label } from "@/components/ui/label";
@@ -14,32 +20,6 @@ import {
 import "@blocknote/shadcn/style.css";
 import "./block-editor.css";
 
-// The document contract intentionally has no media/upload blocks. In particular,
-// opening a note must not fetch an arbitrary image supplied by its contents.
-const {
-  paragraph,
-  heading,
-  bulletListItem,
-  numberedListItem,
-  checkListItem,
-  quote,
-  codeBlock,
-  divider,
-  table,
-} = defaultBlockSpecs;
-const schema = BlockNoteSchema.create({
-  blockSpecs: {
-    paragraph,
-    heading,
-    bulletListItem,
-    numberedListItem,
-    checkListItem,
-    quote,
-    codeBlock,
-    divider,
-    table,
-  },
-});
 const links = {
   isValidLink(href: string) {
     return noteLinkSchema.safeParse(href).success;
@@ -122,6 +102,8 @@ function RichDocumentEditor({
     schema,
     links,
     initialContent: document.blocks,
+    extensions: [noteSyntaxHighlighting],
+    pasteHandler: createCodePasteHandler(document.blocks),
     domAttributes: {
       editor: {
         id: "note-content",
@@ -136,8 +118,38 @@ function RichDocumentEditor({
   useEffect(() => onModeChange("rich"), [onModeChange]);
   return (
     <section className="rich-note-editor" aria-label="Note editor">
+      <div className="editor-history" aria-label="Editing history">
+        <Button
+          variant="ghost"
+          size="icon"
+          aria-label="Undo"
+          title="Undo (Ctrl/Cmd+Z)"
+          disabled={disabled}
+          onClick={() => editor.undo()}
+        >
+          <ArrowUUpLeftIcon size={18} aria-hidden="true" />
+        </Button>
+        <Button
+          variant="ghost"
+          size="icon"
+          aria-label="Redo"
+          title="Redo (Ctrl/Cmd+Shift+Z)"
+          disabled={disabled}
+          onClick={() => editor.redo()}
+        >
+          <ArrowUUpRightIcon size={18} aria-hidden="true" />
+        </Button>
+      </div>
       <BlockNoteView
         editor={editor}
+        shadCNComponents={atlasShadcnComponents}
+        formattingToolbar={false}
+        sideMenu={false}
+        slashMenu={false}
+        linkToolbar={false}
+        emojiPicker={false}
+        tableHandles={false}
+        filePanel={false}
         theme="light"
         editable={!disabled}
         onChange={() => {
@@ -161,13 +173,18 @@ function RichDocumentEditor({
             );
           }
         }}
-      />
+      >
+        <AtlasEditorControls />
+      </BlockNoteView>
     </section>
   );
 }
 
 export function BlockNoteReader({ content }: { content: BlockNoteDocument }) {
-  const editor = useCreateBlockNote({ schema, links, initialContent: content.blocks }, [content]);
+  const editor = useCreateBlockNote(
+    { schema, links, initialContent: content.blocks, extensions: [noteSyntaxHighlighting] },
+    [content],
+  );
   return (
     <section className="rich-note-editor" aria-label="Saved note content">
       <BlockNoteView editor={editor} theme="light" editable={false} />

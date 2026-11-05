@@ -1,43 +1,129 @@
+/* The editor shares the page surface; menus retain their own floating layer. */
 .note-detail[data-editor-mode="rich"] {
   grid-template-columns: minmax(0, 1fr);
 }
-
 .rich-note-editor {
   min-width: 0;
   overflow-wrap: anywhere;
 }
-
 .rich-note-editor .bn-container {
+  --bn-colors-editor-background: var(--background);
+  --bn-colors-editor-text: var(--foreground);
   font-family: inherit;
   color: var(--foreground);
 }
-
 .rich-note-editor .bn-editor {
   min-height: 16rem;
-  padding: 1rem 2.5rem;
+  padding: 1rem 2rem 1rem 4rem;
   font-size: 1rem;
   background: transparent;
 }
-
 .rich-note-editor .bn-editor h1 {
   font-size: 1.5rem;
 }
-
 .rich-note-editor .bn-editor h2 {
   font-size: 1.25rem;
 }
-
 .rich-note-editor .bn-editor h3 {
   font-size: 1.125rem;
 }
-
 .rich-note-editor .bn-editor pre {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
-
-@media (max-width: 480px) {
+.bn-shadcn .bn-side-menu {
+  gap: 0;
+}
+.bn-shadcn .bn-side-menu .bn-button {
+  width: 26px;
+  min-width: 26px;
+  height: 28px;
+  min-height: 28px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  color: var(--muted-foreground);
+}
+.bn-shadcn .bn-side-menu .bn-button:hover {
+  background: var(--secondary);
+}
+.bn-shadcn .bn-side-menu .bn-button svg {
+  width: 14px;
+  height: 14px;
+}
+@media (max-width: 600px) {
   .rich-note-editor .bn-editor {
-    padding-inline: 1.75rem 0.5rem;
+    padding-inline: 66px 8px;
+    min-height: 8rem;
   }
+  .bn-shadcn .bn-side-menu .bn-button {
+    width: 28px;
+    min-width: 28px;
+    height: 36px;
+    min-height: 36px;
+  }
+}
+@font-face {
+  font-family: "Efe Mono";
+  src: url("/fonts/efe-mono.woff2") format("woff2");
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+}
+.bn-editor [data-content-type="codeBlock"] {
+  background: #1e1e2e;
+  color: #cdd6f4;
+  border-radius: 8px;
+}
+.bn-editor [data-content-type="codeBlock"] pre {
+  padding: 40px 20px 20px;
+  line-height: 1.65;
+  font-size: 14px;
+}
+.bn-editor [data-content-type="codeBlock"] pre,
+.bn-editor [data-content-type="codeBlock"] code {
+  font-family: "Efe Mono", ui-monospace, monospace;
+}
+.bn-editor [data-content-type="codeBlock"] select {
+  color: #a6adc8 !important;
+  opacity: 1 !important;
+}
+
+.bn-color-icon {
+  display: inline-flex;
+  width: 22px;
+  min-width: 22px;
+  height: 22px;
+  flex: 0 0 22px;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+  font-size: 14px;
+  border-radius: 4px;
+}
+.atlas-kbd {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 22px;
+  padding: 2px 5px;
+  border: 1px solid var(--border);
+  border-bottom-width: 2px;
+  border-radius: 4px;
+  background: var(--background);
+  color: var(--muted-foreground);
+  font-family: inherit;
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.bn-shadcn .bn-side-menu[data-block-type="quote"] {
+  transform: translateX(-8px);
+}
+
+.editor-history {
+  display: flex;
+  justify-content: flex-end;
+  gap: 2px;
 }
