@@ -301,6 +301,21 @@ export function AIDraftPanel({
                 ? "Draft changes not saved"
                 : "Draft saved"}
         </span>
+        <div className="flex flex-wrap gap-3">
+          <Button
+            disabled={disabled || !valid || error !== null}
+            onClick={() => void finish("save")}
+          >
+            Save as new note
+          </Button>
+          <Button
+            variant="outline"
+            disabled={disabled || savePending}
+            onClick={() => setConfirm("discard")}
+          >
+            Discard draft
+          </Button>
+        </div>
       </header>
       <p className="text-sm text-muted-foreground">
         Generated from your note. Review it before saving. This draft expires{" "}
@@ -380,18 +395,6 @@ export function AIDraftPanel({
           </ul>
         </div>
       )}
-      <div className="flex flex-wrap gap-3">
-        <Button disabled={disabled || !valid || error !== null} onClick={() => void finish("save")}>
-          Save as new note
-        </Button>
-        <Button
-          variant="outline"
-          disabled={disabled || savePending}
-          onClick={() => setConfirm("discard")}
-        >
-          Discard draft
-        </Button>
-      </div>
       <AlertDialog
         open={confirm !== null}
         onOpenChange={(open) => {

@@ -247,6 +247,21 @@ test("Save & organize binds the saved revision and preserves source while draft 
     "href",
     "https://example.com/reference",
   );
+  await expect(
+    page.locator("main > header").getByRole("button", { name: "Save", exact: true }),
+  ).toBeVisible();
+  await expect(
+    panel(page).locator("header").getByRole("button", { name: "Save as new note", exact: true }),
+  ).toBeVisible();
+  const originalBox = await page
+    .getByRole("region", { name: "Original note", exact: true })
+    .boundingBox();
+  const aiBox = await panel(page).boundingBox();
+  expect(originalBox).not.toBeNull();
+  expect(aiBox).not.toBeNull();
+  if (originalBox && aiBox)
+    expect(aiBox.x).toBeGreaterThanOrEqual(originalBox.x + originalBox.width);
+  await page.screenshot({ path: testInfo.outputPath("ai-draft-desktop.png"), fullPage: true });
   await page.setViewportSize({ width: 375, height: 812 });
   expect(await page.evaluate("document.documentElement.scrollWidth <= innerWidth")).toBe(true);
   await page.screenshot({ path: testInfo.outputPath("ai-draft-mobile.png"), fullPage: true });
