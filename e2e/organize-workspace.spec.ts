@@ -67,6 +67,7 @@ async function fixture(page: Page) {
         });
       source = { ...source, ...noteContentSchema.parse(route.request().postDataJSON()) };
       sourceRevision++;
+      if (storedDraft) storedDraft.source.stale = true;
     }
     return route.fulfill({ json: source, headers: { ETag: `"source-${sourceRevision}"` } });
   });
@@ -158,13 +159,24 @@ async function fixture(page: Page) {
         json: { error: { code: "PRECONDITION_FAILED", message: "Stale revision" } },
       });
     }
-    saved ??= {
-      id: savedId,
-      ...noteContentSchema.parse(route.request().postDataJSON()),
-      createdAt: date,
-      updatedAt: date,
-      origin: { sourceNoteId: sourceId, sourceRevision, sources: storedDraft?.sources ?? [] },
-    };
+    if (!saved) {
+      if (!storedDraft)
+        return route.fulfill({
+          status: 404,
+          json: { error: { code: "NOT_FOUND", message: "Missing draft" } },
+        });
+      saved = {
+        id: savedId,
+        ...noteContentSchema.parse(route.request().postDataJSON()),
+        createdAt: date,
+        updatedAt: date,
+        origin: {
+          sourceNoteId: storedDraft.source.noteId,
+          sourceRevision: storedDraft.source.revision,
+          sources: storedDraft.sources,
+        },
+      };
+    }
     storedDraft = null;
     if (loseFinalSave) {
       loseFinalSave = false;
@@ -868,3 +880,26 @@ for (const changed of ["edited", "deleted"] as const) {
     expect(state.source.content).toBe("Original note");
   });
 }
+
+test("a source changed after handoff keeps the draft's bound origin when saved", async ({
+  page,
+}) => {
+  const state = await fixture(page);
+  await page.goto("/");
+  await page.getByRole("button", { name: "Organize", exact: true }).click();
+  await expect(draftEditor(page)).toBeVisible();
+  expect(state.draft?.source.revision).toBe(1);
+  await page.getByRole("textbox", { name: "Title", exact: true }).fill("Source edited later");
+  await page.getByRole("button", { name: "Save", exact: true }).click();
+  await expect.poll(() => state.source.title).toBe("Source edited later");
+  await page.reload();
+  await expect(panel(page)).toContainText("The source note has changed. This draft belongs to an older version.");
+  await panel(page).getByRole("button", { name: "Save as new note", exact: true }).click();
+  await expect(panel(page)).toHaveCount(0);
+  expect(state.saved?.origin).toEqual({
+    sourceNoteId: sourceId,
+    sourceRevision: 1,
+    sources: [{ id: "ref-1", title: "Reference", url: "https://example.com/reference" }],
+  });
+  expect(state.source.title).toBe("Source edited later");
+});
