@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { eq, sql } from "drizzle-orm";
 import { Pool } from "pg";
-import { afterAll, afterEach, beforeAll, expect, it } from "vite-plus/test";
+import { afterAll, afterEach, beforeAll, expect, it, vi } from "vite-plus/test";
 import { noteDraftSchema } from "../../shared/drafts.ts";
 import { noteSchema } from "../../shared/notes.ts";
 import { createApp } from "../app.ts";
@@ -9,6 +9,7 @@ import { createDurableOrganizeRuns, type DurableOrganizer } from "../organize-ru
 import { openDatabase, readTestDatabaseUrl } from "./connection.ts";
 import { applyMigrations } from "./migrations.ts";
 import { createNoteStore } from "./notes.ts";
+import { createNoteDraftStore } from "./note-drafts.ts";
 import { createOrganizeRunStore } from "./organize-runs.ts";
 import { draftSaveRequests, noteDrafts, notes, organizeRuns } from "./schema.ts";
 
@@ -409,4 +410,60 @@ it("makes expired drafts unreadable and physically purges content during mainten
   expect(await other.db.select().from(noteDrafts).where(eq(noteDrafts.id, id))).toEqual([]);
   expect((await f.request(`/organize-runs/${id}/handoff`, { method: "POST" })).status).toBe(409);
   expect(await f.sourceStore.read(f.owner, f.original.note.id)).toEqual(f.original);
+});
+
+it("recovers every unexpired owner draft and source status with one database query", async () => {
+  const owner = randomUUID();
+  const foreign = randomUUID();
+  const sourceStore = createNoteStore(connection.db);
+  const ids = new Map<string, string>();
+  for (const kind of [
+    "unchanged",
+    "changed",
+    "deleted",
+    "foreign-source",
+    "expired",
+    "foreign-draft",
+  ]) {
+    const identity = kind === "foreign-draft" ? foreign : owner;
+    const source = await sourceStore.create(identity, { ...input, title: kind });
+    const id = randomUUID();
+    ids.set(kind, id);
+    await connection.db.insert(noteDrafts).values({
+      id,
+      ownerId: identity,
+      sourceNoteId: source.note.id,
+      sourceRevision: 1,
+      title: kind,
+      content: generated.markdown,
+      sources: [],
+      updatedAt: new Date().toISOString(),
+      expiresAt: new Date(Date.now() + (kind === "expired" ? -60_000 : 60_000)).toISOString(),
+    });
+    if (kind === "changed")
+      await connection.db.update(notes).set({ revision: 2 }).where(eq(notes.id, source.note.id));
+    if (kind === "deleted") await connection.db.delete(notes).where(eq(notes.id, source.note.id));
+    // Even a dangling reference to an existing foreign note must reveal no source state.
+    if (kind === "foreign-source")
+      await connection.db
+        .update(notes)
+        .set({ ownerId: foreign, revision: 7 })
+        .where(eq(notes.id, source.note.id));
+  }
+  const query = vi.spyOn(connection.db.$client, "query");
+  try {
+    const drafts = await createNoteDraftStore(connection.db).list(owner);
+    expect(query).toHaveBeenCalledTimes(1);
+    expect(new Set(drafts.map((draft) => draft.id))).toEqual(
+      new Set(["unchanged", "changed", "deleted", "foreign-source"].map((kind) => ids.get(kind))),
+    );
+    expect(Object.fromEntries(drafts.map((draft) => [draft.title, draft.source]))).toMatchObject({
+      unchanged: { stale: false, deleted: false },
+      changed: { stale: true, deleted: false },
+      deleted: { stale: false, deleted: true },
+      "foreign-source": { stale: false, deleted: true },
+    });
+  } finally {
+    query.mockRestore();
+  }
 });
