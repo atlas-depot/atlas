@@ -343,7 +343,10 @@ test("controls and preview remain usable across laptop, tablet and narrow touch 
     "Project review",
   );
   const previewHeading = page.getByRole("heading", { name: "Preview", exact: true });
-  await expect(page.locator("#note-content")).toBeVisible();
+  const editor = page
+    .getByRole("region", { name: "Original note", exact: true })
+    .getByRole("textbox", { name: /^(Markdown source|Note content)$/ });
+  await expect(editor).toBeVisible();
   for (const width of [1440, 1280, 1024, 768, 767, 375, 320]) {
     await page.setViewportSize({ width, height: 812 });
     await page.evaluate("window.scrollTo(0, 0)");
@@ -354,8 +357,10 @@ test("controls and preview remain usable across laptop, tablet and narrow touch 
       ),
     ).toBeGreaterThanOrEqual(16);
     expect(
-      await page.evaluate(
-        "parseFloat(getComputedStyle(document.querySelector('#note-content')).fontSize)",
+      await editor.evaluate((element) =>
+        Number.parseFloat(
+          element.ownerDocument.defaultView?.getComputedStyle(element).fontSize ?? "0",
+        ),
       ),
     ).toBeGreaterThanOrEqual(16);
     expect(

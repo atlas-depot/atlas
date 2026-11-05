@@ -1,6 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 import { noteContentSchema, type Note } from "../shared/notes.ts";
 import { noteDraftSchema, type NoteDraft } from "../shared/drafts.ts";
+import { blockNoteDocumentSchema } from "../shared/document.ts";
 import { expectEditorContent } from "./notes-editor.ts";
 
 const sourceId = "00000000-0000-4000-8000-000000000001";
@@ -490,4 +491,78 @@ test("session revalidation pauses draft autosave and account switching clears pr
   await expect(page.getByText("Signed in as bob@example.test")).toBeVisible();
   await expect(panel(page)).toHaveCount(0);
   await expect(page.getByText("Private Alice draft")).toHaveCount(0);
+});
+
+test("generated Markdown imports into rich blocks and persists JSON before any manual edit", async ({
+  page,
+}, testInfo) => {
+  const state = await fixture(page);
+  state.resumeDraft();
+  const code = 'const symbol = "<tag> &lt;";\nconsole.log(symbol);';
+  const markdown =
+    "# Synthetic acceptance picnic\n\n## Checklist\n\n- [ ] Plan a fictional picnic\n- [ ] Bring apples\n- [ ] Bring bread\n- [ ] Bring water\n\n[Reference](https://example.com/literal?x=1&y=2)\n\n```typescript\n" +
+    code +
+    "\n```\n";
+  if (state.draft) state.draft.content = markdown;
+  await page.goto("/");
+  await expect(
+    panel(page).getByRole("textbox", { name: "Note content", exact: true }),
+  ).toBeVisible();
+  await expect(
+    panel(page).getByRole("textbox", { name: "Markdown source", exact: true }),
+  ).toHaveCount(0);
+  await expect(
+    panel(page).getByRole("heading", { name: "Synthetic acceptance picnic", exact: true }),
+  ).toBeVisible();
+  await expect(panel(page).locator("code.bn-inline-content")).toHaveText(code);
+  await expect(
+    panel(page).locator('.bn-editor a[href="https://example.com/literal?x=1&y=2"]'),
+  ).toHaveText("Reference");
+  await expect.poll(() => typeof state.draft?.content).toBe("object");
+  const persisted = blockNoteDocumentSchema.parse(state.draft?.content);
+  expect(persisted.blocks.filter((block) => block.type === "checkListItem")).toHaveLength(4);
+  expect(persisted.blocks.find((block) => block.type === "codeBlock")?.content).toEqual([
+    { type: "text", text: code, styles: {} },
+  ]);
+  await page.reload();
+  await expect(
+    panel(page).getByRole("textbox", { name: "Note content", exact: true }),
+  ).toBeVisible();
+  await expect(panel(page).locator("code.bn-inline-content")).toHaveText(code);
+  await page.screenshot({
+    path: testInfo.outputPath("generated-rich-desktop.png"),
+    fullPage: true,
+  });
+  await page.setViewportSize({ width: 375, height: 812 });
+  expect(await page.evaluate("document.documentElement.scrollWidth <= innerWidth")).toBe(true);
+  await page.screenshot({ path: testInfo.outputPath("generated-rich-mobile.png"), fullPage: true });
+  await panel(page).getByRole("button", { name: "Save as new note", exact: true }).click();
+  await expect(panel(page)).toHaveCount(0);
+  expect(state.saved?.content).toEqual(persisted);
+  expect(state.source.content).toBe("Original note");
+});
+
+test("unsupported generated Markdown stays exact editable source with no remote image loading", async ({
+  page,
+}) => {
+  const state = await fixture(page);
+  state.resumeDraft();
+  const markdown =
+    "<div>Keep literal HTML</div>\n\n![Private diagram](https://untrusted.example.test/private.png)";
+  if (state.draft) state.draft.content = markdown;
+  const remoteRequests: string[] = [];
+  page.on("request", (request) => {
+    if (request.url().includes("untrusted.example.test")) remoteRequests.push(request.url());
+  });
+  await page.goto("/");
+  await expect(
+    panel(page).getByRole("textbox", { name: "Markdown source", exact: true }),
+  ).toHaveValue(markdown);
+  await expect(panel(page).getByRole("textbox", { name: "Note content", exact: true })).toHaveCount(
+    0,
+  );
+  await panel(page).getByRole("button", { name: "Save as new note", exact: true }).click();
+  await expect(panel(page)).toHaveCount(0);
+  expect(state.saved?.content).toBe(markdown);
+  expect(remoteRequests).toEqual([]);
 });

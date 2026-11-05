@@ -364,6 +364,7 @@ export function AIDraftPanel({
       />
       <Suspense fallback={<p>Opening draft editor...</p>}>
         <Editor
+          importGeneratedMarkdown
           key={editorKey}
           initialContent={content.content}
           disabled={editingDisabled}
