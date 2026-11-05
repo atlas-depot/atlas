@@ -247,4 +247,26 @@ Coverage runs the full root suite separately and publishes its summary; the inte
 
 Feature previews and `main` production remain the deployment direction. Git branches and passing CI do not configure Vercel linkage, routing or credentials. After an authorized deployment, verify the revision and affected live flow. Application rollback does not roll back the database. Follow [contributing](contributing.md) for PR evidence and merge authority.
 
+## Notes increment acceptance
+
+[#54](https://github.com/atlas-depot/atlas/issues/54) tracks acceptance of the connected notes and AI-draft flow. [Ali's preparation evidence](https://github.com/atlas-depot/atlas/issues/54#issuecomment-6597588207) covers `95e6bc0`; it is historical local evidence, not acceptance of later revisions or a staging deployment. Keep run results, revision, deployment URL and remaining gaps in the issue or implementing PR rather than committing another run log.
+
+Use the pinned clean-setup and check commands above. `pnpm test:e2e:db` additionally exercises reconnect, temporary edits, derivative save, source deletion and account-scoped discard through the real browser, Hono and isolated PostgreSQL with synthetic identity/provider seams. It needs a loopback `TEST_DATABASE_URL`, not WorkOS or model credentials. Run browser suites sequentially within a worktree because they build bundles and bind local ports.
+
+Final acceptance needs the integrated #53 candidate and an authorized staging deployment. Verify its deployed revision before exercising this matrix with synthetic notes and two test accounts:
+
+| Boundary | Required observation |
+| --- | --- |
+| WorkOS | Google and email/password sign-in, cancelled or failed login, recovery, refresh, terminal expiry, logout and account switching behave as documented above. Record each method separately. |
+| Notes | Create, read, edit, explicit Save and Ctrl/Cmd+S, delete and reload preserve the intended content. Another account cannot read or modify it. |
+| Recovery | A failed save keeps local edits. A competing write produces a conflict without overwriting either version. Reloading or discarding local work is explicit. |
+| Organize | Save & organize processes the saved revision. Repeated clicks do not duplicate a run. Loading, reconnect, failure/retry and an editable result are observable; the source remains unchanged. |
+| Draft lifecycle | Edited temporary content survives reload for the agreed 24-hour lifetime. Discard removes it. Save creates one separate permanent note with its source ID/revision and sources; a repeated Save cannot duplicate it. |
+| Source changes | A newer source marks the result stale. A source deleted after result handoff is identified, while Save can preserve the draft separately. Resolve an existing draft before starting another. |
+| Rendering and input | Check the integrated editor at desktop and narrow mobile width, keyboard operation, literal HTML/code, safe links and no unintended remote image requests. Confirm structured content and block IDs survive save/reload. |
+
+The draft rows describe the accepted #53 target, not a claim that the current deployment implements it. Exercise expiry using the deterministic clock-controlled tests rather than shortening a shared staging retention setting.
+
+Live AI acceptance is a separate, explicitly authorized run with synthetic input and an agreed cap. Record model/provider, input facts, returned sources, whether the original changed, and content-free usage/cost. A mocked provider cannot establish factual preservation or research quality. Do not put credentials, session cookies or private note content into evidence. Keep #54 open while an integrated or live-provider row is unverified; do not infer a missing provider environment from absent local `.env` files.
+
 References: [Vite+ local CLI](https://viteplus.dev/guide/local-cli), [Vite environment variables](https://vite.dev/guide/env-and-mode), [Vercel Git integration](https://vercel.com/docs/git), [Vercel env CLI](https://vercel.com/docs/cli/env).

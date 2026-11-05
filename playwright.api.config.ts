@@ -6,7 +6,7 @@ readTestDatabaseUrl(process.env);
 
 export default defineConfig({
   testDir: "e2e",
-  testMatch: "**/notes-api.spec.ts",
+  testMatch: ["**/notes-api.spec.ts", "**/notes-organize-api.spec.ts"],
   forbidOnly: !!process.env.CI,
   retries: 0,
   workers: 1,

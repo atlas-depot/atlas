@@ -24,6 +24,7 @@ export default defineConfig({
         "**/editor-controls.spec.ts",
         "**/code-paste.spec.ts",
         "**/organize-workspace.spec.ts",
+        "**/notes-organize-api.spec.ts",
       ],
       use: { ...devices["Desktop Chrome"] },
     },
