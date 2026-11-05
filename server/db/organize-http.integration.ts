@@ -131,6 +131,8 @@ async function fixture() {
     shutdowns.add(close);
     const request = async (path: string, init: RequestInit = {}) => {
       const headers = new Headers(init.headers);
+      if (path.endsWith("/organize") && !headers.has("If-Match"))
+        headers.set("If-Match", JSON.stringify(`${note.note.id}:${note.revision}`));
       if (!headers.has("Authorization")) headers.set("Authorization", "Bearer synthetic-owner");
       const response = await fetch(`${origin}/api${path}`, {
         ...init,
@@ -210,7 +212,11 @@ it("enforces authentication, cookie origin and bodyless UUID routes before dispa
   expect(f.runtime.submit).not.toHaveBeenCalled();
   const accepted = await fetch(`${f.http.origin}/api${path}`, {
     method: "POST",
-    headers: { Cookie: `${SESSION_COOKIE_NAME}=synthetic-owner`, Origin: appOrigin },
+    headers: {
+      Cookie: `${SESSION_COOKIE_NAME}=synthetic-owner`,
+      Origin: appOrigin,
+      "If-Match": JSON.stringify(`${f.note.note.id}:1`),
+    },
   });
   expect(accepted.status).toBe(202);
   await accepted.text();
@@ -370,7 +376,10 @@ it("recovers a committed start after the HTTP client disconnects before receivin
   const abort = new AbortController();
   const lostResponse = fetch(`${f.http.origin}/api/notes/${f.note.note.id}/organize`, {
     method: "POST",
-    headers: { Authorization: "Bearer synthetic-owner" },
+    headers: {
+      Authorization: "Bearer synthetic-owner",
+      "If-Match": JSON.stringify(`${f.note.note.id}:1`),
+    },
     signal: abort.signal,
   }).then(
     () => "unexpected response",

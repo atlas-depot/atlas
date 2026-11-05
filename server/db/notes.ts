@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { and, desc, eq, sql } from "drizzle-orm";
 import { z } from "zod";
+import { noteOriginSchema } from "../../shared/organize.ts";
 import { canonicalJson, documentContentSchema } from "../../shared/document.ts";
 import {
   createNoteKeySchema,
@@ -30,6 +31,7 @@ export function storedNote(row: Row): StoredNote {
       id: row.id,
       title: row.title,
       content: documentContentSchema.parse(row.content),
+      ...(row.origin ? { origin: noteOriginSchema.parse(row.origin) } : {}),
       createdAt: new Date(row.createdAt).toISOString(),
       updatedAt: new Date(row.updatedAt).toISOString(),
     },

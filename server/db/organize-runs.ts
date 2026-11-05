@@ -1,4 +1,4 @@
-import { and, eq, inArray, lte, sql } from "drizzle-orm";
+import { and, eq, gt, inArray, lte, sql } from "drizzle-orm";
 import { z } from "zod";
 import { noteIdSchema } from "../../shared/notes.ts";
 import { organizerContent } from "../../shared/document.ts";
@@ -6,7 +6,8 @@ import { generatedDraftSchema, organizeUsageSchema, type OrganizeUsage } from ".
 import type { OrganizeRunState } from "../organize-runs.ts";
 import type { openDatabase } from "./connection.ts";
 import { storedNote, type StoredNote } from "./notes.ts";
-import { notes, organizeRuns } from "./schema.ts";
+import { createNoteDraftStore } from "./note-drafts.ts";
+import { noteDrafts, notes, organizeRuns } from "./schema.ts";
 
 type Database = ReturnType<typeof openDatabase>["db"];
 type Row = typeof organizeRuns.$inferSelect;
@@ -93,13 +94,31 @@ function fromRow(row: Row): OrganizeRunRecord {
   };
 }
 
+export class OrganizeClaimError extends Error {
+  readonly reason: "stale" | "unresolved";
+  constructor(reason: "stale" | "unresolved") {
+    super("Organizer precondition failed.");
+    this.reason = reason;
+  }
+}
+
 /** Only trusted backend identity reaches this store. Runtime IDs never leave the backend. */
 export function createOrganizeRunStore(db: Database) {
   return {
+    drafts: createNoteDraftStore(db),
+    async listActive(ownerId: string) {
+      return db
+        .select({ runId: organizeRuns.id, noteId: organizeRuns.noteId })
+        .from(organizeRuns)
+        .where(
+          and(eq(organizeRuns.ownerId, ownerSchema.parse(ownerId)), eq(organizeRuns.active, true)),
+        );
+    },
     async claim(
       ownerId: string,
       noteId: string,
       runtimeUrl: string,
+      expectedTag?: string,
     ): Promise<OrganizeRunRecord | undefined> {
       const owner = ownerSchema.parse(ownerId);
       const id = noteIdSchema.parse(noteId);
@@ -112,6 +131,22 @@ export function createOrganizeRunStore(db: Database) {
           .where(and(eq(notes.ownerId, owner), eq(notes.id, id)))
           .for("update");
         if (!note) return undefined;
+        if (
+          expectedTag !== undefined &&
+          expectedTag !== JSON.stringify(`${note.id}:${note.revision}`)
+        )
+          throw new OrganizeClaimError("stale");
+        const [draft] = await tx
+          .select({ id: noteDrafts.id })
+          .from(noteDrafts)
+          .where(
+            and(
+              eq(noteDrafts.ownerId, owner),
+              eq(noteDrafts.sourceNoteId, id),
+              gt(noteDrafts.expiresAt, sql`clock_timestamp()`),
+            ),
+          );
+        if (draft) throw new OrganizeClaimError("unresolved");
         const [existing] = await tx
           .select()
           .from(organizeRuns)
@@ -122,7 +157,11 @@ export function createOrganizeRunStore(db: Database) {
               eq(organizeRuns.active, true),
             ),
           );
-        if (existing) return fromRow(existing);
+        if (existing) {
+          if (expectedTag !== undefined && existing.sourceRevision !== note.revision)
+            throw new OrganizeClaimError("unresolved");
+          return fromRow(existing);
+        }
         const [created] = await tx
           .insert(organizeRuns)
           .values({

@@ -36,6 +36,13 @@
       "when": 1793891978635,
       "tag": "0004_note-documents",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1793894772419,
+      "tag": "0005_ai-note-drafts",
+      "breakpoints": true
     }
   ]
 }

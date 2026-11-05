@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { noteOriginSchema } from "./organize.ts";
 import { documentContentSchema, noteTextSchema } from "./document.ts";
 
 export const noteIdSchema = z.uuid();
@@ -21,6 +22,7 @@ export const createNoteSchema = noteContentSchema.extend({
 export const updateNoteSchema = noteContentSchema;
 export const noteSchema = createNoteSchema.extend({
   id: noteIdSchema,
+  origin: noteOriginSchema.optional(),
   /** Initially createdAt; the server sets this on successful edits, not for conflict detection. */
   updatedAt: z.iso.datetime(),
 });

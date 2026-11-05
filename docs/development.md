@@ -111,7 +111,7 @@ The Atlas organization is on Free. Its five development branches (`dev-efe`, `de
 
 ### Organizer run persistence
 
-The `organize_runs` migration adds owner-bound transient run records alongside notes. Apply it with the normal reviewed migration command. A partial unique index coalesces active work for one owner/note, including pending cleanup. The note relation deliberately does not cascade-delete cleanup references. Acknowledgement clears temporary content before remote retirement and successful cleanup leaves an expiring metadata tombstone. These records are not saved notes.
+The `organize_runs` migration adds owner-bound transient run records alongside notes. Apply it with the normal reviewed migration command. A partial unique index coalesces active work for one owner/note, including pending cleanup. The note relation deliberately does not cascade-delete cleanup references. Handoff commits a separate temporary draft and cleanup intent together before remote retirement. Successful cleanup leaves an expiring content-free run tombstone. Temporary drafts expire 24 hours after handoff, independently of run metadata. The enabled maintenance sweep physically deletes expired draft content; API reads and writes reject it at expiration even before the next sweep.
 
 `pnpm test:db` also exercises run recovery, concurrency, source revision/deletion races and cleanup using separate pools and Node processes. Runtime transport is mocked in database tests. See the [organizer](../agents/organizer/README.md) for the eve/Vercel build, private service and explicitly enabled maintenance settings. Organize HTTP routes use the existing authentication middleware; note CRUD uses the same authenticated API boundary. Database tests inject synthetic authentication and mock runtime transport, so they do not establish live WorkOS or model behavior.
 
@@ -119,16 +119,25 @@ The `organize_runs` migration adds owner-bound transient run records alongside n
 
 Configure `DATABASE_URL`, `ORGANIZER_RUNTIME_URL` (an immutable private deployment URL) and `ORGANIZER_SERVICE_TOKEN` on the Hono API. Install the isolated organizer dependencies as well as root dependencies. Partial settings fail startup; with no organizer settings, authenticated Organize requests return `503`. The token and optional `ORGANIZER_DEPLOYMENT_PROTECTION_SECRET` stay server-only. `ORGANIZER_RESULT_RETENTION_MS` defaults to 900000 for undelivered results, independently of the 48-hour content-free accounting retention.
 
-All routes use the existing WorkOS Bearer/session boundary and cookie-origin checks. IDs must be UUIDs; requests take no body. The server loads the owned note and revision. Shared response schemas live in `shared/organize.ts`.
+All routes use the existing WorkOS Bearer/session boundary and cookie-origin checks. IDs must be UUIDs. Start requires the saved source ETag in `If-Match`, checked while locking that source revision. Shared response schemas live in `shared/organize.ts` and `shared/drafts.ts`.
 
 | Request | Response |
 | --- | --- |
 | `POST /api/notes/:id/organize` | `202 { runId, status: "accepted" }`, or `cleanup_pending` for existing work awaiting retirement |
 | `GET /api/organize-runs/:id` | `200 { runId, ...state }`, including progress or a separate Markdown draft, sources and source revision/staleness |
 | `POST /api/organize-runs/:id/cancel` | `200` terminal state, or `202` while cleanup is pending |
-| `POST /api/organize-runs/:id/acknowledge` | `200` after retirement, `202` while cleanup is pending; `409` if still running |
+| `POST /api/organize-runs/:id/handoff` | `200` temporary draft and ETag; retries return the same draft without extending its lifetime |
+| `GET /api/organize-work` | Owner-scoped active run handles and unexpired drafts for reconnect/reload |
+| `GET /api/note-drafts/:id` | `200` draft and ETag, including stale/deleted source flags |
+| `PUT /api/note-drafts/:id` | `{ title, content }` plus `If-Match`; persists edits without extending expiry |
+| `DELETE /api/note-drafts/:id` | Empty body plus `If-Match`; discards the temporary draft |
+| `POST /api/note-drafts/:id/save` | `{ title, content }` plus `If-Match`; `201` separate permanent note and ETag |
 
-The consumer retains the editable draft before acknowledging it. Acknowledgement deletes temporary content and is not Save. Keep the `runId` to reconnect; a lost start response can safely retry the same owned note while its run remains active. `cleanup_pending` must be polled instead of launching another run. Inaccessible and missing resources return the same `404`; transient backend failures return sanitized `503`. No raw eve handles, runtime URLs, credentials or accounting records enter these responses. #53 owns the browser integration and explicit derivative Save.
+The browser hands off a completed result before editing it. Handoff records the temporary copy and cleanup intent in one transaction; cleanup failure cannot erase the copy and maintenance retries retirement. A source can have only one unresolved draft. Another Organize returns `409` until Save or Discard resolves it. A changed source is flagged stale; source deletion after handoff does not prevent saving the draft separately.
+
+Save derives provenance from the server-owned draft, not client fields. A draft-ID/payload-hash/note-ID receipt makes concurrent and uncertain-response retries return one unchanged note. Reuse the exact Save payload after a lost response. Changed/deleted saved notes or a changed retry payload return `409`; stale temporary edits return `412`. Content-free receipts survive draft/source/note deletion until account erasure, like note creation receipts. Permanent note responses expose optional `origin` with source ID/revision and research sources. Note writes cannot set or replace origin.
+
+A lost start response can safely retry the same owned source revision or recover through `organize-work`. `cleanup_pending` must be polled instead of launching another run. The older `acknowledge` endpoint still retires an undelivered result without saving it; the editor uses handoff. Inaccessible and missing resources return the same `404`; transient backend failures return sanitized `503`. No raw eve handles, runtime URLs, credentials or accounting records enter these responses.
 
 ## Tests and coverage
 

@@ -15,6 +15,7 @@ import {
 import type { OrganizeRunState } from "../organize-runs.ts";
 import type { OrganizeUsage } from "../organize-note.ts";
 import type { RunTerminalState } from "./organize-runs.ts";
+import type { NoteOrigin } from "../../shared/organize.ts";
 import type { NoteContent } from "../../shared/document.ts";
 
 export const notes = pgTable(
@@ -24,6 +25,7 @@ export const notes = pgTable(
     /** Verified WorkOS identity; never taken from a note payload. */
     ownerId: text("owner_id").notNull(),
     title: text("title").notNull(),
+    origin: jsonb("origin").$type<NoteOrigin>(),
     content: jsonb("content").$type<NoteContent>().notNull(),
     /** Supplied by the client on creation and immutable in note operations. */
     createdAt: timestamp("created_at", { withTimezone: true, mode: "string" }).notNull(),
@@ -89,4 +91,41 @@ export const organizeRuns = pgTable(
       sql`${table.active} OR (${table.input} IS NULL AND ${table.runtime} IS NULL AND ${table.cleanupTarget} IS NULL AND ${table.state}->>'status' NOT IN ('running', 'draft', 'cleaning'))`,
     ),
   ],
+);
+
+/** Temporary user edits. The source relationship intentionally survives source deletion. */
+export const noteDrafts = pgTable(
+  "note_drafts",
+  {
+    id: uuid("id").primaryKey(),
+    ownerId: text("owner_id").notNull(),
+    sourceNoteId: uuid("source_note_id").notNull(),
+    sourceRevision: integer("source_revision").notNull(),
+    title: text("title").notNull(),
+    content: jsonb("content").$type<NoteContent>().notNull(),
+    sources: jsonb("sources").$type<NoteOrigin["sources"]>().notNull(),
+    revision: integer("revision").notNull().default(1),
+    expiresAt: timestamp("expires_at", { withTimezone: true, mode: "string" }).notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true, mode: "string" }).notNull(),
+  },
+  (table) => [
+    uniqueIndex("note_drafts_source_idx").on(table.ownerId, table.sourceNoteId),
+    index("note_drafts_expiry_idx").on(table.expiresAt),
+    check(
+      "note_drafts_revision_positive",
+      sql`${table.revision} > 0 AND ${table.sourceRevision} > 0`,
+    ),
+  ],
+);
+
+/** A content-free receipt makes every Save of one draft converge on one permanent note. */
+export const draftSaveRequests = pgTable(
+  "draft_save_requests",
+  {
+    ownerId: text("owner_id").notNull(),
+    draftId: uuid("draft_id").notNull(),
+    payloadHash: text("payload_hash").notNull(),
+    noteId: uuid("note_id").notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.ownerId, table.draftId] })],
 );
