@@ -228,8 +228,16 @@ test("notes workspace fits desktop and mobile and supports keyboard editing", as
   expect(await page.evaluate("document.documentElement.scrollWidth <= window.innerWidth")).toBe(
     true,
   );
-  await page.keyboard.press("Tab");
-  await expect(page.getByRole("button", { name: "Save", exact: true })).toBeFocused();
+  const save = page.getByRole("button", { name: "Save", exact: true });
+  // Save lives in the page header. Reach it through the actual reverse tab order.
+  for (
+    let step = 0;
+    step < 16 && !(await save.evaluate((element) => element.matches(":focus")));
+    step++
+  ) {
+    await page.keyboard.press("Shift+Tab");
+  }
+  await expect(save).toBeFocused();
   await page.keyboard.press("Enter");
   await expect(page.getByRole("status")).toHaveText("Saved for this preview session");
   await page.screenshot({ path: testInfo.outputPath("mobile-long-content.png"), fullPage: true });
