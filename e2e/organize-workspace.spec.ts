@@ -566,3 +566,149 @@ test("unsupported generated Markdown stays exact editable source with no remote 
   expect(state.saved?.content).toBe(markdown);
   expect(remoteRequests).toEqual([]);
 });
+
+test("remote draft refresh preserves visible oversized edits until explicit confirmation", async ({
+  page,
+}) => {
+  const state = await fixture(page);
+  state.resumeDraft();
+  await page.clock.install();
+  await page.goto("/");
+  await expect(draftEditor(page)).toBeVisible();
+  await page.clock.runFor(1_000);
+  await expect.poll(() => typeof state.draft?.content).toBe("object");
+  await expect(panel(page).getByRole("status")).toHaveText("Draft saved");
+  const oversized = "x".repeat(100_001);
+  await draftEditor(page).fill(oversized);
+  await expect(panel(page).getByRole("alert")).toContainText("This content cannot be saved yet.");
+  if (state.draft) {
+    state.draft.content = "Remote valid draft";
+    state.draft.etag = '"draft-remote"';
+  }
+  const refreshed = page.waitForResponse(
+    (response) =>
+      response.url().endsWith(`/api/note-drafts/${draftId}`) &&
+      response.request().method() === "GET",
+  );
+  await page.clock.fastForward(10_001);
+  await refreshed;
+  await expect(
+    panel(page).getByRole("alert").filter({ hasText: "This draft changed elsewhere." }),
+  ).toBeVisible();
+  expect(await draftEditor(page).evaluate((element) => element.textContent?.length)).toBe(
+    oversized.length,
+  );
+  await expect(
+    panel(page).getByRole("button", { name: "Save as new note", exact: true }),
+  ).toBeDisabled();
+  await panel(page).getByRole("button", { name: "Reload saved draft", exact: true }).click();
+  await page.getByRole("button", { name: "Keep editing", exact: true }).click();
+  expect(await draftEditor(page).evaluate((element) => element.textContent?.length)).toBe(
+    oversized.length,
+  );
+  await expect(
+    panel(page).getByRole("alert").filter({ hasText: "This content cannot be saved yet." }),
+  ).toBeVisible();
+});
+
+test("a confirmed missing run can be dismissed without stranding Organize", async ({ page }) => {
+  const state = await fixture(page);
+  state.resumeRun();
+  await page.route(`**/api/organize-runs/${runId}`, (route) =>
+    route.fulfill({ status: 404, json: { error: { code: "NOT_FOUND", message: "Missing" } } }),
+  );
+  await page.goto("/");
+  await expect(page.getByRole("button", { name: "Dismiss generation", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Cancel generation", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Organize", exact: true })).toBeDisabled();
+  await page.getByRole("button", { name: "Dismiss generation", exact: true }).click();
+  await expect(page.getByRole("region", { name: "Organize progress", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Organize", exact: true })).toBeEnabled();
+  expect(state.starts).toEqual([]);
+});
+
+test("a missing run recovers an already delivered draft before offering dismissal", async ({
+  page,
+}) => {
+  const state = await fixture(page);
+  state.resumeRun();
+  state.resumeDraft();
+  let reads = 0;
+  await page.route("**/api/organize-work", (route) =>
+    route.fulfill({
+      json: { runs: [{ runId, noteId: sourceId }], drafts: reads++ === 0 ? [] : [state.draft] },
+    }),
+  );
+  await page.route(`**/api/organize-runs/${runId}`, (route) =>
+    route.fulfill({ status: 404, json: { error: { code: "NOT_FOUND", message: "Missing" } } }),
+  );
+  await page.goto("/");
+  await expect(draftEditor(page)).toBeVisible();
+  await expect(page.getByRole("region", { name: "Organize progress", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Dismiss generation", exact: true })).toHaveCount(
+    0,
+  );
+  expect(state.starts).toEqual([]);
+});
+
+test("missing run recovery stays retryable while the delivered-draft check is unavailable", async ({
+  page,
+}) => {
+  const state = await fixture(page);
+  state.resumeRun();
+  let reads = 0;
+  await page.route("**/api/organize-work", (route) =>
+    reads++ === 0
+      ? route.fulfill({ json: { runs: [{ runId, noteId: sourceId }], drafts: [] } })
+      : route.abort("failed"),
+  );
+  await page.route(`**/api/organize-runs/${runId}`, (route) =>
+    route.fulfill({ status: 404, json: { error: { code: "NOT_FOUND", message: "Missing" } } }),
+  );
+  await page.goto("/");
+  await expect(
+    page.getByRole("button", { name: "Reconnect generation", exact: true }),
+  ).toBeVisible();
+  await expect(page.getByRole("button", { name: "Dismiss generation", exact: true })).toHaveCount(
+    0,
+  );
+});
+
+test("invalid source-mode draft edits show validation and recover after correction", async ({
+  page,
+}) => {
+  const state = await fixture(page);
+  state.resumeDraft();
+  const original = "<div>Keep this source</div>";
+  if (state.draft) state.draft.content = original;
+  await page.goto("/");
+  const editor = panel(page).getByRole("textbox", { name: "Markdown source", exact: true });
+  await expect(editor).toHaveValue(original);
+  await editor.fill(original + "\u0000");
+  await expect(panel(page).getByRole("alert")).toContainText("This content cannot be saved yet.");
+  await expect(
+    panel(page).getByRole("button", { name: "Save as new note", exact: true }),
+  ).toBeDisabled();
+  expect(state.draft?.content).toBe(original);
+  await editor.fill(original + " corrected");
+  await expect(panel(page).getByRole("alert")).toHaveCount(0);
+  await expect(
+    panel(page).getByRole("button", { name: "Save as new note", exact: true }),
+  ).toBeEnabled();
+  await expect.poll(() => state.draft?.content).toBe(original + " corrected");
+  await panel(page)
+    .getByRole("textbox", { name: "Draft title", exact: true })
+    .fill("Bad\u0000title");
+  await expect(panel(page).getByRole("alert")).toContainText("This content cannot be saved yet.");
+  await expect(
+    panel(page).getByRole("button", { name: "Save as new note", exact: true }),
+  ).toBeDisabled();
+  await panel(page)
+    .getByRole("textbox", { name: "Draft title", exact: true })
+    .fill("Corrected title");
+  await expect(panel(page).getByRole("alert")).toHaveCount(0);
+  await panel(page).getByRole("button", { name: "Save as new note", exact: true }).click();
+  await expect(panel(page)).toHaveCount(0);
+  expect(state.saved?.content).toBe(original + " corrected");
+  expect(state.saved?.title).toBe("Corrected title");
+});

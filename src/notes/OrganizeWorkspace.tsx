@@ -239,9 +239,18 @@ function RunPanel({
         )
           timer = setTimeout(() => void poll(), 1_500);
         else await recoveredDraft();
-      } catch {
+      } catch (cause) {
         try {
-          if (active && (await recoveredDraft())) return;
+          if (!active || (await recoveredDraft())) return;
+          if (cause instanceof NotesRequestError && cause.status === 404) {
+            // Only retire a missing handle after checking for a delivered draft.
+            // A failed recovery read must remain reconnectable instead.
+            if (active) {
+              setState({ runId: run.runId, status: "expired" });
+              setFailedRead(false);
+            }
+            return;
+          }
         } catch {
           /* Keep the same handle for a later reconnect. */
         }
@@ -293,7 +302,7 @@ function RunPanel({
                   : state.status === "cancelled"
                     ? "Generation cancelled."
                     : state.status === "expired"
-                      ? "This generation expired."
+                      ? "This generation expired or is no longer available."
                       : state.status === "failed" && state.reason === "cleanup_failed"
                         ? "Cleanup is pending. Your original is unchanged."
                         : "Generation failed. Your original is unchanged."}
