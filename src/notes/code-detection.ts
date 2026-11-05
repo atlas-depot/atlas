@@ -2,10 +2,12 @@ import hljs from "highlight.js/lib/common";
 import { blockToNode } from "@blocknote/core";
 import { closeHistory } from "@tiptap/pm/history";
 import { bundledLanguagesInfo } from "shiki/langs";
+import { noteTextSchema } from "../../shared/document.ts";
 import type { NoteEditorInstance } from "./editor-schema";
 
 const explicitChoices = new WeakMap<object, Set<string>>();
 const maximumDetectionLength = 20_000;
+const codeLanguageSchema = noteTextSchema.max(128);
 
 /** Choosing Plain text is just as deliberate as choosing Python. */
 export function markCodeLanguageExplicit(editor: object, blockId: string): void {
@@ -37,14 +39,10 @@ type PasteContext = {
 function codeClipboardLanguage(clipboard: DataTransfer): string | undefined {
   try {
     const metadata: unknown = JSON.parse(clipboard.getData("vscode-editor-data"));
-    if (
-      typeof metadata === "object" &&
-      metadata !== null &&
-      "mode" in metadata &&
-      typeof metadata.mode === "string" &&
-      metadata.mode.length <= 128
-    )
-      return metadata.mode;
+    if (typeof metadata === "object" && metadata !== null && "mode" in metadata) {
+      const language = codeLanguageSchema.safeParse(metadata.mode);
+      if (language.success) return language.data;
+    }
   } catch {
     /* Malformed metadata still has literal text that can be pasted. */
   }

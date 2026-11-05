@@ -54,14 +54,15 @@
 }
 @media (max-width: 600px) {
   .rich-note-editor .bn-editor {
-    padding-inline: 66px 8px;
+    /* Reserve two separate 44px targets, plus space before the text. */
+    padding-inline: 96px 8px;
     min-height: 8rem;
   }
   .bn-shadcn .bn-side-menu .bn-button {
-    width: 28px;
-    min-width: 28px;
-    height: 36px;
-    min-height: 36px;
+    width: 44px;
+    min-width: 44px;
+    height: 44px;
+    min-height: 44px;
   }
 }
 @font-face {
@@ -126,4 +127,10 @@
   display: flex;
   justify-content: flex-end;
   gap: 2px;
+}
+
+@media (max-width: 600px) {
+  .bn-editor [data-content-type="codeBlock"] pre {
+    padding: 60px 14px 16px;
+  }
 }

@@ -53,6 +53,7 @@ export function AIDraftPanel({
   const latest = useRef(remote);
   const permission = useRef(enabled);
   const validity = useRef(valid);
+  const editorValidity = useRef(true);
   const alive = useRef(true);
   const flight = useRef<Promise<NoteDraft | undefined> | null>(null);
   const actionLock = useRef(false);
@@ -60,11 +61,17 @@ export function AIDraftPanel({
   useEffect(() => {
     permission.current = enabled;
   }, [enabled]);
-  useEffect(() => {
-    validity.current = valid && noteContentSchema.safeParse(content).success;
-  }, [valid, content]);
+  const reportEditorValidity = useCallback((editorValid: boolean) => {
+    // Rich editors retain invalid visible input without publishing onChange.
+    // Update this guard before React renders or any pending refresh resolves.
+    editorValidity.current = editorValid;
+    validity.current = editorValid && noteContentSchema.safeParse(current.current).success;
+    setValid(validity.current);
+  }, []);
   function edit(value: UpdateNote) {
     current.current = value;
+    validity.current = editorValidity.current && noteContentSchema.safeParse(value).success;
+    setValid(validity.current);
     setContent(value);
   }
   const dirty = !valid || !sameContent(content, remote);
@@ -164,7 +171,7 @@ export function AIDraftPanel({
             return;
           // Refresh source deletion/staleness without silently replacing local edits.
           if (value.etag === latest.current.etag) accept(value);
-          else if (sameContent(current.current, latest.current)) {
+          else if (validity.current && sameContent(current.current, latest.current)) {
             current.current = { title: value.title, content: value.content };
             setContent(current.current);
             accept(value);
@@ -264,7 +271,7 @@ export function AIDraftPanel({
       current.current = { title: value.title, content: value.content };
       setContent(current.current);
       accept(value);
-      setValid(true);
+      reportEditorValidity(true);
       pendingSave.current = null;
       setSavePending(false);
       setError(null);
@@ -370,7 +377,7 @@ export function AIDraftPanel({
           disabled={editingDisabled}
           onChange={(value) => edit({ ...content, content: value })}
           onModeChange={setMode}
-          onValidityChange={setValid}
+          onValidityChange={reportEditorValidity}
         />
       </Suspense>
       {mode === "source" && typeof content.content === "string" && (

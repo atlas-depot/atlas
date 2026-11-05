@@ -22,6 +22,10 @@ async function present(db: Queries, row: Row): Promise<NoteDraft> {
     .select({ revision: notes.revision })
     .from(notes)
     .where(and(eq(notes.ownerId, row.ownerId), eq(notes.id, row.sourceNoteId)));
+  return presentWithSource(row, source?.revision ?? null);
+}
+
+function presentWithSource(row: Row, sourceRevision: number | null): NoteDraft {
   return noteDraftSchema.parse({
     id: row.id,
     title: row.title,
@@ -30,8 +34,8 @@ async function present(db: Queries, row: Row): Promise<NoteDraft> {
     source: {
       noteId: row.sourceNoteId,
       revision: row.sourceRevision,
-      stale: !!source && source.revision !== row.sourceRevision,
-      deleted: !source,
+      stale: sourceRevision !== null && sourceRevision !== row.sourceRevision,
+      deleted: sourceRevision === null,
     },
     sources: row.sources,
     expiresAt: new Date(row.expiresAt).toISOString(),
@@ -54,11 +58,15 @@ export function createNoteDraftStore(db: Database) {
     },
     async list(owner: string): Promise<NoteDraft[]> {
       const rows = await db
-        .select()
+        .select({ draft: noteDrafts, sourceRevision: notes.revision })
         .from(noteDrafts)
+        .leftJoin(
+          notes,
+          and(eq(notes.id, noteDrafts.sourceNoteId), eq(notes.ownerId, noteDrafts.ownerId)),
+        )
         .where(and(eq(noteDrafts.ownerId, owner), gt(noteDrafts.expiresAt, sql`clock_timestamp()`)))
         .orderBy(noteDrafts.updatedAt, noteDrafts.id);
-      return Promise.all(rows.map((row) => present(db, row)));
+      return rows.map(({ draft, sourceRevision }) => presentWithSource(draft, sourceRevision));
     },
     /** The temporary copy and cleanup intent commit together, before any remote deletion. */
     async handoff(

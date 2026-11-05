@@ -213,3 +213,54 @@ test("VS Code clipboard preserves literal code, malformed metadata and selection
     expect(errors).toEqual([]);
   }
 });
+
+test("invalid VS Code language metadata stays plain and saveable while unknown valid labels persist", async ({
+  page,
+}) => {
+  const source = 'const template = "<div>hello</div> &lt;";';
+  for (const scenario of [
+    { metadata: "{invalid", language: undefined },
+    { metadata: JSON.stringify({ mode: "bad\0language" }), language: undefined },
+    { metadata: JSON.stringify({ mode: "bad\ud800language" }), language: undefined },
+    { metadata: JSON.stringify({ mode: "bad\udfff" }), language: undefined },
+    { metadata: JSON.stringify({ mode: "x".repeat(129) }), language: undefined },
+    { metadata: JSON.stringify({ mode: "atlas-dsl" }), language: "atlas-dsl" },
+  ]) {
+    await page.unrouteAll({ behavior: "wait" });
+    const state = await openDocument(page);
+    await page.evaluate(`(async () => {
+      const input = ${JSON.stringify({ source, metadata: scenario.metadata })};
+      const clipboardData = new DataTransfer();
+      clipboardData.setData('text/plain', input.source);
+      clipboardData.setData('vscode-editor-data', input.metadata);
+      await navigator.clipboard.writeText(input.source);
+      document.querySelector('.bn-editor').addEventListener('paste', event => {
+        Object.defineProperty(event, 'clipboardData', { value: clipboardData });
+      }, { capture: true, once: true });
+    })()`);
+    await page.keyboard.press("ControlOrMeta+v");
+    if (scenario.language) {
+      await expect(page.getByRole("combobox", { name: "Code language", exact: true })).toHaveText(
+        scenario.language,
+      );
+    } else {
+      await expect(page.locator('[data-content-type="codeBlock"]')).toHaveCount(0);
+      await expect(page.locator('[data-content-type="paragraph"] .bn-inline-content')).toHaveText(
+        source,
+      );
+    }
+    await expect(page.getByRole("button", { name: "Save", exact: true })).toBeEnabled();
+    await save(page, state);
+    const saved = state.document().blocks;
+    expect(saved).toHaveLength(1);
+    expect(saved[0]).toMatchObject({
+      type: scenario.language ? "codeBlock" : "paragraph",
+      content: text(source),
+      ...(scenario.language ? { props: { language: scenario.language } } : {}),
+    });
+    await page.reload();
+    await expect(page.locator(".bn-inline-content")).toHaveText(source);
+    if (!scenario.language)
+      await expect(page.locator('[data-content-type="codeBlock"]')).toHaveCount(0);
+  }
+});
