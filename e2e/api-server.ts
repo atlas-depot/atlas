@@ -12,7 +12,10 @@ import { createApp } from "../server/app.ts";
 import { readCookie } from "../server/cookies.ts";
 import { openDatabase, readTestDatabaseUrl } from "../server/db/connection.ts";
 import { createNoteStore } from "../server/db/notes.ts";
+import { createOrganizeRunStore } from "../server/db/organize-runs.ts";
+import { createDurableOrganizeRuns } from "../server/organize-runs.ts";
 import { apiError } from "../shared/http.ts";
+import { createAcceptanceOrganizer } from "./organizer-runtime.ts";
 
 const origin = "http://127.0.0.1:4185";
 function account(request: Request) {
@@ -79,12 +82,19 @@ export default async function setup() {
       c.header("Set-Cookie", "atlas_session=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0");
       return c.redirect("/", 303);
     });
+    const runtime = createAcceptanceOrganizer();
+    const organizer = createDurableOrganizeRuns({
+      store: createOrganizeRunStore(database.db),
+      runtimeUrl: "https://synthetic-organizer.example.test",
+      runtimeFor: () => runtime,
+      resultRetentionMs: 15 * 60 * 1_000,
+    });
     const api = createApp(
       async (request) => {
         const userId = account(request);
         return userId ? { userId } : null;
       },
-      { notes: createNoteStore(database.db), authRoutes, appOrigin: origin },
+      { notes: createNoteStore(database.db), organizer, authRoutes, appOrigin: origin },
     );
     const app = new Hono();
     app.all("/api/*", (c) => api.fetch(c.req.raw));

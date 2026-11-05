@@ -22,6 +22,7 @@ export default defineConfig({
         "**/notes-production.spec.ts",
         "**/notes-api.spec.ts",
         "**/organize-workspace.spec.ts",
+        "**/notes-organize-api.spec.ts",
       ],
       use: { ...devices["Desktop Chrome"] },
     },
