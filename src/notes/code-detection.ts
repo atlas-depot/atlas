@@ -33,7 +33,7 @@ type InitialBlock = { id?: string; type?: string; children?: readonly InitialBlo
 type PasteContext = {
   editor: NoteEditorInstance;
   event: ClipboardEvent;
-  defaultPasteHandler: () => boolean | undefined;
+  defaultPasteHandler: (options?: { prioritizeMarkdownOverHTML?: boolean }) => boolean | undefined;
 };
 
 function codeClipboardLanguage(clipboard: DataTransfer): string | undefined {
@@ -151,6 +151,10 @@ export function createCodePasteHandler(initialDocument: readonly InitialBlock[])
     // Respect structured copies, file drops and VS Code's explicit language.
     if (clipboard.types.some((type) => ["blocknote/html", "Files"].includes(type)))
       return defaultPasteHandler();
+    // Rich copies carry a plain-text fallback too. Do not infer from that
+    // fallback and discard the formatting or links in the actual HTML payload.
+    if (clipboard.types.includes("text/html"))
+      return defaultPasteHandler({ prioritizeMarkdownOverHTML: false });
     const markdown = clipboard.getData("text/markdown") || source;
     const inferred = inferUnlabelledCodeFences(markdown);
     if (!inferred) return defaultPasteHandler();
