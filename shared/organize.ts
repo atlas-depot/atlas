@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { noteTextSchema } from "./document.ts";
 
 const sourceUrlSchema = z.url({ protocol: /^https?$/ }).refine((value) => {
   if (!URL.canParse(value)) return false;
@@ -8,16 +9,13 @@ const sourceUrlSchema = z.url({ protocol: /^https?$/ }).refine((value) => {
 
 /** Source records come from the research adapter, never from model-written links. */
 export const generatedDraftSchema = z.strictObject({
-  markdown: z
-    .string()
-    .max(100_000)
-    .refine((value) => value.trim().length > 0),
+  markdown: noteTextSchema.max(100_000).refine((value) => value.trim().length > 0),
   sources: z
     .array(
       z.strictObject({
-        id: z.string().min(1),
+        id: noteTextSchema.min(1),
         url: sourceUrlSchema,
-        title: z.string(),
+        title: noteTextSchema,
         imageUrl: sourceUrlSchema.optional(),
       }),
     )
@@ -64,3 +62,11 @@ export const organizeStartResponseSchema = z.strictObject({
   status: z.enum(["accepted", "cleanup_pending"]),
 });
 export type OrganizeStartResponse = z.infer<typeof organizeStartResponseSchema>;
+
+/** Server-established provenance; note write requests cannot supply this value. */
+export const noteOriginSchema = z.strictObject({
+  sourceNoteId: z.uuid(),
+  sourceRevision: z.number().int().positive(),
+  sources: generatedDraftSchema.shape.sources,
+});
+export type NoteOrigin = z.infer<typeof noteOriginSchema>;

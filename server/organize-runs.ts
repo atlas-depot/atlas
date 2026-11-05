@@ -296,11 +296,32 @@ export function createDurableOrganizeRuns({
   };
 
   return {
+    drafts: store.drafts,
+    async work(ownerId: string) {
+      const drafts = await store.drafts.list(ownerId);
+      const ids = new Set(drafts.map((draft) => draft.id));
+      return {
+        runs: (await store.listActive(ownerId)).filter((run) => !ids.has(run.runId)),
+        drafts,
+      };
+    },
+    async handoff(ownerId: string, runId: string) {
+      const result = await store.drafts.handoff(ownerId, runId, now());
+      if (result.status === "ready") {
+        try {
+          await finishCleanup(ownerId, runId);
+        } catch {
+          /* Committed cleanup intent is retried by sweep. */
+        }
+      }
+      return result;
+    },
     async start(
       ownerId: string,
       noteId: string,
+      expectedTag?: string,
     ): Promise<{ runId: string; status?: "cleanup_pending" } | { status: "not_found" }> {
-      const record = await store.claim(ownerId, noteId, runtimeUrl);
+      const record = await store.claim(ownerId, noteId, runtimeUrl, expectedTag);
       if (!record) return { status: "not_found" };
       if (record.cleanupTarget) return { runId: record.runId, status: "cleanup_pending" };
       const started = await ensureStarted(ownerId, record.runId);
@@ -329,6 +350,7 @@ export function createDurableOrganizeRuns({
         }
       }
       await store.purgeExpired();
+      await store.drafts.purgeExpired();
       return { checked: pending.length, retryPending };
     },
   };

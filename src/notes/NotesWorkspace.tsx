@@ -1,9 +1,8 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -17,6 +16,9 @@ import {
 import { noteContentSchema, type CreateNote } from "../../shared/notes";
 import type { Note } from "../../shared/notes";
 import { MarkdownPreview } from "./MarkdownPreview";
+import { NoteContentView } from "./NoteContentView";
+import { OrganizeWorkspace } from "./OrganizeWorkspace";
+import type { OrganizeClient } from "./organize-store";
 import type { NoteSnapshot, NotesStore } from "./notes-store";
 import {
   classifyFailure,
@@ -24,6 +26,7 @@ import {
   hasUnsavedChanges,
   savingMessage,
   sameContent,
+  emptyNoteDocument,
   type RequestFailure,
 } from "./editor-state";
 
@@ -34,13 +37,18 @@ type Selection =
   | { kind: "replace"; snapshot: NoteSnapshot };
 type ReadFailure = { id: string; compare: boolean; kind: RequestFailure };
 type SaveState = "idle" | "saving" | RequestFailure;
+const BlockNoteEditor = lazy(() =>
+  import("./BlockNoteEditor").then((module) => ({ default: module.BlockNoteEditor })),
+);
 
 export function NotesWorkspace({
   store,
+  organizer,
   example = false,
   requestsEnabled = true,
 }: {
   store: NotesStore;
+  organizer?: OrganizeClient;
   example?: boolean;
   requestsEnabled?: boolean;
 }) {
@@ -48,6 +56,9 @@ export function NotesWorkspace({
   const [loadState, setLoadState] = useState<"loading" | "ready" | RequestFailure>("loading");
   const [loadAttempt, setLoadAttempt] = useState(0);
   const [draft, setDraft] = useState<Draft | null>(null);
+  const [editorKey, setEditorKey] = useState(0);
+  const [editorMode, setEditorMode] = useState<"loading" | "rich" | "source">("loading");
+  const [editorValid, setEditorValid] = useState(true);
   const [saved, setSaved] = useState<NoteSnapshot | null>(null);
   const [pendingCreation, setPendingCreation] = useState<{ key: string; input: CreateNote } | null>(
     null,
@@ -73,8 +84,9 @@ export function NotesWorkspace({
   const deleteRefreshRef = useRef<HTMLButtonElement>(null);
   const deleteCancelRef = useRef<HTMLButtonElement>(null);
   const deleteButtonRef = useRef<HTMLButtonElement>(null);
-  const dirty = hasUnsavedChanges(draft, saved?.note ?? null);
+  const dirty = !editorValid || hasUnsavedChanges(draft, saved?.note ?? null);
   const valid =
+    editorValid &&
     draft !== null &&
     noteContentSchema.safeParse({ title: draft.title, content: draft.content }).success;
   const busy =
@@ -108,6 +120,9 @@ export function NotesWorkspace({
   }, []);
 
   const applySnapshot = useCallback((snapshot: NoteSnapshot) => {
+    setEditorKey((key) => key + 1);
+    setEditorMode("loading");
+    setEditorValid(true);
     setDraft({
       title: snapshot.note.title,
       content: snapshot.note.content,
@@ -223,10 +238,9 @@ export function NotesWorkspace({
     }
   }
 
-  const save = useCallback(async () => {
+  const save = useCallback(async (): Promise<NoteSnapshot | undefined> => {
     if (
       !draft ||
-      (saved !== null && !dirty) ||
       !valid ||
       busyRef.current ||
       writeBlocked ||
@@ -236,6 +250,7 @@ export function NotesWorkspace({
       saveState === "missing"
     )
       return;
+    if (saved && !dirty) return saved;
     const snapshot = { ...draft };
     busyRef.current = true;
     setSaveState("saving");
@@ -278,6 +293,7 @@ export function NotesWorkspace({
       setSaveState("idle");
       setDeleteFailure(null);
       setDeleteNotice(null);
+      return result;
     } catch (error) {
       const kind = classifyFailure(error);
       setSaveState(kind);
@@ -321,7 +337,10 @@ export function NotesWorkspace({
     }
     if (selection.kind === "replace") applySnapshot(selection.snapshot);
     else {
-      setDraft({ title: "", content: "", createdAt: new Date().toISOString() });
+      setEditorKey((key) => key + 1);
+      setEditorMode("loading");
+      setEditorValid(true);
+      setDraft({ title: "", content: emptyNoteDocument(), createdAt: new Date().toISOString() });
       setSaved(null);
       setPendingCreation(null);
       setSaveState("idle");
@@ -479,7 +498,7 @@ export function NotesWorkspace({
 
   return (
     <main className="notes-workspace space-y-5 p-4 sm:p-6">
-      <header className="flex flex-wrap items-center justify-between gap-3">
+      <header className="workspace-header">
         <h1 className="text-2xl font-semibold">Atlas notes</h1>
         <Button
           ref={newNoteRef}
@@ -488,120 +507,149 @@ export function NotesWorkspace({
         >
           New note
         </Button>
+        <div className="workspace-save-controls">
+          <div className="workspace-save-status">
+            <p role={failed ? "alert" : "status"} className="text-sm">
+              {status}
+            </p>
+            {readFailure && dirty && (
+              <p role="status" className="text-sm">
+                Unsaved changes
+              </p>
+            )}
+            {deleteFailure === "failed" && saved && (
+              <Button ref={deleteRefreshRef} disabled={busy} onClick={() => void refreshNotes()}>
+                Refresh notes
+              </Button>
+            )}
+            {(saveState === "failed" || saveState === "creation-conflict") &&
+              saved === null &&
+              !readFailure &&
+              !blocked &&
+              loadState !== "forbidden" && (
+                <Button disabled={busy} onClick={() => void refreshNotes()}>
+                  Refresh notes
+                </Button>
+              )}
+            {loadState === "failed" && (
+              <Button
+                disabled={busy}
+                onClick={() => {
+                  if (draft) {
+                    void refreshNotes();
+                    return;
+                  }
+                  setLoadState("loading");
+                  setLoadAttempt((value) => value + 1);
+                }}
+              >
+                Retry loading
+              </Button>
+            )}
+            {recoveryKind === "unauthenticated" && (
+              <a
+                ref={signInRef}
+                className="inline-flex min-h-11 items-center underline underline-offset-4"
+                href="/api/auth/login"
+              >
+                Sign in again
+              </a>
+            )}
+            {recoveryKind === "missing" && (
+              <div className="flex flex-wrap gap-3">
+                <Button disabled={busy} onClick={() => void refreshNotes()}>
+                  Refresh notes
+                </Button>
+                {draft &&
+                  (saveState === "missing" ||
+                    deleteFailure === "missing" ||
+                    readFailure?.id === saved?.note.id) && (
+                    <Button variant="outline" disabled={busy} onClick={keepAsNew}>
+                      Keep as new note
+                    </Button>
+                  )}
+              </div>
+            )}
+            {readFailure && recoveryKind === "failed" && (
+              <Button
+                disabled={busy}
+                onClick={() => {
+                  if (readFailure.compare) void openNote(readFailure.id, true);
+                  else requestSelection({ kind: "read", id: readFailure.id });
+                }}
+              >
+                Retry opening
+              </Button>
+            )}
+          </div>
+          {draft && (
+            <div className="flex flex-wrap items-center gap-2">
+              <Button
+                disabled={
+                  (saved !== null && !dirty) ||
+                  busy ||
+                  writeBlocked ||
+                  deleteFailure !== null ||
+                  !valid ||
+                  saveState === "creation-conflict" ||
+                  saveState === "conflict" ||
+                  saveState === "missing"
+                }
+                title="Save (Ctrl/Cmd+S)"
+                onClick={() => void save()}
+              >
+                Save
+              </Button>
+              {(saveState === "conflict" || deleteFailure === "conflict") && saved && (
+                <Button
+                  ref={compareRef}
+                  variant="outline"
+                  disabled={busy || blocked}
+                  onClick={() => void openNote(saved.note.id, true)}
+                >
+                  Compare latest
+                </Button>
+              )}
+            </div>
+          )}
+        </div>
       </header>
       {example && (
         <p className="text-sm text-muted-foreground" role="note">
           Development preview with synthetic notes. Saves last only until reload.
         </p>
       )}
-      <p role={failed ? "alert" : "status"} className="text-sm">
-        {status}
-      </p>
-      {readFailure && dirty && (
-        <p role="status" className="text-sm">
-          Unsaved changes
-        </p>
-      )}
-      {deleteFailure === "failed" && saved && (
-        <Button ref={deleteRefreshRef} disabled={busy} onClick={() => void refreshNotes()}>
-          Refresh notes
-        </Button>
-      )}
-      {(saveState === "failed" || saveState === "creation-conflict") &&
-        saved === null &&
-        !readFailure &&
-        !blocked &&
-        loadState !== "forbidden" && (
-          <Button disabled={busy} onClick={() => void refreshNotes()}>
-            Refresh notes
-          </Button>
-        )}
-      {loadState === "failed" && (
-        <Button
-          disabled={busy}
-          onClick={() => {
-            if (draft) {
-              void refreshNotes();
-              return;
-            }
-            setLoadState("loading");
-            setLoadAttempt((value) => value + 1);
-          }}
-        >
-          Retry loading
-        </Button>
-      )}
-      {recoveryKind === "unauthenticated" && (
-        <a
-          ref={signInRef}
-          className="inline-flex min-h-11 items-center underline underline-offset-4"
-          href="/api/auth/login"
-        >
-          Sign in again
-        </a>
-      )}
-      {recoveryKind === "missing" && (
-        <div className="flex flex-wrap gap-3">
-          <Button disabled={busy} onClick={() => void refreshNotes()}>
-            Refresh notes
-          </Button>
-          {draft &&
-            (saveState === "missing" ||
-              deleteFailure === "missing" ||
-              readFailure?.id === saved?.note.id) && (
-              <Button variant="outline" disabled={busy} onClick={keepAsNew}>
-                Keep as new note
-              </Button>
-            )}
-        </div>
-      )}
-      {readFailure && recoveryKind === "failed" && (
-        <Button
-          disabled={busy}
-          onClick={() => {
-            if (readFailure.compare) void openNote(readFailure.id, true);
-            else requestSelection({ kind: "read", id: readFailure.id });
-          }}
-        >
-          Retry opening
-        </Button>
-      )}
-      {(loadState === "ready" || draft !== null) && (
-        <div className="grid gap-5 lg:grid-cols-[minmax(160px,200px)_minmax(0,1fr)]">
-          <nav aria-label="Notes" className="space-y-3">
-            <h2 className="font-semibold">Your notes</h2>
-            {notes.length === 0 ? (
-              <p>
-                {blocked
-                  ? "Restore access to load your notes."
-                  : "No notes yet. Create a new note to get started."}
-              </p>
-            ) : (
-              <div className="flex flex-wrap gap-2 lg:flex-col">
-                {notes.map((note) => (
-                  <Button
-                    key={note.id}
-                    variant={saved?.note.id === note.id ? "secondary" : "outline"}
-                    aria-current={saved?.note.id === note.id ? "true" : undefined}
-                    disabled={busy || blocked}
-                    className="note-list-button"
-                    onClick={() => requestSelection({ kind: "read", id: note.id })}
-                  >
-                    {note.title || "Untitled note"}
-                  </Button>
-                ))}
-              </div>
-            )}
-          </nav>
-          {draft && (
-            <div className="note-detail">
-              <Card>
-                <CardHeader>
-                  <CardTitle>
-                    <h2>Edit note</h2>
-                  </CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-3">
+      <div className="notes-body">
+        {(loadState === "ready" || draft !== null) && (
+          <>
+            <nav aria-label="Notes" className="space-y-3">
+              <h2 className="font-semibold">Your notes</h2>
+              {notes.length === 0 ? (
+                <p>
+                  {blocked
+                    ? "Restore access to load your notes."
+                    : "No notes yet. Create a new note to get started."}
+                </p>
+              ) : (
+                <div className="flex flex-wrap gap-2 lg:flex-col">
+                  {notes.map((note) => (
+                    <Button
+                      key={note.id}
+                      variant={saved?.note.id === note.id ? "secondary" : "outline"}
+                      aria-current={saved?.note.id === note.id ? "true" : undefined}
+                      disabled={busy || blocked}
+                      className="note-list-button"
+                      onClick={() => requestSelection({ kind: "read", id: note.id })}
+                    >
+                      {note.title || "Untitled note"}
+                    </Button>
+                  ))}
+                </div>
+              )}
+            </nav>
+            {draft && (
+              <div className="note-detail" data-editor-mode={editorMode}>
+                <section aria-label="Original note" className="note-editor-plane space-y-3">
                   <Label htmlFor="note-title">Title</Label>
                   <Input
                     ref={titleRef}
@@ -611,16 +659,18 @@ export function NotesWorkspace({
                     disabled={openingId !== null || deleting}
                     onChange={(event) => setDraft({ ...draft, title: event.target.value })}
                   />
-                  <Label htmlFor="note-content">Markdown source</Label>
-                  <Textarea
-                    id="note-content"
-                    value={draft.content}
-                    maxLength={100_000}
-                    rows={6}
-                    className="note-source"
-                    disabled={openingId !== null || deleting}
-                    onChange={(event) => setDraft({ ...draft, content: event.target.value })}
-                  />
+                  <Suspense fallback={<p>Opening editor...</p>}>
+                    <BlockNoteEditor
+                      key={editorKey}
+                      initialContent={draft.content}
+                      disabled={openingId !== null || deleting}
+                      onChange={(content) =>
+                        setDraft((current) => (current ? { ...current, content } : current))
+                      }
+                      onModeChange={setEditorMode}
+                      onValidityChange={setEditorValid}
+                    />
+                  </Suspense>
                   {!valid && (
                     <p role="alert">
                       The text contains unsupported characters or is too long. Use up to 256
@@ -628,32 +678,6 @@ export function NotesWorkspace({
                     </p>
                   )}
                   <div className="flex flex-wrap items-center gap-3">
-                    <Button
-                      disabled={
-                        (saved !== null && !dirty) ||
-                        busy ||
-                        writeBlocked ||
-                        deleteFailure !== null ||
-                        !valid ||
-                        saveState === "creation-conflict" ||
-                        saveState === "conflict" ||
-                        saveState === "missing"
-                      }
-                      onClick={() => void save()}
-                    >
-                      Save
-                    </Button>
-                    <span className="text-xs text-muted-foreground">Ctrl/Cmd+S to save</span>
-                    {(saveState === "conflict" || deleteFailure === "conflict") && saved && (
-                      <Button
-                        ref={compareRef}
-                        variant="outline"
-                        disabled={busy || blocked}
-                        onClick={() => void openNote(saved.note.id, true)}
-                      >
-                        Compare latest
-                      </Button>
-                    )}
                     {saved && (
                       <Button
                         ref={deleteButtonRef}
@@ -665,46 +689,72 @@ export function NotesWorkspace({
                       </Button>
                     )}
                   </div>
-                </CardContent>
-              </Card>
-              <Card>
-                <CardHeader>
-                  <CardTitle>
-                    <h2>Preview</h2>
-                  </CardTitle>
-                </CardHeader>
-                <CardContent>
-                  {draft.content ? (
-                    <MarkdownPreview content={draft.content} />
-                  ) : (
-                    <p>Write Markdown to see a preview.</p>
-                  )}
-                </CardContent>
-              </Card>
-              {comparison && (
-                <Card className="note-comparison">
-                  <CardHeader>
-                    <CardTitle>
-                      <h2>Latest saved version</h2>
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent className="space-y-3">
-                    <p>{comparison.note.title || "Untitled note"}</p>
-                    <MarkdownPreview content={comparison.note.content} />
-                    <Button
-                      variant="outline"
-                      disabled={busy || blocked}
-                      onClick={() => requestSelection({ kind: "replace", snapshot: comparison })}
-                    >
-                      Use latest version
-                    </Button>
-                  </CardContent>
-                </Card>
-              )}
-            </div>
-          )}
-        </div>
-      )}
+                </section>
+                {editorMode === "source" && typeof draft.content === "string" && (
+                  <Card>
+                    <CardHeader>
+                      <CardTitle>
+                        <h2>Preview</h2>
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      {draft.content ? (
+                        <MarkdownPreview content={draft.content} />
+                      ) : (
+                        <p>Write Markdown to see a preview.</p>
+                      )}
+                    </CardContent>
+                  </Card>
+                )}
+                {comparison && (
+                  <Card className="note-comparison">
+                    <CardHeader>
+                      <CardTitle>
+                        <h2>Latest saved version</h2>
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent className="space-y-3">
+                      <p>{comparison.note.title || "Untitled note"}</p>
+                      <NoteContentView content={comparison.note.content} />
+                      <Button
+                        variant="outline"
+                        disabled={busy || blocked}
+                        onClick={() => requestSelection({ kind: "replace", snapshot: comparison })}
+                      >
+                        Use latest version
+                      </Button>
+                    </CardContent>
+                  </Card>
+                )}
+              </div>
+            )}
+          </>
+        )}
+        {!example && organizer && (
+          <OrganizeWorkspace
+            client={organizer}
+            source={saved}
+            sourceDirty={dirty}
+            enabled={requestsEnabled && !blocked}
+            canStart={
+              draft !== null &&
+              valid &&
+              !busy &&
+              !writeBlocked &&
+              deleteFailure === null &&
+              !["creation-conflict", "conflict", "missing"].includes(saveState)
+            }
+            prepareSource={save}
+            onCheckNotes={refreshNotes}
+            onSaved={(snapshot) =>
+              setNotes((current) => [
+                snapshot.note,
+                ...current.filter((note) => note.id !== snapshot.note.id),
+              ])
+            }
+          />
+        )}
+      </div>
       <AlertDialog
         open={pending !== null}
         onOpenChange={(open) => {

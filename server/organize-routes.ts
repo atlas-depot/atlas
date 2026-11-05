@@ -1,52 +1,27 @@
+import { hasEmptyBody } from "./request-body.ts";
 import { Hono } from "hono";
 import { z } from "zod";
-import { apiError } from "../shared/http.ts";
+import { apiError, ifMatchSchema } from "../shared/http.ts";
 import { organizeRunResponseSchema, organizeStartResponseSchema } from "../shared/organize.ts";
+import { OrganizeClaimError } from "./db/organize-runs.ts";
+import { createDraftRoutes } from "./draft-routes.ts";
 import type { AuthEnv } from "./auth.ts";
 import type { createDurableOrganizeRuns } from "./organize-runs.ts";
 
 export type OrganizeService = Pick<
   ReturnType<typeof createDurableOrganizeRuns>,
   "start" | "read" | "cancel" | "acknowledge"
->;
+> &
+  Partial<Pick<ReturnType<typeof createDurableOrganizeRuns>, "drafts" | "work" | "handoff">>;
 
 const idSchema = z.uuid();
 const notFound = () => apiError("NOT_FOUND", "Resource not found.");
 const unavailable = () => apiError("SERVICE_UNAVAILABLE", "Organizer is temporarily unavailable.");
 
-async function hasEmptyBody(request: Request): Promise<boolean> {
-  if (Number(request.headers.get("Content-Length")) > 0) return false;
-  if (!request.body) return true;
-  const reader = request.body.getReader();
-  let timeout: ReturnType<typeof setTimeout> | undefined;
-  try {
-    // Node presents even bodyless POSTs as streams. Inspect without collecting bytes,
-    // and bound empty/stalled uploads before any database or runtime work begins.
-    return await Promise.race([
-      (async () => {
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) return true;
-          if (value.byteLength > 0) return false;
-        }
-      })(),
-      new Promise<false>((resolve) => {
-        timeout = setTimeout(() => resolve(false), 5_000);
-      }),
-    ]);
-  } catch {
-    return false;
-  } finally {
-    clearTimeout(timeout);
-    // Cancellation must not make a stalled uploader block the response again.
-    void reader.cancel().catch(() => {});
-    reader.releaseLock();
-  }
-}
-
 /** Mounted behind requireAuth and the app's cookie-origin protection. */
 export function createOrganizeRoutes(service?: OrganizeService) {
   const routes = new Hono<AuthEnv>();
+  routes.route("/", createDraftRoutes(service));
 
   routes.post("/notes/:id/organize", async (c) => {
     const id = idSchema.safeParse(c.req.param("id"));
@@ -58,14 +33,32 @@ export function createOrganizeRoutes(service?: OrganizeService) {
     }
     if (!service) return c.json(unavailable(), 503);
     try {
-      const result = await service.start(c.get("user").userId, id.data);
+      const expected = c.req.header("If-Match");
+      if (expected === undefined)
+        return c.json(apiError("PRECONDITION_REQUIRED", "If-Match is required."), 428);
+      if (!ifMatchSchema.safeParse(expected).success)
+        return c.json(apiError("VALIDATION_ERROR", "Invalid If-Match."), 400);
+      const result = await service.start(c.get("user").userId, id.data, expected);
       if (result.status === "not_found") return c.json(notFound(), 404);
       const response = organizeStartResponseSchema.parse({
         runId: result.runId,
         status: result.status ?? "accepted",
       });
       return c.json(response, 202);
-    } catch {
+    } catch (error) {
+      if (error instanceof OrganizeClaimError)
+        return error.reason === "stale"
+          ? c.json(
+              apiError(
+                "PRECONDITION_FAILED",
+                "The source note changed. Save or reload before organizing.",
+              ),
+              412,
+            )
+          : c.json(
+              apiError("CONFLICT", "Finish the existing draft or run before organizing again."),
+              409,
+            );
       return c.json(unavailable(), 503);
     }
   });

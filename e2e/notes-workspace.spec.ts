@@ -1,8 +1,9 @@
+import { expectEditorContent } from "./notes-editor.ts";
 import { expect, test } from "@playwright/test";
 
 test("edit, keyboard save, and switching notes preserve the literal Markdown", async ({ page }) => {
   await page.goto("/");
-  const source = page.getByRole("textbox", { name: "Markdown source" });
+  const source = page.getByRole("textbox", { name: /^(Markdown source|Note content)$/ });
   await expect(page.getByRole("textbox", { name: "Title", exact: true })).toHaveValue(
     "Project review",
   );
@@ -19,18 +20,18 @@ test("edit, keyboard save, and switching notes preserve the literal Markdown", a
   await expect(page.getByRole("status")).toHaveText("Saved for this preview session");
   await page.getByRole("button", { name: "Reading notes", exact: true }).click();
   await page.getByRole("button", { name: "Project review", exact: true }).click();
-  await expect(source).toHaveValue(markdown);
+  await expectEditorContent(source, markdown);
 });
 
 test("failed save retains edits and can be retried with Cmd+S", async ({ page }) => {
   await page.goto("/?notesExample=save-failure");
-  const source = page.getByRole("textbox", { name: "Markdown source" });
+  const source = page.getByRole("textbox", { name: /^(Markdown source|Note content)$/ });
   await source.fill("Do not lose this draft.");
   await page.getByRole("button", { name: "Save", exact: true }).click();
   await expect(page.getByRole("alert")).toHaveText(
     "Save failed. Your changes are still here. Try again.",
   );
-  await expect(source).toHaveValue("Do not lose this draft.");
+  await expectEditorContent(source, "Do not lose this draft.");
   await page.keyboard.press("Meta+s");
   await expect(page.getByRole("status")).toHaveText("Saved for this preview session");
 });
@@ -39,8 +40,8 @@ test("typing during save stays unsaved and repeated shortcuts do not acknowledge
   page,
 }) => {
   await page.goto("/?notesExample=slow-save");
-  const source = page.getByRole("textbox", { name: "Markdown source" });
-  await expect(source).toHaveValue(/Prepare the/);
+  const source = page.getByRole("textbox", { name: /^(Markdown source|Note content)$/ });
+  await expectEditorContent(source, /Prepare the/);
   await page.clock.install({ time: new Date(0) });
   await page.clock.pauseAt(new Date(1000));
   await source.fill("First snapshot");
@@ -53,7 +54,7 @@ test("typing during save stays unsaved and repeated shortcuts do not acknowledge
   await page.keyboard.press("Control+s");
   await page.clock.runFor(1501);
   await expect(page.getByRole("status")).toHaveText("Unsaved changes");
-  await expect(source).toHaveValue("A newer edit");
+  await expectEditorContent(source, "A newer edit");
   await page.getByRole("button", { name: "Save", exact: true }).click();
   await page.clock.runFor(1501);
   await expect(page.getByRole("status")).toHaveText("Saved for this preview session");
@@ -115,7 +116,7 @@ test("malicious Markdown cannot execute or load remote images", async ({ page })
   });
   await page.goto("/");
   await page
-    .getByRole("textbox", { name: "Markdown source" })
+    .getByRole("textbox", { name: /^(Markdown source|Note content)$/ })
     .fill(
       '<script>window.hacked = true</script>\n\n<img src=x onerror="window.hacked = true">\n\n[unsafe](javascript:alert%281%29)\n\n![tracking](https://example.com/pixel.png)\n\n[safe](https://example.com)',
     );
@@ -137,17 +138,17 @@ test("individual-note opening supplies content and successive saves retain updat
   page,
 }) => {
   await page.goto("/");
-  const source = page.getByRole("textbox", { name: "Markdown source" });
-  await expect(source).toHaveValue(/Prepare the \*\*budget summary\*\*/);
+  const source = page.getByRole("textbox", { name: /^(Markdown source|Note content)$/ });
+  await expectEditorContent(source, /Prepare the \*\*budget summary\*\*/);
   for (const content of ["First save", "Second save with the returned ETag"]) {
     await source.fill(content);
     await page.getByRole("button", { name: "Save", exact: true }).click();
     await expect(page.getByRole("status")).toHaveText("Saved for this preview session");
   }
   await page.getByRole("button", { name: "Reading notes", exact: true }).click();
-  await expect(source).toHaveValue(/Next steps/);
+  await expectEditorContent(source, /Next steps/);
   await page.getByRole("button", { name: "Project review", exact: true }).click();
-  await expect(source).toHaveValue("Second save with the returned ETag");
+  await expectEditorContent(source, "Second save with the returned ETag");
 });
 
 test("a server-assigned note identity is used for subsequent updates, without duplicate creates", async ({
@@ -159,7 +160,9 @@ test("a server-assigned note identity is used for subsequent updates, without du
   await page.getByRole("textbox", { name: "Title", exact: true }).fill("New server note");
   await page.getByRole("button", { name: "Save", exact: true }).click();
   await expect(page.getByRole("status")).toHaveText("Saved for this preview session");
-  await page.getByRole("textbox", { name: "Markdown source" }).fill("Edited after creation");
+  await page
+    .getByRole("textbox", { name: /^(Markdown source|Note content)$/ })
+    .fill("Edited after creation");
   await page.getByRole("button", { name: "Save", exact: true }).click();
   await expect(page.getByRole("status")).toHaveText("Saved for this preview session");
   await expect(page.getByRole("navigation", { name: "Notes" }).getByRole("button")).toHaveCount(1);
@@ -172,32 +175,37 @@ test("failed individual-note opening is recoverable without using a list record 
   await expect(page.getByRole("alert")).toHaveText(
     "Could not open note. Your current changes are still here. Try again.",
   );
-  await expect(page.getByRole("textbox", { name: "Markdown source" })).toHaveCount(0);
+  await expect(page.getByRole("textbox", { name: /^(Markdown source|Note content)$/ })).toHaveCount(
+    0,
+  );
   await page.getByRole("button", { name: "Retry opening" }).click();
-  await expect(page.getByRole("textbox", { name: "Markdown source" })).toHaveValue(/Prepare the/);
+  await expectEditorContent(
+    page.getByRole("textbox", { name: /^(Markdown source|Note content)$/ }),
+    /Prepare the/,
+  );
 });
 
 test("conflict preserves local text and explicit comparison/adoption obtains a usable new ETag", async ({
   page,
 }) => {
   await page.goto("/?notesExample=conflict");
-  const source = page.getByRole("textbox", { name: "Markdown source" });
+  const source = page.getByRole("textbox", { name: /^(Markdown source|Note content)$/ });
   await source.fill("My unsaved local edit");
   await page.getByRole("button", { name: "Save", exact: true }).click();
   await expect(page.getByRole("alert")).toContainText("This note changed on the server.");
-  await expect(source).toHaveValue("My unsaved local edit");
+  await expectEditorContent(source, "My unsaved local edit");
   await page.getByRole("button", { name: "Compare latest" }).click();
   await expect(
     page.getByText("A newer version saved by another client.", { exact: true }),
   ).toBeVisible();
-  await expect(source).toHaveValue("My unsaved local edit");
+  await expectEditorContent(source, "My unsaved local edit");
   await page.getByRole("button", { name: "Use latest version" }).click();
   await expect(page.getByRole("alertdialog")).toBeVisible();
   await page.getByRole("button", { name: "Keep editing" }).click();
-  await expect(source).toHaveValue("My unsaved local edit");
+  await expectEditorContent(source, "My unsaved local edit");
   await page.getByRole("button", { name: "Use latest version" }).click();
   await page.getByRole("button", { name: "Discard changes", exact: true }).click();
-  await expect(source).toHaveValue("A newer version saved by another client.");
+  await expectEditorContent(source, "A newer version saved by another client.");
   await source.fill("Edit based on the latest version");
   await page.getByRole("button", { name: "Save", exact: true }).click();
   await expect(page.getByRole("status")).toHaveText("Saved for this preview session");
@@ -211,17 +219,29 @@ test("notes workspace fits desktop and mobile and supports keyboard editing", as
   await page.screenshot({ path: testInfo.outputPath("before-source-viewer.png"), fullPage: true });
   await page.goto("/");
   await expect(page.getByRole("textbox", { name: "Title", exact: true })).toBeVisible();
+  await expect(
+    page.getByRole("textbox", { name: /^(Markdown source|Note content)$/ }),
+  ).toBeVisible();
+  await expect(page.getByText("Opening editor...", { exact: true })).toHaveCount(0);
   await page.screenshot({ path: testInfo.outputPath("after-notes-desktop.png"), fullPage: true });
   await page.setViewportSize({ width: 375, height: 812 });
   await page.screenshot({ path: testInfo.outputPath("after-notes-mobile.png"), fullPage: true });
   await page
-    .getByRole("textbox", { name: "Markdown source" })
+    .getByRole("textbox", { name: /^(Markdown source|Note content)$/ })
     .fill("# Mobile\n\n" + "longword".repeat(100));
   expect(await page.evaluate("document.documentElement.scrollWidth <= window.innerWidth")).toBe(
     true,
   );
-  await page.keyboard.press("Tab");
-  await expect(page.getByRole("button", { name: "Save", exact: true })).toBeFocused();
+  const save = page.getByRole("button", { name: "Save", exact: true });
+  // Save lives in the page header. Reach it through the actual reverse tab order.
+  for (
+    let step = 0;
+    step < 16 && !(await save.evaluate((element) => element.matches(":focus")));
+    step++
+  ) {
+    await page.keyboard.press("Shift+Tab");
+  }
+  await expect(save).toBeFocused();
   await page.keyboard.press("Enter");
   await expect(page.getByRole("status")).toHaveText("Saved for this preview session");
   await page.screenshot({ path: testInfo.outputPath("mobile-long-content.png"), fullPage: true });
@@ -251,11 +271,11 @@ test("expired-session save preserves the current text and removes other cached n
   page,
 }) => {
   await page.goto("/?notesExample=expired-save");
-  const source = page.getByRole("textbox", { name: "Markdown source" });
+  const source = page.getByRole("textbox", { name: /^(Markdown source|Note content)$/ });
   await source.fill("Copy this text before signing in again.");
   await page.getByRole("button", { name: "Save", exact: true }).click();
   await expect(page.getByRole("alert")).toContainText("Your session has ended.");
-  await expect(source).toHaveValue("Copy this text before signing in again.");
+  await expectEditorContent(source, "Copy this text before signing in again.");
   await expect(page.getByRole("link", { name: "Sign in again" })).toHaveAttribute(
     "href",
     "/api/auth/login",
@@ -266,21 +286,21 @@ test("expired-session save preserves the current text and removes other cached n
 
 test("a forbidden save keeps input and blocks further writes", async ({ page }) => {
   await page.goto("/?notesExample=forbidden-save");
-  const source = page.getByRole("textbox", { name: "Markdown source" });
+  const source = page.getByRole("textbox", { name: /^(Markdown source|Note content)$/ });
   await source.fill("Preserve denied edit");
   await page.getByRole("button", { name: "Save", exact: true }).click();
   await expect(page.getByRole("alert")).toContainText("This request was blocked.");
-  await expect(source).toHaveValue("Preserve denied edit");
+  await expectEditorContent(source, "Preserve denied edit");
   await expect(page.getByRole("button", { name: "Save", exact: true })).toBeDisabled();
   await expect(page.getByRole("button", { name: "New note", exact: true })).toBeEnabled();
   const other = page.getByRole("button", { name: "Reading notes", exact: true });
   await expect(other).toBeEnabled();
   await other.click();
   await page.getByRole("button", { name: "Keep editing", exact: true }).click();
-  await expect(source).toHaveValue("Preserve denied edit");
+  await expectEditorContent(source, "Preserve denied edit");
   await other.click();
   await page.getByRole("button", { name: "Discard changes", exact: true }).click();
-  await expect(source).toHaveValue(/Next steps/);
+  await expectEditorContent(source, /Next steps/);
   await source.fill("A different note remains readable, with writes blocked");
   await expect(page.getByRole("button", { name: "Save", exact: true })).toBeDisabled();
   await page.getByRole("button", { name: "New note", exact: true }).click();
@@ -293,7 +313,7 @@ test("a missing save removes the old entry before explicit creation, without req
   page,
 }) => {
   await page.goto("/?notesExample=missing-save");
-  const source = page.getByRole("textbox", { name: "Markdown source" });
+  const source = page.getByRole("textbox", { name: /^(Markdown source|Note content)$/ });
   await source.fill("Keep this orphaned local edit");
   await page.getByRole("button", { name: "Save", exact: true }).click();
   await expect(page.getByRole("alert")).toContainText("This note is no longer available.");
@@ -303,11 +323,11 @@ test("a missing save removes the old entry before explicit creation, without req
       .getByRole("navigation", { name: "Notes" })
       .getByRole("button", { name: "Project review", exact: true }),
   ).toHaveCount(0);
-  await expect(source).toHaveValue("Keep this orphaned local edit");
+  await expectEditorContent(source, "Keep this orphaned local edit");
   await page.getByRole("button", { name: "Keep as new note", exact: true }).click();
   await page.getByRole("button", { name: "Save", exact: true }).click();
   await expect(page.getByRole("status")).toHaveText("Saved for this preview session");
-  await expect(source).toHaveValue("Keep this orphaned local edit");
+  await expectEditorContent(source, "Keep this orphaned local edit");
   await expect(
     page
       .getByRole("navigation", { name: "Notes" })
@@ -323,6 +343,10 @@ test("controls and preview remain usable across laptop, tablet and narrow touch 
     "Project review",
   );
   const previewHeading = page.getByRole("heading", { name: "Preview", exact: true });
+  const editor = page
+    .getByRole("region", { name: "Original note", exact: true })
+    .getByRole("textbox", { name: /^(Markdown source|Note content)$/ });
+  await expect(editor).toBeVisible();
   for (const width of [1440, 1280, 1024, 768, 767, 375, 320]) {
     await page.setViewportSize({ width, height: 812 });
     await page.evaluate("window.scrollTo(0, 0)");
@@ -333,8 +357,10 @@ test("controls and preview remain usable across laptop, tablet and narrow touch 
       ),
     ).toBeGreaterThanOrEqual(16);
     expect(
-      await page.evaluate(
-        "parseFloat(getComputedStyle(document.querySelector('#note-content')).fontSize)",
+      await editor.evaluate((element) =>
+        Number.parseFloat(
+          element.ownerDocument.defaultView?.getComputedStyle(element).fontSize ?? "0",
+        ),
       ),
     ).toBeGreaterThanOrEqual(16);
     expect(
@@ -363,8 +389,8 @@ test("deleting asks for confirmation, warns about unsaved edits, and selects the
   page,
 }) => {
   await page.goto("/");
-  const source = page.getByRole("textbox", { name: "Markdown source" });
-  await expect(source).toHaveValue(/Prepare the/);
+  const source = page.getByRole("textbox", { name: /^(Markdown source|Note content)$/ });
+  await expectEditorContent(source, /Prepare the/);
   await source.fill("Unsaved deletion draft");
   await page.getByRole("button", { name: "Delete note", exact: true }).click();
   const dialog = page.getByRole("alertdialog");
@@ -373,14 +399,14 @@ test("deleting asks for confirmation, warns about unsaved edits, and selects the
   await expect(page.getByRole("button", { name: "Keep note", exact: true })).toBeFocused();
   await page.keyboard.press("Escape");
   await expect(dialog).toHaveCount(0);
-  await expect(source).toHaveValue("Unsaved deletion draft");
+  await expectEditorContent(source, "Unsaved deletion draft");
 
   await page.getByRole("button", { name: "Delete note", exact: true }).click();
   await page.getByRole("button", { name: "Delete permanently", exact: true }).click();
   await expect(page.getByRole("textbox", { name: "Title", exact: true })).toHaveValue(
     "Reading notes",
   );
-  await expect(source).toHaveValue(/Next steps/);
+  await expectEditorContent(source, /Next steps/);
   await expect(
     page.getByRole("navigation", { name: "Notes" }).getByRole("button", { name: "Project review" }),
   ).toHaveCount(0);
@@ -397,14 +423,14 @@ test("a stale delete keeps the note and requires comparison before a new confirm
   page,
 }) => {
   await page.goto("/?notesExample=delete-conflict");
-  const source = page.getByRole("textbox", { name: "Markdown source" });
+  const source = page.getByRole("textbox", { name: /^(Markdown source|Note content)$/ });
   await source.fill("Local delete draft");
   await page.getByRole("button", { name: "Delete note", exact: true }).click();
   await page.getByRole("button", { name: "Delete permanently", exact: true }).click();
   await expect(page.getByRole("alert")).toContainText(
     "This note changed on the server. Nothing was deleted.",
   );
-  await expect(source).toHaveValue("Local delete draft");
+  await expectEditorContent(source, "Local delete draft");
   await expect(
     page
       .getByRole("navigation", { name: "Notes" })
@@ -419,7 +445,7 @@ test("a stale delete keeps the note and requires comparison before a new confirm
   ).toBeVisible();
   await page.getByRole("button", { name: "Use latest version", exact: true }).click();
   await page.getByRole("button", { name: "Discard changes", exact: true }).click();
-  await expect(source).toHaveValue("A newer version saved by another client.");
+  await expectEditorContent(source, "A newer version saved by another client.");
   await expect(page.getByRole("button", { name: "Delete note", exact: true })).toBeEnabled();
 
   await page.getByRole("button", { name: "Delete note", exact: true }).click();
@@ -436,13 +462,13 @@ test("a stale delete keeps the note and requires comparison before a new confirm
 
 test("a failed delete keeps the note and can be retried", async ({ page }) => {
   await page.goto("/?notesExample=delete-failure");
-  const source = page.getByRole("textbox", { name: "Markdown source" });
+  const source = page.getByRole("textbox", { name: /^(Markdown source|Note content)$/ });
   await page.getByRole("button", { name: "Delete note", exact: true }).click();
   await page.getByRole("button", { name: "Delete permanently", exact: true }).click();
   await expect(page.getByRole("alert")).toHaveText(
     "Could not confirm deletion. Your text is preserved. Refresh the notes list before trying again; the note may already be gone.",
   );
-  await expect(source).toHaveValue(/Prepare the/);
+  await expectEditorContent(source, /Prepare the/);
   await expect(
     page
       .getByRole("navigation", { name: "Notes" })
@@ -465,7 +491,7 @@ test("GFM task checkboxes keep native proportions while the title keeps its touc
 }) => {
   await page.goto("/");
   await page
-    .getByRole("textbox", { name: "Markdown source" })
+    .getByRole("textbox", { name: /^(Markdown source|Note content)$/ })
     .fill("- [ ] Pending task\n- [x] Completed task");
   const preview = page.getByRole("region", { name: "Markdown preview" });
   const checkboxes = preview.getByRole("checkbox");

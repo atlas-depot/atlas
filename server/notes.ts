@@ -1,3 +1,4 @@
+import { readJson, readBody } from "./request-body.ts";
 import { Hono } from "hono";
 import { apiError, ifMatchSchema } from "../shared/http.ts";
 import {
@@ -40,51 +41,6 @@ const invalid = () => apiError("VALIDATION_ERROR", "Invalid note request.");
 const stale = () =>
   apiError("PRECONDITION_FAILED", "The note has changed. Reload before retrying.");
 const etag = (value: StoredNote) => JSON.stringify(`${value.note.id}:${value.revision}`);
-
-/** Bound actual bytes and total upload time, including requests without Content-Length. */
-async function readBody(request: Request, maxBytes: number): Promise<string | undefined> {
-  if (Number(request.headers.get("Content-Length")) > maxBytes) return undefined;
-  if (!request.body) return "";
-  const reader = request.body.getReader();
-  let timeout: ReturnType<typeof setTimeout> | undefined;
-  try {
-    return await Promise.race([
-      (async () => {
-        const decoder = new TextDecoder("utf-8", { fatal: true });
-        let size = 0;
-        let text = "";
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) return text + decoder.decode();
-          size += value.byteLength;
-          if (size > maxBytes) return undefined;
-          text += decoder.decode(value, { stream: true });
-        }
-      })(),
-      new Promise<undefined>((resolve) => {
-        timeout = setTimeout(() => resolve(undefined), 5_000);
-      }),
-    ]);
-  } catch {
-    return undefined;
-  } finally {
-    clearTimeout(timeout);
-    // Do not wait on an uncooperative upload stream's cancellation hook.
-    void reader.cancel().catch(() => {});
-    reader.releaseLock();
-  }
-}
-
-async function readJson(request: Request): Promise<unknown> {
-  // Allows the 100k UTF-16 content limit even when every character is JSON-escaped.
-  const text = await readBody(request, 1024 * 1024);
-  if (text === undefined) return undefined;
-  try {
-    return JSON.parse(text) as unknown;
-  } catch {
-    return undefined;
-  }
-}
 
 /** Mounted behind requireAuth and the app's cookie-origin protection. */
 export function createNoteRoutes(store?: NoteService) {
