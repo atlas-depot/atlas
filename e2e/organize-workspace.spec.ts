@@ -893,7 +893,9 @@ test("a source changed after handoff keeps the draft's bound origin when saved",
   await page.getByRole("button", { name: "Save", exact: true }).click();
   await expect.poll(() => state.source.title).toBe("Source edited later");
   await page.reload();
-  await expect(panel(page)).toContainText("The source note has changed. This draft belongs to an older version.");
+  await expect(panel(page)).toContainText(
+    "The source note has changed. This draft belongs to an older version.",
+  );
   await panel(page).getByRole("button", { name: "Save as new note", exact: true }).click();
   await expect(panel(page)).toHaveCount(0);
   expect(state.saved?.origin).toEqual({
