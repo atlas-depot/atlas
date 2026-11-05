@@ -219,6 +219,10 @@ test("notes workspace fits desktop and mobile and supports keyboard editing", as
   await page.screenshot({ path: testInfo.outputPath("before-source-viewer.png"), fullPage: true });
   await page.goto("/");
   await expect(page.getByRole("textbox", { name: "Title", exact: true })).toBeVisible();
+  await expect(
+    page.getByRole("textbox", { name: /^(Markdown source|Note content)$/ }),
+  ).toBeVisible();
+  await expect(page.getByText("Opening editor...", { exact: true })).toHaveCount(0);
   await page.screenshot({ path: testInfo.outputPath("after-notes-desktop.png"), fullPage: true });
   await page.setViewportSize({ width: 375, height: 812 });
   await page.screenshot({ path: testInfo.outputPath("after-notes-mobile.png"), fullPage: true });
