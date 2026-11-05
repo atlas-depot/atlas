@@ -152,7 +152,19 @@ test("VS Code clipboard preserves literal code, malformed metadata and selection
     // synthetic arrow adjustments can leave ProseMirror one character behind.
     // Nonzero key durations let native selectionchange run between keystrokes.
     for (let step = 0; step < 32; step++) await page.keyboard.press("ArrowLeft", { delay: 20 });
-    for (let step = 0; step < 7; step++) await page.keyboard.press("ArrowRight", { delay: 20 });
+    const prefixAtCaret = () =>
+      page.evaluate(`(() => {
+      const block = document.querySelector('.bn-inline-content');
+      const selection = window.getSelection();
+      if (!selection?.focusNode || !block?.contains(selection.focusNode)) return null;
+      const prefix = document.createRange();
+      prefix.selectNodeContents(block);
+      prefix.setEnd(selection.focusNode, selection.focusOffset);
+      return prefix.toString();
+    })()`);
+    for (let step = 0; step < 16 && (await prefixAtCaret()) !== "before "; step++)
+      await page.keyboard.press("ArrowRight", { delay: 20 });
+    expect(await prefixAtCaret()).toBe("before ");
     const selectedText = () =>
       page.evaluate("window.getSelection()?.toString().replace(/\\n/g, '') ?? ''");
     const expectedSelection = crossing ? "CODEreplace" : "replace";
