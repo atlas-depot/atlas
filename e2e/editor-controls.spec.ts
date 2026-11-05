@@ -81,18 +81,28 @@ test("unknown code remains readable and catalog alias search saves a deliberate 
 }) => {
   const errors: string[] = [];
   page.on("pageerror", (error) => errors.push(error.message));
+  page.on("console", (message) => {
+    if (message.type() === "error") errors.push(message.text());
+  });
   const source = "let answer: u32 = 42;";
-  const state = await openDocument(page, [code("atlas-dsl", source)]);
-  const picker = page.getByRole("combobox", { name: "Code language", exact: true });
+  const state = await openDocument(page, [
+    code("atlas-dsl", source),
+    { ...code("ts", "const later: number = 42;"), id: "known-code" },
+  ]);
+  const picker = page.getByRole("combobox", { name: "Code language", exact: true }).first();
+  const unknown = page.locator("code.bn-inline-content").first();
+  const known = page.locator("code.bn-inline-content").nth(1);
+  await expect.poll(() => known.locator("span.shiki").count()).toBeGreaterThan(2);
+  await expect(unknown.locator("span.shiki")).toHaveCount(0);
   await expect(picker).toHaveText("atlas-dsl");
-  await expect(page.locator("code.bn-inline-content")).toHaveText(source);
+  await expect(unknown).toHaveText(source);
   await page.reload();
   await expect(picker).toHaveText("atlas-dsl");
   await picker.click();
   await page.getByRole("combobox", { name: "Search code languages" }).fill("rs");
   await page.getByRole("option", { name: "Rust", exact: true }).click();
   await expect(picker).toHaveText("Rust");
-  await expect.poll(() => page.locator("code span.shiki").count()).toBeGreaterThan(2);
+  await expect.poll(() => unknown.locator("span.shiki").count()).toBeGreaterThan(2);
   await save(page, state);
   expect(state.document().blocks[0]).toMatchObject({
     id: "code",
@@ -250,3 +260,56 @@ test("table cells stay editable and their controls render at mobile width", asyn
   await expect(cell).toContainText("edited");
   expect(await page.evaluate("document.documentElement.scrollWidth <= innerWidth")).toBe(true);
 });
+
+for (const width of [375, 320])
+  test(`mobile ${width}px controls have separate touch targets without covering quote or code`, async ({
+    page,
+  }, testInfo) => {
+    await page.setViewportSize({ width, height: 900 });
+    await openDocument(page, [
+      { ...paragraph("A quoted thought"), id: "quote", type: "quote" },
+      code("python", 'print("A small example")'),
+    ]);
+    const quote = page.locator('[data-content-type="quote"]');
+    await quote.hover();
+    const add = page.getByRole("button", { name: "Add block", exact: true });
+    const menu = page.getByRole("button", { name: "Open block menu", exact: true });
+    await expect(menu).toBeVisible();
+    const quoteRect = (await quote.boundingBox())!;
+    const addRect = (await add.boundingBox())!;
+    const menuRect = (await menu.boundingBox())!;
+    for (const rect of [addRect, menuRect]) {
+      expect(rect.width).toBeGreaterThanOrEqual(44);
+      expect(rect.height).toBeGreaterThanOrEqual(44);
+      expect(rect.x).toBeGreaterThanOrEqual(0);
+      expect(rect.x + rect.width).toBeLessThanOrEqual(quoteRect.x);
+    }
+    expect(addRect.x + addRect.width).toBeLessThanOrEqual(menuRect.x);
+    await expect(add.locator("svg")).toHaveCSS("width", "14px");
+    await expect(menu.locator("svg")).toHaveCSS("height", "14px");
+    await page.screenshot({
+      path: testInfo.outputPath(`quote-targets-${width}.png`),
+      fullPage: true,
+    });
+    const picker = page.getByRole("combobox", { name: "Code language", exact: true });
+    const pickerRect = (await picker.boundingBox())!;
+    expect(pickerRect.height).toBeGreaterThanOrEqual(44);
+    expect(pickerRect.width).toBeGreaterThanOrEqual(44);
+    const codeRect = (await page.locator("code.bn-inline-content").boundingBox())!;
+    expect(codeRect.y).toBeGreaterThanOrEqual(pickerRect.y + pickerRect.height);
+    await picker.click();
+    const search = page.getByRole("combobox", { name: "Search code languages" });
+    await expect(search).toHaveCSS("font-size", "16px");
+    expect((await search.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+    await search.fill("sql");
+    const option = page.getByRole("option", { name: "SQL", exact: true });
+    expect((await option.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+    const popup = (await page.getByRole("dialog", { name: "Choose code language" }).boundingBox())!;
+    expect(popup.x).toBeGreaterThanOrEqual(0);
+    expect(popup.x + popup.width).toBeLessThanOrEqual(width);
+    expect(await page.evaluate("document.documentElement.scrollWidth <= innerWidth")).toBe(true);
+    await page.screenshot({
+      path: testInfo.outputPath(`code-picker-${width}.png`),
+      fullPage: true,
+    });
+  });
