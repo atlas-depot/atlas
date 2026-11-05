@@ -745,6 +745,7 @@ export function NotesWorkspace({
               !["creation-conflict", "conflict", "missing"].includes(saveState)
             }
             prepareSource={save}
+            onCheckNotes={refreshNotes}
             onSaved={(snapshot) =>
               setNotes((current) => [
                 snapshot.note,

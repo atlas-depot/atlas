@@ -712,3 +712,159 @@ test("invalid source-mode draft edits show validation and recover after correcti
   expect(state.saved?.content).toBe(original + " corrected");
   expect(state.saved?.title).toBe("Corrected title");
 });
+
+for (const settled of [false, true]) {
+  test(`a delayed recovery list cannot ${settled ? "resurrect a dismissed" : "erase a newly started"} run`, async ({
+    page,
+  }) => {
+    await fixture(page);
+    let listCalls = 0;
+    let releaseList: (() => void) | undefined;
+    const delayed = new Promise<void>((resolve) => {
+      releaseList = resolve;
+    });
+    await page.route("**/api/organize-work", async (route) => {
+      if (++listCalls === 3) {
+        await delayed;
+        return route.fulfill({
+          json: { runs: settled ? [{ runId, noteId: sourceId }] : [], drafts: [] },
+        });
+      }
+      return route.fulfill({ json: { runs: [], drafts: [] } });
+    });
+    let starts = 0;
+    await page.route(`**/api/notes/${sourceId}/organize`, (route) =>
+      ++starts === 1
+        ? route.abort("failed")
+        : route.fulfill({ status: 202, json: { runId, status: "accepted" } }),
+    );
+    let cancelled = false;
+    await page.route(`**/api/organize-runs/${runId}`, (route) =>
+      route.fulfill({
+        json: cancelled
+          ? { runId, status: "cancelled" }
+          : { runId, status: "running", phase: "writing" },
+      }),
+    );
+    await page.route(`**/api/organize-runs/${runId}/cancel`, (route) => {
+      cancelled = true;
+      return route.fulfill({ json: { runId, status: "cancelled" } });
+    });
+    await page.goto("/");
+    await page.getByRole("button", { name: "Organize", exact: true }).click();
+    await page.getByRole("button", { name: "Reconnect", exact: true }).click();
+    await expect.poll(() => listCalls).toBe(3);
+    await page.getByRole("button", { name: "Organize", exact: true }).click();
+    const progress = page.getByRole("region", { name: "Organize progress", exact: true });
+    await expect(progress).toContainText("Writing your draft");
+    if (settled) {
+      await page.getByRole("button", { name: "Cancel generation", exact: true }).click();
+      await page.getByRole("button", { name: "Dismiss generation", exact: true }).click();
+      await expect(progress).toHaveCount(0);
+    }
+    const received = page.waitForResponse((response) =>
+      response.url().endsWith("/api/organize-work"),
+    );
+    releaseList?.();
+    await (await received).finished();
+    await page.evaluate(
+      "new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))",
+    );
+    if (settled) {
+      await expect(progress).toHaveCount(0);
+      await expect(page.getByRole("button", { name: "Organize", exact: true })).toBeEnabled();
+    } else {
+      await expect(progress).toBeVisible();
+      await expect(page.getByRole("button", { name: "Organize", exact: true })).toBeDisabled();
+    }
+    expect(starts).toBe(2);
+  });
+}
+
+for (const changed of ["edited", "deleted"] as const) {
+  test(`an uncertain Save whose created note was ${changed} keeps inspectable text and closes only locally`, async ({
+    page,
+  }) => {
+    const state = await fixture(page);
+    state.resumeDraft();
+    await page.goto("/");
+    await expect(draftEditor(page)).toBeVisible();
+    state.loseFinalSave();
+    await panel(page).getByRole("button", { name: "Save as new note", exact: true }).click();
+    await expect(panel(page)).toContainText("Could not confirm the new note was saved.");
+    const originalSaved = state.saved;
+    const requests: { body: unknown; etag: string }[] = [];
+    let deletes = 0;
+    page.on("request", (request) => {
+      if (request.method() === "DELETE") deletes++;
+    });
+    await page.route(`**/api/note-drafts/${draftId}/save`, (route) => {
+      requests.push({
+        body: route.request().postDataJSON(),
+        etag: route.request().headers()["if-match"],
+      });
+      return route.fulfill({
+        status: 409,
+        json: { error: { code: "CONFLICT", message: "The saved note changed or was deleted." } },
+      });
+    });
+    let listReads = 0;
+    await page.route("**/api/notes", (route) => {
+      listReads++;
+      if (changed === "edited" && listReads === 1)
+        return route.fulfill({
+          status: 503,
+          json: { error: { code: "UNAVAILABLE", message: "Unavailable" } },
+        });
+      return route.fulfill({
+        json: {
+          notes: [
+            state.source,
+            ...(changed === "edited" && originalSaved
+              ? [{ ...originalSaved, title: "Changed elsewhere" }]
+              : []),
+          ],
+        },
+      });
+    });
+    await panel(page).getByRole("button", { name: "Retry saving note", exact: true }).click();
+    await expect(panel(page)).toContainText("The saved note may have changed or been deleted.");
+    await expect(
+      panel(page).getByRole("button", { name: "Reload saved draft", exact: true }),
+    ).toHaveCount(0);
+    await expect(
+      panel(page).getByRole("button", { name: "Retry draft save", exact: true }),
+    ).toHaveCount(0);
+    await panel(page).getByRole("button", { name: "Check saved notes", exact: true }).click();
+    await expect.poll(() => listReads).toBe(1);
+    if (changed === "edited") {
+      await expectEditorContent(draftEditor(page), "Generated note");
+      await panel(page).getByRole("button", { name: "Check saved notes", exact: true }).click();
+      await expect.poll(() => listReads).toBe(2);
+    }
+    await expectEditorContent(draftEditor(page), "Generated note");
+    if (changed === "edited")
+      await expect(
+        page
+          .getByRole("navigation", { name: "Notes", exact: true })
+          .getByRole("button", { name: "Changed elsewhere", exact: true }),
+      ).toBeVisible();
+    await panel(page).getByRole("button", { name: "Close panel", exact: true }).click();
+    await page.getByRole("button", { name: "Keep panel open", exact: true }).click();
+    await expectEditorContent(draftEditor(page), "Generated note");
+    await panel(page).getByRole("button", { name: "Close panel", exact: true }).click();
+    await page
+      .getByRole("alertdialog")
+      .getByRole("button", { name: "Close panel", exact: true })
+      .click();
+    await expect(panel(page)).toHaveCount(0);
+    expect(deletes).toBe(0);
+    expect(state.saves).toBe(1);
+    expect(requests).toHaveLength(1);
+    expect(requests[0].body).toEqual({
+      title: originalSaved?.title,
+      content: originalSaved?.content,
+    });
+    expect(state.source.content).toBe("Original note");
+  });
+}

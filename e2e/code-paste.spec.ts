@@ -264,3 +264,47 @@ test("invalid VS Code language metadata stays plain and saveable while unknown v
       await expect(page.locator('[data-content-type="codeBlock"]')).toHaveCount(0);
   }
 });
+
+test("rich HTML clipboard keeps its formatting when its plain-text fallback contains a fence", async ({
+  page,
+}) => {
+  const state = await openDocument(page);
+  const plain = "Keep this title Reference\n\n```\n" + python + "\n```";
+  const html =
+    '<p><strong>Keep this title</strong> <a href="https://example.test/reference">Reference</a></p><pre><code>' +
+    python +
+    "</code></pre>";
+  await page.evaluate(`(async () => {
+    const input = ${JSON.stringify({ plain, html })};
+    await navigator.clipboard.write([new ClipboardItem({
+      'text/plain': new Blob([input.plain], { type: 'text/plain' }),
+      'text/html': new Blob([input.html], { type: 'text/html' }),
+    })]);
+  })()`);
+  await page.keyboard.press("ControlOrMeta+v");
+  await save(page, state);
+  expect(state.document().blocks.map(({ id: _id, ...block }) => block)).toEqual([
+    {
+      type: "paragraph",
+      props: { backgroundColor: "default", textColor: "default", textAlignment: "left" },
+      content: [
+        { type: "text", text: "Keep this title", styles: { bold: true } },
+        { type: "text", text: " ", styles: {} },
+        {
+          type: "link",
+          href: "https://example.test/reference",
+          content: [{ type: "text", text: "Reference", styles: {} }],
+        },
+      ],
+      children: [],
+    },
+    { type: "codeBlock", props: { language: "text" }, content: text(python), children: [] },
+  ]);
+  await page.reload();
+  await expect(page.locator(".bn-inline-content strong")).toHaveText("Keep this title");
+  await expect(page.getByRole("link", { name: "Reference", exact: true })).toHaveAttribute(
+    "href",
+    "https://example.test/reference",
+  );
+  await expect(page.locator("code.bn-inline-content")).toHaveText(python);
+});
