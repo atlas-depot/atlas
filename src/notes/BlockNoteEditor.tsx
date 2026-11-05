@@ -1,7 +1,8 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { ArrowUUpLeftIcon } from "@phosphor-icons/react/dist/csr/ArrowUUpLeft";
 import { ArrowUUpRightIcon } from "@phosphor-icons/react/dist/csr/ArrowUUpRight";
 import { Button } from "@/components/ui/button";
+import { canImportGeneratedMarkdown } from "./generated-markdown";
 import { noteSchema as schema } from "./editor-schema";
 import { noteSyntaxHighlighting } from "./code-theme";
 import { createCodePasteHandler } from "./code-detection";
@@ -28,6 +29,7 @@ const links = {
 
 type EditorMode = "loading" | "rich" | "source";
 type EditorProps = {
+  importGeneratedMarkdown?: boolean;
   initialContent: NoteContent;
   disabled: boolean;
   onChange: (content: NoteContent) => void;
@@ -40,22 +42,26 @@ export function BlockNoteEditor(props: EditorProps) {
   // not, preserving the undo history and edits made during an in-flight save.
   const [initial] = useState(props.initialContent);
   return typeof initial === "string" ? (
-    <LegacyNoteEditor {...props} initialContent={initial} source={initial} />
+    <MarkdownNoteEditor {...props} initialContent={initial} source={initial} />
   ) : (
     <RichDocumentEditor {...props} initialContent={initial} document={initial} />
   );
 }
 
-function LegacyNoteEditor(props: EditorProps & { source: string }) {
+function MarkdownNoteEditor(props: EditorProps & { source: string }) {
+  const contentId = useId();
   const parser = useCreateBlockNote({ schema, links });
   const [source, setSource] = useState(props.source);
   const [converted] = useState(() => {
     try {
       const blocks = parser.tryParseMarkdownToBlocks(props.source);
       const roundtrip = parser.blocksToMarkdownLossy(blocks);
-      // Conservative on purpose: even harmless normalizing changes fall back
-      // to source editing, rather than silently discarding Markdown features.
-      if (roundtrip.replace(/\n+$/, "") !== props.source.replace(/\n+$/, "")) return null;
+      // User-authored legacy notes retain exact spelling. Generated drafts may
+      // normalize Markdown syntax only when their complete supported AST survives.
+      const preservesContent = props.importGeneratedMarkdown
+        ? canImportGeneratedMarkdown(props.source, roundtrip)
+        : roundtrip.replace(/\n+$/, "") === props.source.replace(/\n+$/, "");
+      if (!preservesContent) return null;
       return blockNoteDocumentSchema.parse({ format: "blocknote", schemaVersion: 1, blocks });
     } catch {
       return null;
@@ -65,15 +71,23 @@ function LegacyNoteEditor(props: EditorProps & { source: string }) {
   useEffect(() => {
     if (!converted) onModeChange("source");
   }, [converted, onModeChange]);
-  if (converted) return <RichDocumentEditor {...props} document={converted} />;
+  if (converted)
+    return (
+      <RichDocumentEditor
+        {...props}
+        initialContent={props.importGeneratedMarkdown ? converted : props.initialContent}
+        importedFromMarkdown={props.importGeneratedMarkdown}
+        document={converted}
+      />
+    );
   return (
     <div className="space-y-2">
-      <Label htmlFor="note-content">Markdown source</Label>
+      <Label htmlFor={contentId}>Markdown source</Label>
       <p className="text-sm text-muted-foreground">
         Source mode preserves this Markdown without conversion.
       </p>
       <Textarea
-        id="note-content"
+        id={contentId}
         value={source}
         maxLength={100_000}
         rows={6}
@@ -95,7 +109,9 @@ function RichDocumentEditor({
   onChange,
   onModeChange,
   onValidityChange,
-}: EditorProps & { document: BlockNoteDocument }) {
+  importedFromMarkdown = false,
+}: EditorProps & { document: BlockNoteDocument; importedFromMarkdown?: boolean }) {
+  const contentId = useId();
   // Initialize with the actual content: importing through replaceBlocks would
   // create an undo entry that could erase the note immediately after opening.
   const editor = useCreateBlockNote({
@@ -106,7 +122,7 @@ function RichDocumentEditor({
     pasteHandler: createCodePasteHandler(document.blocks),
     domAttributes: {
       editor: {
-        id: "note-content",
+        id: contentId,
         role: "textbox",
         "aria-multiline": "true",
         "aria-label": "Note content",
@@ -116,6 +132,13 @@ function RichDocumentEditor({
   const lastDocument = useRef(JSON.stringify(editor.document));
   const initialDocument = useRef(canonicalNoteContent(document));
   useEffect(() => onModeChange("rich"), [onModeChange]);
+  const publishedImport = useRef(false);
+  useEffect(() => {
+    if (importedFromMarkdown && !publishedImport.current) {
+      publishedImport.current = true;
+      onChange(document);
+    }
+  }, [document, importedFromMarkdown, onChange]);
   return (
     <section className="rich-note-editor" aria-label="Note editor">
       <div className="editor-history" aria-label="Editing history">

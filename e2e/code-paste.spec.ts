@@ -148,26 +148,44 @@ test("VS Code clipboard preserves literal code, malformed metadata and selection
         : undefined,
     );
     if (!crossing) await page.keyboard.insertText("before replace after");
-    await page.evaluate(`(() => {
-      const elements = document.querySelectorAll('.bn-inline-content');
-      const range = document.createRange();
-      const start = document.createTreeWalker(elements[0], NodeFilter.SHOW_TEXT).nextNode();
-      const end = document.createTreeWalker(elements[${crossing ? 1 : 0}], NodeFilter.SHOW_TEXT).nextNode();
-      range.setStart(start, 7); range.setEnd(end, ${crossing ? 7 : 14});
-      const selection = window.getSelection(); selection.removeAllRanges(); selection.addRange(range);
+    // Move the actual editor selection with keyboard events. A DOM Range plus
+    // synthetic arrow adjustments can leave ProseMirror one character behind.
+    // Nonzero key durations let native selectionchange run between keystrokes.
+    for (let step = 0; step < 32; step++) await page.keyboard.press("ArrowLeft", { delay: 20 });
+    const prefixAtCaret = () =>
+      page.evaluate(`(() => {
+      const block = document.querySelector('.bn-inline-content');
+      const selection = window.getSelection();
+      if (!selection?.focusNode || !block?.contains(selection.focusNode)) return null;
+      const prefix = document.createRange();
+      prefix.selectNodeContents(block);
+      prefix.setEnd(selection.focusNode, selection.focusOffset);
+      return prefix.toString();
     })()`);
-    await page.keyboard.press("Shift+ArrowLeft");
-    await page.keyboard.press("Shift+ArrowRight");
+    for (let step = 0; step < 16 && (await prefixAtCaret()) !== "before "; step++)
+      await page.keyboard.press("ArrowRight", { delay: 20 });
+    expect(await prefixAtCaret()).toBe("before ");
+    const selectedText = () =>
+      page.evaluate("window.getSelection()?.toString().replace(/\\n/g, '') ?? ''");
+    const expectedSelection = crossing ? "CODEreplace" : "replace";
+    for (let step = 0; step < 20 && (await selectedText()) !== expectedSelection; step++) {
+      await page.keyboard.press("Shift+ArrowRight", { delay: 20 });
+    }
+    expect(await selectedText()).toBe(expectedSelection);
     const source = 'const template = "<div>hello</div>";\nconst entity = "a &lt; b";';
-    // ClipboardItem cannot write VS Code's custom MIME type. Exercise the native
-    // paste event with the same DataTransfer payload at the real editor boundary.
-    await page.evaluate(`(() => {
+    // ClipboardItem cannot write VS Code's custom MIME type. Add that metadata
+    // to a real keyboard paste so the browser synchronizes its selection first.
+    await page.evaluate(`(async () => {
       const input = ${JSON.stringify({ source, metadata })};
       const clipboardData = new DataTransfer();
       clipboardData.setData('text/plain', input.source);
       clipboardData.setData('vscode-editor-data', input.metadata);
-      document.querySelector('.bn-editor').dispatchEvent(new ClipboardEvent('paste', { bubbles: true, cancelable: true, clipboardData }));
+      await navigator.clipboard.writeText(input.source);
+      document.querySelector('.bn-editor').addEventListener('paste', (event) => {
+        Object.defineProperty(event, 'clipboardData', { value: clipboardData });
+      }, { capture: true, once: true });
     })()`);
+    await page.keyboard.press("ControlOrMeta+v");
     await save(page, state);
     const blocks = state.document().blocks;
     const allText = blocks

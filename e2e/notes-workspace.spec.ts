@@ -219,6 +219,10 @@ test("notes workspace fits desktop and mobile and supports keyboard editing", as
   await page.screenshot({ path: testInfo.outputPath("before-source-viewer.png"), fullPage: true });
   await page.goto("/");
   await expect(page.getByRole("textbox", { name: "Title", exact: true })).toBeVisible();
+  await expect(
+    page.getByRole("textbox", { name: /^(Markdown source|Note content)$/ }),
+  ).toBeVisible();
+  await expect(page.getByText("Opening editor...", { exact: true })).toHaveCount(0);
   await page.screenshot({ path: testInfo.outputPath("after-notes-desktop.png"), fullPage: true });
   await page.setViewportSize({ width: 375, height: 812 });
   await page.screenshot({ path: testInfo.outputPath("after-notes-mobile.png"), fullPage: true });
@@ -339,7 +343,10 @@ test("controls and preview remain usable across laptop, tablet and narrow touch 
     "Project review",
   );
   const previewHeading = page.getByRole("heading", { name: "Preview", exact: true });
-  await expect(page.locator("#note-content")).toBeVisible();
+  const editor = page
+    .getByRole("region", { name: "Original note", exact: true })
+    .getByRole("textbox", { name: /^(Markdown source|Note content)$/ });
+  await expect(editor).toBeVisible();
   for (const width of [1440, 1280, 1024, 768, 767, 375, 320]) {
     await page.setViewportSize({ width, height: 812 });
     await page.evaluate("window.scrollTo(0, 0)");
@@ -350,8 +357,10 @@ test("controls and preview remain usable across laptop, tablet and narrow touch 
       ),
     ).toBeGreaterThanOrEqual(16);
     expect(
-      await page.evaluate(
-        "parseFloat(getComputedStyle(document.querySelector('#note-content')).fontSize)",
+      await editor.evaluate((element) =>
+        Number.parseFloat(
+          element.ownerDocument.defaultView?.getComputedStyle(element).fontSize ?? "0",
+        ),
       ),
     ).toBeGreaterThanOrEqual(16);
     expect(
