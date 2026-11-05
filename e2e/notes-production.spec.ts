@@ -11,6 +11,9 @@ const browserUser = {
 };
 
 test.beforeEach(async ({ page }) => {
+  await page.route("**/api/organize-work", (route) =>
+    route.fulfill({ json: { runs: [], drafts: [] } }),
+  );
   await page.route("**/api/auth/session", (route) =>
     route.fulfill({ json: { user: browserUser } }),
   );

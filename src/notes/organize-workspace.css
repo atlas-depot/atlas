@@ -1,0 +1,21 @@
+.organize-workspace {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.ai-draft-list {
+  display: grid;
+  gap: 1.5rem;
+}
+.ai-draft-panel,
+.organize-progress {
+  min-width: 0;
+  padding-block: 1.25rem;
+  border-top: 1px solid var(--border);
+}
+.ai-draft-panel input {
+  width: 100%;
+}
+
+.note-editor-plane {
+  min-width: 0;
+}

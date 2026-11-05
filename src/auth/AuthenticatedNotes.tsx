@@ -4,8 +4,10 @@ import { Button } from "@/components/ui/button";
 import { NotesWorkspace } from "@/notes/NotesWorkspace";
 import type { NotesStore } from "@/notes/notes-store";
 import { createSessionClient } from "./session";
+import { createOrganizeClient, type OrganizeClient } from "@/notes/organize-store";
 
 const sessionClient = createSessionClient();
+const organizeClient = createOrganizeClient();
 
 type SessionState =
   | { kind: "loading" }
@@ -50,6 +52,51 @@ export function AuthenticatedNotes({ store }: { store: NotesStore }) {
       },
     };
   }, [store, accountId]);
+
+  const organizer = useMemo<OrganizeClient>(() => {
+    const verified = () => {
+      if (accountId === null || verifiedUserId.current !== accountId)
+        throw new Error("Confirm your session before requesting AI drafts.");
+    };
+    return {
+      list: async () => {
+        verified();
+        return organizeClient.list();
+      },
+      start: async (...args) => {
+        verified();
+        return organizeClient.start(...args);
+      },
+      readRun: async (...args) => {
+        verified();
+        return organizeClient.readRun(...args);
+      },
+      cancel: async (...args) => {
+        verified();
+        return organizeClient.cancel(...args);
+      },
+      handoff: async (...args) => {
+        verified();
+        return organizeClient.handoff(...args);
+      },
+      readDraft: async (...args) => {
+        verified();
+        return organizeClient.readDraft(...args);
+      },
+      updateDraft: async (...args) => {
+        verified();
+        return organizeClient.updateDraft(...args);
+      },
+      discard: async (...args) => {
+        verified();
+        return organizeClient.discard(...args);
+      },
+      save: async (...args) => {
+        verified();
+        return organizeClient.save(...args);
+      },
+    };
+  }, [accountId]);
 
   useEffect(() => {
     let active = true;
@@ -162,6 +209,7 @@ export function AuthenticatedNotes({ store }: { store: NotesStore }) {
       <NotesWorkspace
         key={session.user.id}
         store={guardedStore}
+        organizer={organizer}
         requestsEnabled={sessionCheck === "verified"}
       />
     </div>

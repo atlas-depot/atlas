@@ -17,6 +17,8 @@ import { noteContentSchema, type CreateNote } from "../../shared/notes";
 import type { Note } from "../../shared/notes";
 import { MarkdownPreview } from "./MarkdownPreview";
 import { NoteContentView } from "./NoteContentView";
+import { OrganizeWorkspace } from "./OrganizeWorkspace";
+import type { OrganizeClient } from "./organize-store";
 import type { NoteSnapshot, NotesStore } from "./notes-store";
 import {
   classifyFailure,
@@ -41,10 +43,12 @@ const BlockNoteEditor = lazy(() =>
 
 export function NotesWorkspace({
   store,
+  organizer,
   example = false,
   requestsEnabled = true,
 }: {
   store: NotesStore;
+  organizer?: OrganizeClient;
   example?: boolean;
   requestsEnabled?: boolean;
 }) {
@@ -234,10 +238,9 @@ export function NotesWorkspace({
     }
   }
 
-  const save = useCallback(async () => {
+  const save = useCallback(async (): Promise<NoteSnapshot | undefined> => {
     if (
       !draft ||
-      (saved !== null && !dirty) ||
       !valid ||
       busyRef.current ||
       writeBlocked ||
@@ -247,6 +250,7 @@ export function NotesWorkspace({
       saveState === "missing"
     )
       return;
+    if (saved && !dirty) return saved;
     const snapshot = { ...draft };
     busyRef.current = true;
     setSaveState("saving");
@@ -289,6 +293,7 @@ export function NotesWorkspace({
       setSaveState("idle");
       setDeleteFailure(null);
       setDeleteNotice(null);
+      return result;
     } catch (error) {
       const kind = classifyFailure(error);
       setSaveState(kind);
@@ -609,80 +614,73 @@ export function NotesWorkspace({
           </nav>
           {draft && (
             <div className="note-detail" data-editor-mode={editorMode}>
-              <Card>
-                <CardHeader>
-                  <CardTitle>
-                    <h2>Edit note</h2>
-                  </CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-3">
-                  <Label htmlFor="note-title">Title</Label>
-                  <Input
-                    ref={titleRef}
-                    id="note-title"
-                    value={draft.title}
-                    maxLength={256}
+              <section aria-label="Original note" className="note-editor-plane space-y-3">
+                <Label htmlFor="note-title">Title</Label>
+                <Input
+                  ref={titleRef}
+                  id="note-title"
+                  value={draft.title}
+                  maxLength={256}
+                  disabled={openingId !== null || deleting}
+                  onChange={(event) => setDraft({ ...draft, title: event.target.value })}
+                />
+                <Suspense fallback={<p>Opening editor...</p>}>
+                  <BlockNoteEditor
+                    key={editorKey}
+                    initialContent={draft.content}
                     disabled={openingId !== null || deleting}
-                    onChange={(event) => setDraft({ ...draft, title: event.target.value })}
+                    onChange={(content) =>
+                      setDraft((current) => (current ? { ...current, content } : current))
+                    }
+                    onModeChange={setEditorMode}
+                    onValidityChange={setEditorValid}
                   />
-                  <Suspense fallback={<p>Opening editor...</p>}>
-                    <BlockNoteEditor
-                      key={editorKey}
-                      initialContent={draft.content}
-                      disabled={openingId !== null || deleting}
-                      onChange={(content) =>
-                        setDraft((current) => (current ? { ...current, content } : current))
-                      }
-                      onModeChange={setEditorMode}
-                      onValidityChange={setEditorValid}
-                    />
-                  </Suspense>
-                  {!valid && (
-                    <p role="alert">
-                      The text contains unsupported characters or is too long. Use up to 256
-                      characters for the title and 100,000 for the content. Your text is preserved.
-                    </p>
-                  )}
-                  <div className="flex flex-wrap items-center gap-3">
+                </Suspense>
+                {!valid && (
+                  <p role="alert">
+                    The text contains unsupported characters or is too long. Use up to 256
+                    characters for the title and 100,000 for the content. Your text is preserved.
+                  </p>
+                )}
+                <div className="flex flex-wrap items-center gap-3">
+                  <Button
+                    disabled={
+                      (saved !== null && !dirty) ||
+                      busy ||
+                      writeBlocked ||
+                      deleteFailure !== null ||
+                      !valid ||
+                      saveState === "creation-conflict" ||
+                      saveState === "conflict" ||
+                      saveState === "missing"
+                    }
+                    onClick={() => void save()}
+                  >
+                    Save
+                  </Button>
+                  <span className="text-xs text-muted-foreground">Ctrl/Cmd+S to save</span>
+                  {(saveState === "conflict" || deleteFailure === "conflict") && saved && (
                     <Button
-                      disabled={
-                        (saved !== null && !dirty) ||
-                        busy ||
-                        writeBlocked ||
-                        deleteFailure !== null ||
-                        !valid ||
-                        saveState === "creation-conflict" ||
-                        saveState === "conflict" ||
-                        saveState === "missing"
-                      }
-                      onClick={() => void save()}
+                      ref={compareRef}
+                      variant="outline"
+                      disabled={busy || blocked}
+                      onClick={() => void openNote(saved.note.id, true)}
                     >
-                      Save
+                      Compare latest
                     </Button>
-                    <span className="text-xs text-muted-foreground">Ctrl/Cmd+S to save</span>
-                    {(saveState === "conflict" || deleteFailure === "conflict") && saved && (
-                      <Button
-                        ref={compareRef}
-                        variant="outline"
-                        disabled={busy || blocked}
-                        onClick={() => void openNote(saved.note.id, true)}
-                      >
-                        Compare latest
-                      </Button>
-                    )}
-                    {saved && (
-                      <Button
-                        ref={deleteButtonRef}
-                        variant="destructive"
-                        disabled={busy || writeBlocked || deleteBlocked}
-                        onClick={() => setDeleteOpen(true)}
-                      >
-                        Delete note
-                      </Button>
-                    )}
-                  </div>
-                </CardContent>
-              </Card>
+                  )}
+                  {saved && (
+                    <Button
+                      ref={deleteButtonRef}
+                      variant="destructive"
+                      disabled={busy || writeBlocked || deleteBlocked}
+                      onClick={() => setDeleteOpen(true)}
+                    >
+                      Delete note
+                    </Button>
+                  )}
+                </div>
+              </section>
               {editorMode === "source" && typeof draft.content === "string" && (
                 <Card>
                   <CardHeader>
@@ -722,6 +720,29 @@ export function NotesWorkspace({
             </div>
           )}
         </div>
+      )}
+      {!example && organizer && (
+        <OrganizeWorkspace
+          client={organizer}
+          source={saved}
+          sourceDirty={dirty}
+          enabled={requestsEnabled && !blocked}
+          canStart={
+            draft !== null &&
+            valid &&
+            !busy &&
+            !writeBlocked &&
+            deleteFailure === null &&
+            !["creation-conflict", "conflict", "missing"].includes(saveState)
+          }
+          prepareSource={save}
+          onSaved={(snapshot) =>
+            setNotes((current) => [
+              snapshot.note,
+              ...current.filter((note) => note.id !== snapshot.note.id),
+            ])
+          }
+        />
       )}
       <AlertDialog
         open={pending !== null}
