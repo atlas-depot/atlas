@@ -200,6 +200,13 @@ describe("note passage contract", () => {
         }).success,
       ).toBe(false);
     }
+    expect(
+      notePassageProjectionSchema.safeParse({
+        status: "unsupported",
+        passages: [],
+        issues: [{ code: "unsupported_schema_version", schemaVersion: 1e20 }],
+      }).success,
+    ).toBe(false);
   });
 
   it("bounds validated projections to the passage limit", () => {

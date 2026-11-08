@@ -65,7 +65,7 @@ const unsupportedFormatIssueSchema = z.strictObject({
 });
 const unsupportedSchemaVersionIssueSchema = z.strictObject({
   code: z.literal("unsupported_schema_version"),
-  schemaVersion: z.number().int(),
+  schemaVersion: z.number().int().min(Number.MIN_SAFE_INTEGER).max(Number.MAX_SAFE_INTEGER),
 });
 const malformedContentIssueSchema = z.strictObject({
   code: z.literal("malformed_content"),

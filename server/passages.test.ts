@@ -231,6 +231,31 @@ describe("note passage projection", () => {
     expect(texts(result)).toEqual(["const x = 1;\n  y();"]);
   });
 
+  it("keeps code exact through nested list indentation", () => {
+    const markdown = project(
+      [
+        "- Parent",
+        "  - Child",
+        "",
+        "    ```",
+        "    const x = 1;",
+        "      y();",
+        "    ```",
+        "",
+      ].join("\n"),
+    );
+    expect(markdown.status).toBe("complete");
+    expect(texts(markdown)).toEqual(["- Parent\n  - Child\nconst x = 1;\n  y();"]);
+
+    const block = project(
+      document([
+        bullet("b1", "Parent", [bullet("b2", "Child", [code("c1", "const x = 1;\n  y();\n")])]),
+      ]),
+    );
+    expect(block.status).toBe("complete");
+    expect(texts(block)).toEqual(["- Parent\n  - Child\nconst x = 1;\n  y();\n"]);
+  });
+
   it("preserves Turkish, supplementary and combining Unicode", () => {
     const value = "Başlık 😀 𐐷 e\u0301";
     const result = project(`# ${value}\n\n${value}\n`);
@@ -343,6 +368,14 @@ describe("note passage projection", () => {
     ).toEqual([0, 1]);
   });
 
+  it("keeps one indivisible grapheme whole above the soft limit", () => {
+    const value = `a${"\u0301".repeat(4_000)}`;
+    const result = project(value);
+    expect(result.status).toBe("complete");
+    expect(texts(result)).toEqual([value]);
+    expect(value.length).toBe(4_001);
+  });
+
   it("splits long code at line boundaries", () => {
     const value = "const value = 1;\n".repeat(400);
     const result = project(`\`\`\`ts\n${value}\`\`\`\n`);
@@ -362,11 +395,24 @@ describe("note passage projection", () => {
     expect(texts(block).every((text) => text.length <= 4_000)).toBe(true);
   });
 
-  it("keeps code passages within the limit when blank lines are merged", () => {
-    const value = `${"a".repeat(3_999)}\n\n${"b".repeat(3_999)}`;
+  it("keeps blank lines exact in long code passages", () => {
+    const value = `${"a".repeat(3_999)}\n\n${"b".repeat(4_000)}`;
+    const markdown = project(`\`\`\`\n${value}\n\`\`\`\n`);
+    expect(markdown.status).toBe("complete");
+    expect(texts(markdown).join("")).toBe(value);
+    expect(markdown.passages.every((passage) => passage.text.length <= 4_000)).toBe(true);
+
+    const block = project(document([code("c1", value)]));
+    expect(block.status).toBe("complete");
+    expect(texts(block).join("")).toBe(value);
+    expect(block.passages.every((passage) => passage.text.length <= 4_000)).toBe(true);
+  });
+
+  it("does not overflow a code passage to fit one grapheme", () => {
+    const value = `${"a".repeat(3_999)}😀`;
     const result = project(`\`\`\`\n${value}\n\`\`\`\n`);
     expect(result.status).toBe("complete");
-    expect(result.passages.length).toBeGreaterThan(1);
+    expect(texts(result).join("")).toBe(value);
     expect(result.passages.every((passage) => passage.text.length <= 4_000)).toBe(true);
   });
 
@@ -403,6 +449,11 @@ describe("note passage projection", () => {
       status: "unsupported",
       passages: [],
       issues: [{ code: "unsupported_format", format: "markdown" }],
+    });
+    expect(project({ format: "blocknote", schemaVersion: 1e20, blocks: [] })).toEqual({
+      status: "malformed",
+      passages: [],
+      issues: [{ code: "malformed_content", reason: "content_schema" }],
     });
     expect(
       project(document([{ id: "image", type: "image", props: {}, content: [], children: [] }])),

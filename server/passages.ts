@@ -50,8 +50,20 @@ function indentLine(line: string): string {
   return line.length > 0 ? `  ${line}` : line;
 }
 
-function indentText(text: string): string {
-  return text.split("\n").map(indentLine).join("\n");
+type PassageLine = { text: string; indent: boolean };
+
+function passageLines(text: string, indent: boolean): PassageLine[] {
+  return text.split("\n").map((line) => ({ text: line, indent }));
+}
+
+function passageText(lines: PassageLine[]): string {
+  return lines.map((line) => line.text).join("\n");
+}
+
+function indentPassageLines(lines: PassageLine[]): PassageLine[] {
+  return lines.map((line) =>
+    line.indent && line.text.length > 0 ? { text: `  ${line.text}`, indent: true } : line,
+  );
 }
 
 function createState(): ProjectionState {
@@ -155,6 +167,48 @@ function mergeBlankParts(parts: string[]): string[] {
   return merged;
 }
 
+function safeSliceLength(text: string, limit: number, allowOversized: boolean): number {
+  if (text.length <= limit) return text.length;
+  const boundaries = graphemeBoundaries(text);
+  let end = 0;
+  for (const boundary of boundaries) {
+    if (boundary > limit) break;
+    end = boundary;
+  }
+  if (end > 0) return end;
+  if (!allowOversized) return 0;
+  return boundaries.find((boundary) => boundary > 0) ?? text.length;
+}
+
+/**
+ * Code and tables must keep every character across a split. The 4,000 character limit stays soft
+ * for one indivisible grapheme, because cutting it would corrupt Unicode.
+ */
+function packExactParts(parts: string[]): string[] {
+  const packed: string[] = [];
+  let current = "";
+  for (const part of parts) {
+    let offset = 0;
+    while (offset < part.length) {
+      const room = MAX_PASSAGE_CHARS - current.length;
+      const take = safeSliceLength(part.slice(offset), room, current.length === 0);
+      if (take === 0) {
+        packed.push(current);
+        current = "";
+        continue;
+      }
+      current += part.slice(offset, offset + take);
+      offset += take;
+      if (current.length >= MAX_PASSAGE_CHARS) {
+        packed.push(current);
+        current = "";
+      }
+    }
+  }
+  if (current.length > 0) packed.push(current);
+  return packed;
+}
+
 function graphemeBoundaries(text: string): number[] {
   const boundaries = [0];
   for (const segment of graphemeSegmenter.segment(text)) {
@@ -175,6 +229,7 @@ function largestBoundaryAtOrBefore(boundaries: number[], limit: number, after: n
 
 function splitProse(text: string): string[] {
   if (text.length <= MAX_PASSAGE_CHARS) return [text];
+  // One indivisible grapheme may exceed the soft limit; splitting it would corrupt Unicode.
   const boundaries = graphemeBoundaries(text);
   const parts: string[] = [];
   let start = 0;
@@ -228,7 +283,7 @@ function splitLines(text: string): string[] {
     }
   }
   if (current) parts.push(current);
-  return mergeBlankParts(parts);
+  return packExactParts(parts);
 }
 
 type MdastNode = {
@@ -256,6 +311,7 @@ type MarkdownUnit = {
     | "blockquote"
     | "structural";
   ownText: string;
+  ownIndent: boolean;
   marker: string;
   headingPath: string[];
   startOffset: number;
@@ -355,35 +411,43 @@ function markdownTableText(node: MdastNode, state: ProjectionState): string {
   return rows.join("\n");
 }
 
-function flattenMarkdownUnit(unit: MarkdownUnit): string {
+function flattenMarkdownUnit(unit: MarkdownUnit): PassageLine[] {
   switch (unit.kind) {
     case "paragraph":
     case "heading":
+      return passageLines(unit.ownText, true);
     case "code":
     case "table":
-      return unit.ownText;
+      return passageLines(unit.ownText, false);
     case "list":
-      return unit.children.map(flattenMarkdownUnit).filter(isMeaningful).join("\n");
+      return unit.children.flatMap(flattenMarkdownUnit);
     case "listItem": {
-      const lines: string[] = [];
+      const lines: PassageLine[] = [];
       if (isMeaningful(unit.ownText)) {
         const ownLines = unit.ownText.split("\n");
-        lines.push(`${unit.marker}${ownLines[0]}`);
-        for (const line of ownLines.slice(1)) {
-          lines.push(unit.marker ? indentLine(line) : line);
+        if (unit.marker) {
+          lines.push({ text: `${unit.marker}${ownLines[0]}`, indent: unit.ownIndent });
+          for (const line of ownLines.slice(1)) {
+            lines.push({
+              text: unit.ownIndent ? indentLine(line) : line,
+              indent: unit.ownIndent,
+            });
+          }
+        } else {
+          for (const line of ownLines) lines.push({ text: line, indent: unit.ownIndent });
         }
       }
       for (const child of unit.children) {
-        const childText = flattenMarkdownUnit(child);
-        if (!isMeaningful(childText)) continue;
-        lines.push(child.kind === "code" ? childText : indentText(childText));
+        const childLines = flattenMarkdownUnit(child);
+        if (!isMeaningful(passageText(childLines))) continue;
+        lines.push(...indentPassageLines(childLines));
       }
-      return lines.join("\n");
+      return lines;
     }
     case "blockquote":
-      return unit.children.map(flattenMarkdownUnit).filter(isMeaningful).join("\n");
+      return unit.children.flatMap(flattenMarkdownUnit);
     case "structural":
-      return "";
+      return [];
   }
 }
 
@@ -394,7 +458,7 @@ function buildMarkdownUnit(
   marker: string,
 ): MarkdownUnit | undefined {
   const { startOffset, endOffset } = markdownPosition(node);
-  const base = { marker, headingPath, startOffset, endOffset };
+  const base = { marker, headingPath, startOffset, endOffset, ownIndent: true };
   switch (node.type) {
     case "paragraph":
       return {
@@ -411,9 +475,21 @@ function buildMarkdownUnit(
         children: [],
       };
     case "code":
-      return { ...base, kind: "code", ownText: node.value ?? "", children: [] };
+      return {
+        ...base,
+        kind: "code",
+        ownText: node.value ?? "",
+        ownIndent: false,
+        children: [],
+      };
     case "table":
-      return { ...base, kind: "table", ownText: markdownTableText(node, state), children: [] };
+      return {
+        ...base,
+        kind: "table",
+        ownText: markdownTableText(node, state),
+        ownIndent: false,
+        children: [],
+      };
     case "list": {
       const ordered = node.ordered === true;
       const start = typeof node.start === "number" ? node.start : 1;
@@ -441,15 +517,15 @@ function buildMarkdownUnit(
         return { ...base, kind: "listItem", ownText: "", children };
       }
       const firstUnit = buildMarkdownUnit(first, state, headingPath, "");
-      const ownText = firstUnit ? flattenMarkdownUnit(firstUnit) : "";
+      const ownText = firstUnit ? passageText(flattenMarkdownUnit(firstUnit)) : "";
       const children: MarkdownUnit[] = [];
       for (const block of blocks.slice(1)) {
         const unit = buildMarkdownUnit(block, state, headingPath, "");
         if (unit) children.push(unit);
       }
-      const ownMarker =
-        firstUnit && (firstUnit.kind === "code" || firstUnit.kind === "table") ? "" : marker;
-      return { ...base, marker: ownMarker, kind: "listItem", ownText, children };
+      const ownIndent = firstUnit ? firstUnit.kind !== "code" && firstUnit.kind !== "table" : true;
+      const ownMarker = ownIndent ? marker : "";
+      return { ...base, marker: ownMarker, kind: "listItem", ownText, ownIndent, children };
     }
     case "blockquote": {
       const children: MarkdownUnit[] = [];
@@ -501,7 +577,7 @@ function projectMarkdown(content: string, sourceBase: SourceBase): NotePassagePr
     ...(part === undefined ? {} : { part }),
   });
   const projectUnit = (unit: MarkdownUnit): void => {
-    const full = flattenMarkdownUnit(unit);
+    const full = passageText(flattenMarkdownUnit(unit));
     if (!isMeaningful(full)) return;
     if (full.length <= MAX_PASSAGE_CHARS) {
       addPassage(state, full, sourceFor(unit));
@@ -544,6 +620,7 @@ type BlockUnit = {
   kind: AtlasBlock["type"];
   blockId: string;
   ownText: string;
+  ownIndent: boolean;
   marker: string;
   headingPath: string[];
   children: BlockUnit[];
@@ -645,6 +722,7 @@ function buildBlockUnit(block: AtlasBlock, headingPath: string[], marker: string
     kind: block.type,
     blockId: block.id,
     ownText: blockOwnText(block),
+    ownIndent: block.type !== "codeBlock" && block.type !== "table",
     marker,
     headingPath,
     children: buildBlockChildren(block.children, headingPath),
@@ -667,23 +745,25 @@ function buildBlockChildren(children: AtlasBlock[], headingPath: string[]): Bloc
   });
 }
 
-function flattenBlockUnit(unit: BlockUnit): string {
-  const lines: string[] = [];
+function flattenBlockUnit(unit: BlockUnit): PassageLine[] {
+  const lines: PassageLine[] = [];
   if (isMeaningful(unit.ownText)) {
     const ownLines = unit.ownText.split("\n");
     if (unit.marker) {
-      lines.push(`${unit.marker}${ownLines[0]}`);
-      for (const line of ownLines.slice(1)) lines.push(indentLine(line));
+      lines.push({ text: `${unit.marker}${ownLines[0]}`, indent: true });
+      for (const line of ownLines.slice(1)) {
+        lines.push({ text: indentLine(line), indent: true });
+      }
     } else {
-      lines.push(...ownLines);
+      for (const line of ownLines) lines.push({ text: line, indent: unit.ownIndent });
     }
   }
   for (const child of unit.children) {
-    const childText = flattenBlockUnit(child);
-    if (!isMeaningful(childText)) continue;
-    lines.push(child.kind === "codeBlock" ? childText : indentText(childText));
+    const childLines = flattenBlockUnit(child);
+    if (!isMeaningful(passageText(childLines))) continue;
+    lines.push(...indentPassageLines(childLines));
   }
-  return lines.join("\n");
+  return lines;
 }
 
 function splitBlockOwnText(unit: BlockUnit): string[] {
@@ -749,7 +829,7 @@ function classifyInvalidBlockDocument(content: unknown): NotePassageProjection |
     });
   }
   const schemaVersion = content.schemaVersion;
-  if (typeof schemaVersion !== "number" || !Number.isInteger(schemaVersion)) return undefined;
+  if (typeof schemaVersion !== "number" || !Number.isSafeInteger(schemaVersion)) return undefined;
   if (schemaVersion !== 1) {
     return unsupported({ code: "unsupported_schema_version", schemaVersion });
   }
@@ -779,7 +859,7 @@ function projectBlockNote(
     ...(part === undefined ? {} : { part }),
   });
   const projectUnit = (unit: BlockUnit): void => {
-    const full = flattenBlockUnit(unit);
+    const full = passageText(flattenBlockUnit(unit));
     if (!isMeaningful(full)) return;
     if (full.length <= MAX_PASSAGE_CHARS) {
       addPassage(state, full, sourceFor(unit));
