@@ -303,9 +303,10 @@ function markdownDepthOk(root: MdastNode): boolean {
 
 function addUnsupportedNode(state: ProjectionState, node: MdastNode): void {
   const { startOffset, endOffset } = markdownPosition(node);
+  const nodeType = noteTextSchema.min(1).max(64).safeParse(node.type);
   addIssue(state, {
     code: "unsupported_node",
-    nodeType: node.type.slice(0, 64),
+    nodeType: nodeType.success ? nodeType.data : "unknown",
     startOffset,
     endOffset,
   });
@@ -444,7 +445,9 @@ function buildMarkdownUnit(
         const unit = buildMarkdownUnit(block, state, headingPath, "");
         if (unit) children.push(unit);
       }
-      return { ...base, kind: "listItem", ownText, children };
+      const ownMarker =
+        firstUnit && (firstUnit.kind === "code" || firstUnit.kind === "table") ? "" : marker;
+      return { ...base, marker: ownMarker, kind: "listItem", ownText, children };
     }
     case "blockquote": {
       const children: MarkdownUnit[] = [];
@@ -737,9 +740,10 @@ function classifyInvalidBlockDocument(content: unknown): NotePassageProjection |
   const format = content.format;
   if (typeof format !== "string") return undefined;
   if (format !== "blocknote") {
+    const value = noteTextSchema.min(1).max(64).safeParse(format);
     return unsupported({
       code: "unsupported_format",
-      format: format.slice(0, 64) || "unknown",
+      format: value.success ? value.data : "unknown",
     });
   }
   const schemaVersion = content.schemaVersion;
@@ -750,9 +754,10 @@ function classifyInvalidBlockDocument(content: unknown): NotePassageProjection |
   const unsupportedBlock = findUnsupportedBlockType(content.blocks);
   if (unsupportedBlock) {
     const blockId = blockIdSchema.safeParse(unsupportedBlock.id);
+    const blockType = noteTextSchema.min(1).max(128).safeParse(unsupportedBlock.type);
     return unsupported({
       code: "unsupported_block_type",
-      blockType: unsupportedBlock.type.slice(0, 128) || "unknown",
+      blockType: blockType.success ? blockType.data : "unknown",
       ...(blockId.success ? { blockId: blockId.data } : {}),
     });
   }

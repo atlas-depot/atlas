@@ -187,6 +187,19 @@ describe("note passage contract", () => {
         }).success,
       ).toBe(false);
     }
+    for (const issue of [
+      { code: "unsupported_node" as const, nodeType: "\0", startOffset: 0, endOffset: 7 },
+      { code: "unsupported_block_type" as const, blockType: "\0" },
+      { code: "unsupported_format" as const, format: "\0" },
+    ]) {
+      expect(
+        notePassageProjectionSchema.safeParse({
+          status: "partial",
+          passages: [passage],
+          issues: [issue],
+        }).success,
+      ).toBe(false);
+    }
   });
 
   it("bounds validated projections to the passage limit", () => {

@@ -225,6 +225,12 @@ describe("note passage projection", () => {
     expect(texts(project(document([code("c1", value)])))).toEqual([value]);
   });
 
+  it("keeps code exact when it is the first child of a list item", () => {
+    const result = project("- ```\n  const x = 1;\n  ```\n");
+    expect(result.status).toBe("complete");
+    expect(texts(result)).toEqual(["const x = 1;"]);
+  });
+
   it("preserves Turkish, supplementary and combining Unicode", () => {
     const value = "Başlık 😀 𐐷 e\u0301";
     const result = project(`# ${value}\n\n${value}\n`);
@@ -429,6 +435,18 @@ describe("note passage projection", () => {
     );
     expect(nulId.status).toBe("unsupported");
     expect(issues(nulId)).toEqual([{ code: "unsupported_block_type", blockType: "image" }]);
+
+    const nulType = project(
+      document([{ id: "block-1", type: "\0", props: {}, content: [], children: [] }]),
+    );
+    expect(nulType.status).toBe("unsupported");
+    expect(issues(nulType)).toEqual([
+      { code: "unsupported_block_type", blockType: "unknown", blockId: "block-1" },
+    ]);
+
+    const nulFormat = project({ format: "\0", schemaVersion: 1, blocks: [] });
+    expect(nulFormat.status).toBe("unsupported");
+    expect(issues(nulFormat)).toEqual([{ code: "unsupported_format", format: "unknown" }]);
   });
 
   it("returns malformed for invalid source metadata", () => {

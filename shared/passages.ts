@@ -50,18 +50,18 @@ export const notePassageSchema = z.strictObject({
 
 const unsupportedNodeIssueSchema = z.strictObject({
   code: z.literal("unsupported_node"),
-  nodeType: z.string().min(1).max(64),
+  nodeType: noteTextSchema.min(1).max(64),
   startOffset: offsetSchema,
   endOffset: offsetSchema,
 });
 const unsupportedBlockTypeIssueSchema = z.strictObject({
   code: z.literal("unsupported_block_type"),
-  blockType: z.string().min(1).max(128),
+  blockType: noteTextSchema.min(1).max(128),
   blockId: blockIdSchema.optional(),
 });
 const unsupportedFormatIssueSchema = z.strictObject({
   code: z.literal("unsupported_format"),
-  format: z.string().min(1).max(64),
+  format: noteTextSchema.min(1).max(64),
 });
 const unsupportedSchemaVersionIssueSchema = z.strictObject({
   code: z.literal("unsupported_schema_version"),
