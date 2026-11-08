@@ -41,7 +41,7 @@ describe("note passage contract", () => {
       ...blockSource,
       part: 0,
     });
-    expect(PASSAGE_PROJECTION_VERSION).toBe(1);
+    expect(PASSAGE_PROJECTION_VERSION).toBe(2);
   });
 
   it("keeps the source kinds strict and distinct", () => {
@@ -64,6 +64,18 @@ describe("note passage contract", () => {
       notePassageSourceSchema.safeParse({
         ...blockSource,
         headingPath: ["1", "2", "3", "4", "5", "6", "7"],
+      }).success,
+    ).toBe(false);
+    expect(
+      notePassageSourceSchema.safeParse({
+        ...blockSource,
+        headingPath: ["x".repeat(256)],
+      }).success,
+    ).toBe(true);
+    expect(
+      notePassageSourceSchema.safeParse({
+        ...blockSource,
+        headingPath: ["x".repeat(257)],
       }).success,
     ).toBe(false);
     expect(

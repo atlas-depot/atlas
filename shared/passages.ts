@@ -4,7 +4,9 @@ import { noteIdSchema } from "./notes.ts";
 
 /** Opaque note version. The API uses the note's strong ETag, so the internal revision stays private. */
 export const notePassageVersionSchema = noteTextSchema.min(1).max(256);
-const headingPathSchema = z.array(noteTextSchema).max(6);
+/** Heading text is display context, not the searchable passage body. */
+export const MAX_HEADING_PATH_CHARS = 256;
+const headingPathSchema = z.array(noteTextSchema.max(MAX_HEADING_PATH_CHARS)).max(6);
 const offsetSchema = z.number().int().min(0).max(100_000);
 const partSchema = z.number().int().min(0);
 
@@ -134,4 +136,4 @@ export type NotePassageProjectionInput = {
  * Changes to the projected text, source shape or split rules invalidate stored embeddings. The
  * index must rebuild when this value changes.
  */
-export const PASSAGE_PROJECTION_VERSION = 1;
+export const PASSAGE_PROJECTION_VERSION = 2;

@@ -348,7 +348,8 @@ describe("note passage projection", () => {
       (passage) => passage.source.kind === "block" && passage.source.blockId === "p1",
     );
     if (!child || child.source.kind !== "block") throw new Error("Expected child block source");
-    expect(child.source.headingPath).toEqual([headingText]);
+    expect(child.source.headingPath).toEqual([headingText.slice(0, 256)]);
+    expect(child.source.headingPath[0]).toHaveLength(256);
   });
 
   it("splits long text at grapheme boundaries without corrupting Unicode", () => {
@@ -406,6 +407,11 @@ describe("note passage projection", () => {
     expect(block.status).toBe("complete");
     expect(texts(block).join("")).toBe(value);
     expect(block.passages.every((passage) => passage.text.length <= 4_000)).toBe(true);
+
+    const list = project(`- \`\`\`\n  ${value.replace(/\n/g, "\n  ")}\n  \`\`\`\n`);
+    expect(list.status).toBe("complete");
+    expect(texts(list).join("")).toBe(value);
+    expect(list.passages.every((passage) => passage.text.length <= 4_000)).toBe(true);
   });
 
   it("does not overflow a code passage to fit one grapheme", () => {

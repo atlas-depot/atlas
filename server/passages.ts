@@ -10,6 +10,7 @@ import {
 } from "../shared/document.ts";
 import { noteIdSchema } from "../shared/notes.ts";
 import {
+  MAX_HEADING_PATH_CHARS,
   notePassageVersionSchema,
   type NotePassage,
   type NotePassageProjection,
@@ -124,8 +125,23 @@ function updateHeadingPath(path: Heading[], level: number, text: string): Headin
   return next;
 }
 
+function truncateHeadingPath(text: string): string {
+  if (text.length <= MAX_HEADING_PATH_CHARS) return text;
+  const boundaries = graphemeBoundaries(text);
+  let end = 0;
+  for (const boundary of boundaries) {
+    if (boundary > MAX_HEADING_PATH_CHARS) break;
+    end = boundary;
+  }
+  if (end > 0) return text.slice(0, end);
+  let hardEnd = MAX_HEADING_PATH_CHARS;
+  const code = text.charCodeAt(hardEnd - 1);
+  if (code >= 0xd800 && code <= 0xdbff) hardEnd--;
+  return text.slice(0, hardEnd);
+}
+
 function headingTexts(path: Heading[]): string[] {
-  return path.map((heading) => heading.text);
+  return path.map((heading) => truncateHeadingPath(heading.text));
 }
 
 function cleanCell(text: string): string {
@@ -553,7 +569,7 @@ function buildMarkdownUnit(
 
 function splitMarkdownOwnText(unit: MarkdownUnit): string[] {
   const ownText = formatOwnText(unit.marker, unit.ownText);
-  return unit.kind === "code" || unit.kind === "table" ? splitLines(ownText) : splitProse(ownText);
+  return unit.ownIndent ? splitProse(ownText) : splitLines(ownText);
 }
 
 function projectMarkdown(content: string, sourceBase: SourceBase): NotePassageProjection {
@@ -768,9 +784,7 @@ function flattenBlockUnit(unit: BlockUnit): PassageLine[] {
 
 function splitBlockOwnText(unit: BlockUnit): string[] {
   const ownText = formatOwnText(unit.marker, unit.ownText);
-  return unit.kind === "codeBlock" || unit.kind === "table"
-    ? splitLines(ownText)
-    : splitProse(ownText);
+  return unit.ownIndent ? splitProse(ownText) : splitLines(ownText);
 }
 
 function setBlockHeadingPath(units: BlockUnit[], headingPath: string[]): void {
