@@ -288,6 +288,17 @@ function splitProse(text: string): string[] {
   return mergeBlankParts(parts);
 }
 
+function splitGraphemes(text: string, limit: number): string[] {
+  const parts: string[] = [];
+  let start = 0;
+  while (start < text.length) {
+    const take = safeSliceLength(text.slice(start), limit, true);
+    parts.push(text.slice(start, start + take));
+    start += take;
+  }
+  return parts;
+}
+
 function splitLines(text: string): string[] {
   if (text.length <= MAX_PASSAGE_CHARS) return [text];
   const lines: string[] = [];
@@ -307,7 +318,7 @@ function splitLines(text: string): string[] {
         parts.push(current);
         current = "";
       }
-      parts.push(...splitProse(line));
+      parts.push(...splitGraphemes(line, MAX_PASSAGE_CHARS));
     } else if (current.length > 0 && current.length + line.length > MAX_PASSAGE_CHARS) {
       parts.push(current);
       current = line;
