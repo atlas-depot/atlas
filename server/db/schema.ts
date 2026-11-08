@@ -40,6 +40,21 @@ export const notes = pgTable(
   ],
 );
 
+/** Pending indexing work contains identity/revision only, never a content snapshot. */
+export const noteIndexIntents = pgTable(
+  "note_index_intents",
+  {
+    noteId: uuid("note_id")
+      .primaryKey()
+      .references(() => notes.id, { onDelete: "cascade" }),
+    revision: integer("revision").notNull(),
+    requestedAt: timestamp("requested_at", { withTimezone: true, mode: "string" })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [check("note_index_intents_revision_positive", sql`${table.revision} > 0`)],
+);
+
 /** Content-free creation receipts survive note deletion to prevent duplicate retries. */
 export const noteCreateRequests = pgTable(
   "note_create_requests",

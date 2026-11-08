@@ -43,6 +43,13 @@
       "when": 1793894772419,
       "tag": "0005_ai-note-drafts",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1794168042887,
+      "tag": "0006_note-index-intents",
+      "breakpoints": true
     }
   ]
 }
