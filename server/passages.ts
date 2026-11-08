@@ -610,7 +610,21 @@ function buildMarkdownUnit(
   }
 }
 
+function splitMarkdownListOwnText(unit: MarkdownUnit): string[] {
+  if (unit.ownLines.length === 0) return [];
+  const markerAllowed = unit.marker.length > 0 && unit.ownLines[0]?.indent !== false;
+  const lines = unit.ownLines.map((line, index) => {
+    if (index === 0 && markerAllowed) return `${unit.marker}${line.text}`;
+    if (index > 0 && markerAllowed && line.indent) return indentLine(line.text);
+    return line.text;
+  });
+  return splitLines(lines.join("\n"));
+}
+
 function splitMarkdownOwnText(unit: MarkdownUnit): string[] {
+  if (unit.kind === "listItem" && unit.ownLines.some((line) => !line.indent)) {
+    return splitMarkdownListOwnText(unit);
+  }
   const ownText = formatOwnText(unit.marker, unit.ownText);
   return unit.ownIndent ? splitProse(ownText) : splitLines(ownText);
 }
@@ -643,6 +657,8 @@ function projectMarkdown(content: string, sourceBase: SourceBase): NotePassagePr
       return;
     }
     if (isMeaningful(unit.ownText)) {
+      const allowBlank =
+        !unit.ownIndent || (unit.kind === "listItem" && unit.ownLines.some((line) => !line.indent));
       const parts = splitMarkdownOwnText(unit);
       for (const [index, part] of parts.entries()) {
         if (
@@ -650,7 +666,7 @@ function projectMarkdown(content: string, sourceBase: SourceBase): NotePassagePr
             state,
             part,
             sourceFor(unit, parts.length > 1 ? index : undefined),
-            !unit.ownIndent,
+            allowBlank,
           )
         ) {
           return;

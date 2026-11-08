@@ -476,6 +476,24 @@ describe("note passage projection", () => {
     expect(texts(result)).toEqual(['if True:\n    print("ok")']);
   });
 
+  it("keeps quoted list code exact after a long text split", () => {
+    const longText = "a".repeat(4_001);
+    const content = [
+      `- > ${longText}`,
+      "  >",
+      "  > ```python",
+      "  > if True:",
+      '  >     print("ok")',
+      "  > ```",
+      "",
+    ].join("\n");
+    const result = project(content);
+    expect(result.status).toBe("complete");
+    const joined = texts(result).join("\n");
+    expect(joined).toContain('    print("ok")');
+    expect(joined).not.toContain('      print("ok")');
+  });
+
   it("keeps code splits on whole lines when lines fit", () => {
     const lineA = "a".repeat(3_000);
     const lineB = "b".repeat(3_000);
