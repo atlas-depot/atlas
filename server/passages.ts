@@ -212,7 +212,7 @@ function packExactParts(parts: string[]): string[] {
       if (current.length > 0) {
         const room = MAX_PASSAGE_CHARS - current.length;
         if (room > 0) {
-          const take = safeSliceLength(rest, room, true);
+          const take = safeSliceLength(rest, room, false);
           current += rest.slice(0, take);
           rest = rest.slice(take);
         }
