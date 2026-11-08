@@ -175,5 +175,32 @@ describe("note passage contract", () => {
         issues: [{ code: "unsupported_block_type", blockType: "image", extra: true }],
       }).success,
     ).toBe(false);
+    for (const [startOffset, endOffset] of [
+      [7, 7],
+      [8, 7],
+    ]) {
+      expect(
+        notePassageProjectionSchema.safeParse({
+          status: "partial",
+          passages: [passage],
+          issues: [{ code: "unsupported_node", nodeType: "image", startOffset, endOffset }],
+        }).success,
+      ).toBe(false);
+    }
+  });
+
+  it("bounds validated projections to the passage limit", () => {
+    expect(
+      notePassageProjectionSchema.safeParse({
+        status: "complete",
+        passages: Array.from({ length: 1_000 }, () => passage),
+      }).success,
+    ).toBe(true);
+    expect(
+      notePassageProjectionSchema.safeParse({
+        status: "complete",
+        passages: Array.from({ length: 1_001 }, () => passage),
+      }).success,
+    ).toBe(false);
   });
 });

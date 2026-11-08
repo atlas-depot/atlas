@@ -120,27 +120,37 @@ function cleanCell(text: string): string {
   return text.replace(/\s*\n\s*/g, " ").trim();
 }
 
-function formatSplitPart(marker: string, part: string, index: number): string {
-  if (!marker || !isMeaningful(part)) return part;
-  const lines = part.split("\n");
-  if (index === 0) {
-    return [marker + lines[0], ...lines.slice(1).map(indentLine)].join("\n");
-  }
-  return indentText(part);
+function formatOwnText(marker: string, text: string): string {
+  if (!marker || !isMeaningful(text)) return text;
+  const lines = text.split("\n");
+  return [marker + lines[0], ...lines.slice(1).map(indentLine)].join("\n");
 }
 
 function mergeBlankParts(parts: string[]): string[] {
   const merged: string[] = [];
+  let pending = "";
   for (const part of parts) {
-    if (!isMeaningful(part) && merged.length > 0) {
-      merged[merged.length - 1] += part;
-    } else {
-      merged.push(part);
+    if (!isMeaningful(part)) {
+      if (
+        merged.length > 0 &&
+        merged[merged.length - 1].length + part.length <= MAX_PASSAGE_CHARS
+      ) {
+        merged[merged.length - 1] += part;
+      } else {
+        pending += part;
+      }
+      continue;
     }
+    const candidate = pending + part;
+    merged.push(candidate.length <= MAX_PASSAGE_CHARS ? candidate : part);
+    pending = "";
   }
-  if (merged.length > 1 && !isMeaningful(merged[0])) {
-    merged[1] = merged[0] + merged[1];
-    merged.shift();
+  if (
+    pending.length > 0 &&
+    merged.length > 0 &&
+    merged[merged.length - 1].length + pending.length <= MAX_PASSAGE_CHARS
+  ) {
+    merged[merged.length - 1] += pending;
   }
   return merged;
 }
@@ -461,9 +471,8 @@ function buildMarkdownUnit(
 }
 
 function splitMarkdownOwnText(unit: MarkdownUnit): string[] {
-  return unit.kind === "code" || unit.kind === "table"
-    ? splitLines(unit.ownText)
-    : splitProse(unit.ownText);
+  const ownText = formatOwnText(unit.marker, unit.ownText);
+  return unit.kind === "code" || unit.kind === "table" ? splitLines(ownText) : splitProse(ownText);
 }
 
 function projectMarkdown(content: string, sourceBase: SourceBase): NotePassageProjection {
@@ -496,8 +505,7 @@ function projectMarkdown(content: string, sourceBase: SourceBase): NotePassagePr
     if (isMeaningful(unit.ownText)) {
       const parts = splitMarkdownOwnText(unit);
       for (const [index, part] of parts.entries()) {
-        const text = formatSplitPart(unit.marker, part, index);
-        if (!addPassage(state, text, sourceFor(unit, parts.length > 1 ? index : undefined))) {
+        if (!addPassage(state, part, sourceFor(unit, parts.length > 1 ? index : undefined))) {
           return;
         }
       }
@@ -674,9 +682,17 @@ function flattenBlockUnit(unit: BlockUnit): string {
 }
 
 function splitBlockOwnText(unit: BlockUnit): string[] {
+  const ownText = formatOwnText(unit.marker, unit.ownText);
   return unit.kind === "codeBlock" || unit.kind === "table"
-    ? splitLines(unit.ownText)
-    : splitProse(unit.ownText);
+    ? splitLines(ownText)
+    : splitProse(ownText);
+}
+
+function setBlockHeadingPath(units: BlockUnit[], headingPath: string[]): void {
+  for (const unit of units) {
+    unit.headingPath = headingPath;
+    setBlockHeadingPath(unit.children, headingPath);
+  }
 }
 
 const SUPPORTED_BLOCK_TYPES = new Set([
@@ -765,8 +781,7 @@ function projectBlockNote(
     if (isMeaningful(unit.ownText)) {
       const parts = splitBlockOwnText(unit);
       for (const [index, part] of parts.entries()) {
-        const text = formatSplitPart(unit.marker, part, index);
-        if (!addPassage(state, text, sourceFor(unit, parts.length > 1 ? index : undefined))) {
+        if (!addPassage(state, part, sourceFor(unit, parts.length > 1 ? index : undefined))) {
           return;
         }
       }
@@ -792,7 +807,9 @@ function projectBlockNote(
     const unit = buildBlockUnit(block, headingTexts(headings), marker);
     if (block.type === "heading") {
       headings = updateHeadingPath(headings, block.props.level, unit.ownText);
-      unit.headingPath = headingTexts(headings);
+      const headingPath = headingTexts(headings);
+      unit.headingPath = headingPath;
+      setBlockHeadingPath(unit.children, headingPath);
     }
     projectUnit(unit);
     if (state.passageLimit) break;

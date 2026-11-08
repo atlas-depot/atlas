@@ -233,11 +233,13 @@ describe("note passage projection", () => {
   });
 
   it("uses UTF-16 offsets with CRLF input", () => {
-    const content = "# A\r\n\r\nText\r\n";
+    const content = "# 😀\r\n\r\nText\r\n";
     const result = project(content);
     expect(result.status).toBe("complete");
     const source = result.passages[1].source;
     if (source.kind !== "markdown") throw new Error("Expected Markdown source");
+    expect(source.startOffset).toBe(8);
+    expect(source.endOffset).toBe(12);
     expect(content.slice(source.startOffset, source.endOffset)).toBe("Text");
   });
 
@@ -307,6 +309,17 @@ describe("note passage projection", () => {
     ).toEqual(["A", "A", "A", "A"]);
   });
 
+  it("propagates a heading path to children of an oversized heading", () => {
+    const headingText = "Heading ".repeat(600);
+    const result = project(document([heading("h1", headingText, 1, [paragraph("p1", "Child")])]));
+    expect(result.status).toBe("complete");
+    const child = result.passages.find(
+      (passage) => passage.source.kind === "block" && passage.source.blockId === "p1",
+    );
+    if (!child || child.source.kind !== "block") throw new Error("Expected child block source");
+    expect(child.source.headingPath).toEqual([headingText]);
+  });
+
   it("splits long text at grapheme boundaries without corrupting Unicode", () => {
     const value = "😀".repeat(2_500);
     const result = project(value);
@@ -330,6 +343,25 @@ describe("note passage projection", () => {
     expect(result.status).toBe("complete");
     expect(result.passages.length).toBeGreaterThan(1);
     expect(texts(result).join("")).toBe(value.replace(/\n$/, ""));
+  });
+
+  it("keeps formatted list passages within the passage limit", () => {
+    const value = "a".repeat(3_999);
+    const markdown = project(`- ${value}\n`);
+    expect(markdown.status).toBe("complete");
+    expect(texts(markdown).every((text) => text.length <= 4_000)).toBe(true);
+
+    const block = project(document([bullet("b1", value)]));
+    expect(block.status).toBe("complete");
+    expect(texts(block).every((text) => text.length <= 4_000)).toBe(true);
+  });
+
+  it("keeps code passages within the limit when blank lines are merged", () => {
+    const value = `${"a".repeat(3_999)}\n\n${"b".repeat(3_999)}`;
+    const result = project(`\`\`\`\n${value}\n\`\`\`\n`);
+    expect(result.status).toBe("complete");
+    expect(result.passages.length).toBeGreaterThan(1);
+    expect(result.passages.every((passage) => passage.text.length <= 4_000)).toBe(true);
   });
 
   it("reports malformed content separately", () => {

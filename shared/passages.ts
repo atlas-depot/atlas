@@ -74,24 +74,33 @@ const malformedContentIssueSchema = z.strictObject({
 const passageLimitIssueSchema = z.strictObject({ code: z.literal("passage_limit") });
 const issueLimitIssueSchema = z.strictObject({ code: z.literal("issue_limit") });
 
-export const passageIssueSchema = z.discriminatedUnion("code", [
-  unsupportedNodeIssueSchema,
-  unsupportedBlockTypeIssueSchema,
-  unsupportedFormatIssueSchema,
-  unsupportedSchemaVersionIssueSchema,
-  malformedContentIssueSchema,
-  passageLimitIssueSchema,
-  issueLimitIssueSchema,
-]);
+export const passageIssueSchema = z
+  .discriminatedUnion("code", [
+    unsupportedNodeIssueSchema,
+    unsupportedBlockTypeIssueSchema,
+    unsupportedFormatIssueSchema,
+    unsupportedSchemaVersionIssueSchema,
+    malformedContentIssueSchema,
+    passageLimitIssueSchema,
+    issueLimitIssueSchema,
+  ])
+  .superRefine((issue, ctx) => {
+    if (issue.code === "unsupported_node" && issue.startOffset >= issue.endOffset) {
+      ctx.addIssue({
+        code: "custom",
+        message: "Unsupported node offsets must identify a non-empty source range.",
+      });
+    }
+  });
 
 export const notePassageProjectionSchema = z.discriminatedUnion("status", [
   z.strictObject({
     status: z.literal("complete"),
-    passages: z.array(notePassageSchema).min(1),
+    passages: z.array(notePassageSchema).min(1).max(1_000),
   }),
   z.strictObject({
     status: z.literal("partial"),
-    passages: z.array(notePassageSchema).min(1),
+    passages: z.array(notePassageSchema).min(1).max(1_000),
     issues: z.array(passageIssueSchema).min(1),
   }),
   z.strictObject({
