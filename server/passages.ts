@@ -216,7 +216,7 @@ function packExactParts(parts: string[]): string[] {
           current += rest.slice(0, take);
           rest = rest.slice(take);
         }
-        if (current.length >= MAX_PASSAGE_CHARS) {
+        if (rest.length > 0) {
           packed.push(current);
           current = "";
         }
@@ -356,6 +356,7 @@ type MarkdownUnit = {
     | "structural";
   ownText: string;
   ownIndent: boolean;
+  ownLines: PassageLine[];
   marker: string;
   headingPath: string[];
   startOffset: number;
@@ -467,19 +468,17 @@ function flattenMarkdownUnit(unit: MarkdownUnit): PassageLine[] {
       return unit.children.flatMap(flattenMarkdownUnit);
     case "listItem": {
       const lines: PassageLine[] = [];
-      if (isMeaningful(unit.ownText)) {
-        const ownLines = unit.ownText.split("\n");
-        if (unit.marker) {
-          lines.push({ text: `${unit.marker}${ownLines[0]}`, indent: unit.ownIndent });
-          for (const line of ownLines.slice(1)) {
-            lines.push({
-              text: unit.ownIndent ? indentLine(line) : line,
-              indent: unit.ownIndent,
-            });
+      if (isMeaningful(passageText(unit.ownLines))) {
+        const markerAllowed = unit.marker.length > 0 && unit.ownLines[0]?.indent !== false;
+        unit.ownLines.forEach((line, index) => {
+          if (index === 0 && markerAllowed) {
+            lines.push({ text: `${unit.marker}${line.text}`, indent: line.indent });
+          } else if (index > 0 && markerAllowed && line.indent) {
+            lines.push({ text: indentLine(line.text), indent: true });
+          } else {
+            lines.push(line);
           }
-        } else {
-          for (const line of ownLines) lines.push({ text: line, indent: unit.ownIndent });
-        }
+        });
       }
       for (const child of unit.children) {
         const childLines = flattenMarkdownUnit(child);
@@ -502,7 +501,14 @@ function buildMarkdownUnit(
   marker: string,
 ): MarkdownUnit | undefined {
   const { startOffset, endOffset } = markdownPosition(node);
-  const base = { marker, headingPath, startOffset, endOffset, ownIndent: true };
+  const base = {
+    marker,
+    headingPath,
+    startOffset,
+    endOffset,
+    ownIndent: true,
+    ownLines: [] as PassageLine[],
+  };
   switch (node.type) {
     case "paragraph":
       return {
@@ -561,15 +567,24 @@ function buildMarkdownUnit(
         return { ...base, kind: "listItem", ownText: "", children };
       }
       const firstUnit = buildMarkdownUnit(first, state, headingPath, "");
-      const ownText = firstUnit ? passageText(flattenMarkdownUnit(firstUnit)) : "";
+      const ownLines = firstUnit ? flattenMarkdownUnit(firstUnit) : [];
+      const ownText = passageText(ownLines);
       const children: MarkdownUnit[] = [];
       for (const block of blocks.slice(1)) {
         const unit = buildMarkdownUnit(block, state, headingPath, "");
         if (unit) children.push(unit);
       }
-      const ownIndent = firstUnit ? firstUnit.kind !== "code" && firstUnit.kind !== "table" : true;
+      const ownIndent = ownLines.length > 0 ? ownLines[0].indent : true;
       const ownMarker = ownIndent ? marker : "";
-      return { ...base, marker: ownMarker, kind: "listItem", ownText, ownIndent, children };
+      return {
+        ...base,
+        marker: ownMarker,
+        kind: "listItem",
+        ownText,
+        ownIndent,
+        ownLines,
+        children,
+      };
     }
     case "blockquote": {
       const children: MarkdownUnit[] = [];

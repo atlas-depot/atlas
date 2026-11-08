@@ -454,6 +454,28 @@ describe("note passage projection", () => {
     expect(block.passages.every((passage) => passage.text.length <= 4_000)).toBe(true);
   });
 
+  it("keeps CRLF code order exact", () => {
+    const value = `${"a".repeat(4_001)}${"\r\n".repeat(2_001)}b`;
+    const block = project(document([code("c1", value)]));
+    expect(block.status).toBe("complete");
+    expect(texts(block).join("")).toBe(value);
+    expect(block.passages.every((passage) => passage.text.length <= 4_000)).toBe(true);
+
+    const markdown = project(`\`\`\`\n${value}\n\`\`\`\n`);
+    expect(markdown.status).toBe("complete");
+    expect(texts(markdown).join("")).toBe(value);
+    expect(markdown.passages.every((passage) => passage.text.length <= 4_000)).toBe(true);
+  });
+
+  it("keeps code exact when a list item starts with a quote", () => {
+    const content = ["- > ```python", "  > if True:", '  >     print("ok")', "  > ```", ""].join(
+      "\n",
+    );
+    const result = project(content);
+    expect(result.status).toBe("complete");
+    expect(texts(result)).toEqual(['if True:\n    print("ok")']);
+  });
+
   it("keeps code splits on whole lines when lines fit", () => {
     const lineA = "a".repeat(3_000);
     const lineB = "b".repeat(3_000);
