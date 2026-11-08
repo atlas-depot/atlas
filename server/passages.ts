@@ -134,10 +134,8 @@ function truncateHeadingPath(text: string): string {
     end = boundary;
   }
   if (end > 0) return text.slice(0, end);
-  let hardEnd = MAX_HEADING_PATH_CHARS;
-  const code = text.charCodeAt(hardEnd - 1);
-  if (code >= 0xd800 && code <= 0xdbff) hardEnd--;
-  return text.slice(0, hardEnd);
+  // A single grapheme longer than the cap cannot be truncated without corruption.
+  return "";
 }
 
 function headingTexts(path: Heading[]): string[] {

@@ -340,6 +340,20 @@ describe("note passage projection", () => {
     ).toEqual(["A", "A", "A", "A"]);
   });
 
+  it("does not split a heading path grapheme at the cap", () => {
+    const value = `a${"\u0301".repeat(256)}`;
+    const result = project(`# ${value}\n\nChild\n`);
+    expect(result.status).toBe("complete");
+    const child = result.passages.find((passage) => passage.text === "Child");
+    if (!child || child.source.kind !== "markdown") throw new Error("Expected Markdown child");
+    expect(child.source.headingPath).toEqual([""]);
+    for (const passage of result.passages) {
+      if (passage.source.kind === "markdown") {
+        expect(passage.source.headingPath.every((entry) => entry.length <= 256)).toBe(true);
+      }
+    }
+  });
+
   it("propagates a heading path to children of an oversized heading", () => {
     const headingText = "Heading ".repeat(600);
     const result = project(document([heading("h1", headingText, 1, [paragraph("p1", "Child")])]));
