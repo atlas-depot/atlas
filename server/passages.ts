@@ -2,6 +2,7 @@ import remarkGfm from "remark-gfm";
 import remarkParse from "remark-parse";
 import { unified } from "unified";
 import {
+  blockIdSchema,
   blockNoteDocumentSchema,
   noteTextSchema,
   type AtlasBlock,
@@ -73,7 +74,7 @@ function addPassage(state: ProjectionState, text: string, source: NotePassage["s
   if (state.passages.length >= MAX_PASSAGES) {
     if (!state.passageLimit) {
       state.passageLimit = true;
-      addIssue(state, { code: "passage_limit" });
+      state.issues.push({ code: "passage_limit" });
     }
     return false;
   }
@@ -732,10 +733,11 @@ function classifyInvalidBlockDocument(content: unknown): NotePassageProjection |
   }
   const unsupportedBlock = findUnsupportedBlockType(content.blocks);
   if (unsupportedBlock) {
+    const blockId = blockIdSchema.safeParse(unsupportedBlock.id);
     return unsupported({
       code: "unsupported_block_type",
-      blockType: unsupportedBlock.type.slice(0, 128),
-      ...(unsupportedBlock.id ? { blockId: unsupportedBlock.id } : {}),
+      blockType: unsupportedBlock.type.slice(0, 128) || "unknown",
+      ...(blockId.success ? { blockId: blockId.data } : {}),
     });
   }
   return undefined;

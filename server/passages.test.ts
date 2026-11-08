@@ -385,6 +385,20 @@ describe("note passage projection", () => {
     });
   });
 
+  it("keeps unsupported block issues valid for bad type and ID values", () => {
+    const emptyType = project(
+      document([{ id: "x".repeat(200), type: "", props: {}, content: [], children: [] }]),
+    );
+    expect(emptyType.status).toBe("unsupported");
+    expect(issues(emptyType)).toEqual([{ code: "unsupported_block_type", blockType: "unknown" }]);
+
+    const nulId = project(
+      document([{ id: "\0", type: "image", props: {}, content: [], children: [] }]),
+    );
+    expect(nulId.status).toBe("unsupported");
+    expect(issues(nulId)).toEqual([{ code: "unsupported_block_type", blockType: "image" }]);
+  });
+
   it("returns malformed for invalid source metadata", () => {
     expect(projectNotePassages({ noteId: "note-1", version, content: "Text" })).toEqual({
       status: "malformed",
@@ -439,6 +453,20 @@ describe("note passage projection", () => {
     expect(result.status).toBe("unsupported");
     expect(issues(result).filter((issue) => issue.code === "unsupported_node").length).toBe(100);
     expect(issues(result).some((issue) => issue.code === "issue_limit")).toBe(true);
+  });
+
+  it("keeps the passage limit visible when the issue cap is full", () => {
+    const images = Array.from(
+      { length: 101 },
+      (_, index) => `![x](https://example.com/${index}.png)`,
+    );
+    const paragraphs = Array.from({ length: 1_001 }, (_, index) => `p${index}`);
+    const result = project([...images, ...paragraphs].join("\n\n"));
+    expect(result.status).toBe("partial");
+    expect(result.passages.length).toBe(1_000);
+    const codes = issues(result).map((issue) => issue.code);
+    expect(codes).toContain("issue_limit");
+    expect(codes).toContain("passage_limit");
   });
 
   it("projects the stored Markdown fixture", () => {
