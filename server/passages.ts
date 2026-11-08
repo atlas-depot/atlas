@@ -369,7 +369,9 @@ function flattenMarkdownUnit(unit: MarkdownUnit): string {
       if (isMeaningful(unit.ownText)) {
         const ownLines = unit.ownText.split("\n");
         lines.push(`${unit.marker}${ownLines[0]}`);
-        for (const line of ownLines.slice(1)) lines.push(indentLine(line));
+        for (const line of ownLines.slice(1)) {
+          lines.push(unit.marker ? indentLine(line) : line);
+        }
       }
       for (const child of unit.children) {
         const childText = flattenMarkdownUnit(child);

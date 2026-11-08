@@ -226,9 +226,9 @@ describe("note passage projection", () => {
   });
 
   it("keeps code exact when it is the first child of a list item", () => {
-    const result = project("- ```\n  const x = 1;\n  ```\n");
+    const result = project("- ```\n  const x = 1;\n    y();\n  ```\n");
     expect(result.status).toBe("complete");
-    expect(texts(result)).toEqual(["const x = 1;"]);
+    expect(texts(result)).toEqual(["const x = 1;\n  y();"]);
   });
 
   it("preserves Turkish, supplementary and combining Unicode", () => {
