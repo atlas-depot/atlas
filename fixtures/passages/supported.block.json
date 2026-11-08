@@ -1,0 +1,82 @@
+{
+  "format": "blocknote",
+  "schemaVersion": 1,
+  "blocks": [
+    {
+      "id": "h1",
+      "type": "heading",
+      "props": { "level": 1 },
+      "content": [{ "type": "text", "text": "Atlas fixture", "styles": {} }],
+      "children": []
+    },
+    {
+      "id": "p1",
+      "type": "paragraph",
+      "props": {},
+      "content": [{ "type": "text", "text": "A short fixture paragraph.", "styles": {} }],
+      "children": []
+    },
+    {
+      "id": "b1",
+      "type": "bulletListItem",
+      "props": {},
+      "content": [{ "type": "text", "text": "First", "styles": {} }],
+      "children": [
+        {
+          "id": "b2",
+          "type": "bulletListItem",
+          "props": {},
+          "content": [{ "type": "text", "text": "Nested", "styles": {} }],
+          "children": []
+        }
+      ]
+    },
+    {
+      "id": "t1",
+      "type": "table",
+      "props": {},
+      "content": {
+        "type": "tableContent",
+        "columnWidths": [120, 120],
+        "rows": [
+          {
+            "cells": [
+              {
+                "type": "tableCell",
+                "props": {},
+                "content": [{ "type": "text", "text": "A", "styles": {} }]
+              },
+              {
+                "type": "tableCell",
+                "props": {},
+                "content": [{ "type": "text", "text": "B", "styles": {} }]
+              }
+            ]
+          },
+          {
+            "cells": [
+              {
+                "type": "tableCell",
+                "props": {},
+                "content": [{ "type": "text", "text": "1", "styles": {} }]
+              },
+              {
+                "type": "tableCell",
+                "props": {},
+                "content": [{ "type": "text", "text": "2", "styles": {} }]
+              }
+            ]
+          }
+        ]
+      },
+      "children": []
+    },
+    {
+      "id": "k1",
+      "type": "codeBlock",
+      "props": { "language": "ts" },
+      "content": [{ "type": "text", "text": "const value = 1;\n", "styles": {} }],
+      "children": []
+    }
+  ]
+}
