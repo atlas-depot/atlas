@@ -82,8 +82,13 @@ function addIssue(state: ProjectionState, issue: PassageIssue): void {
   state.issues.push(issue);
 }
 
-function addPassage(state: ProjectionState, text: string, source: NotePassage["source"]): boolean {
-  if (!isMeaningful(text)) return true;
+function addPassage(
+  state: ProjectionState,
+  text: string,
+  source: NotePassage["source"],
+  allowBlank = false,
+): boolean {
+  if (text.length === 0 || (!allowBlank && !isMeaningful(text))) return true;
   if (state.passages.length >= MAX_PASSAGES) {
     if (!state.passageLimit) {
       state.passageLimit = true;
@@ -202,21 +207,35 @@ function packExactParts(parts: string[]): string[] {
   const packed: string[] = [];
   let current = "";
   for (const part of parts) {
-    let offset = 0;
-    while (offset < part.length) {
-      const room = MAX_PASSAGE_CHARS - current.length;
-      const take = safeSliceLength(part.slice(offset), room, current.length === 0);
-      if (take === 0) {
-        packed.push(current);
-        current = "";
-        continue;
+    if (!isMeaningful(part)) {
+      let rest = part;
+      if (current.length > 0) {
+        const room = MAX_PASSAGE_CHARS - current.length;
+        if (room > 0) {
+          const take = safeSliceLength(rest, room, true);
+          current += rest.slice(0, take);
+          rest = rest.slice(take);
+        }
+        if (current.length >= MAX_PASSAGE_CHARS) {
+          packed.push(current);
+          current = "";
+        }
       }
-      current += part.slice(offset, offset + take);
-      offset += take;
-      if (current.length >= MAX_PASSAGE_CHARS) {
-        packed.push(current);
-        current = "";
+      while (rest.length > 0) {
+        const take = safeSliceLength(rest, MAX_PASSAGE_CHARS, true);
+        packed.push(rest.slice(0, take));
+        rest = rest.slice(take);
       }
+      continue;
+    }
+    if (current.length > 0 && current.length + part.length > MAX_PASSAGE_CHARS) {
+      packed.push(current);
+      current = "";
+    }
+    if (part.length > MAX_PASSAGE_CHARS) {
+      packed.push(part);
+    } else {
+      current += part;
     }
   }
   if (current.length > 0) packed.push(current);
@@ -600,7 +619,14 @@ function projectMarkdown(content: string, sourceBase: SourceBase): NotePassagePr
     if (isMeaningful(unit.ownText)) {
       const parts = splitMarkdownOwnText(unit);
       for (const [index, part] of parts.entries()) {
-        if (!addPassage(state, part, sourceFor(unit, parts.length > 1 ? index : undefined))) {
+        if (
+          !addPassage(
+            state,
+            part,
+            sourceFor(unit, parts.length > 1 ? index : undefined),
+            !unit.ownIndent,
+          )
+        ) {
           return;
         }
       }
@@ -880,7 +906,14 @@ function projectBlockNote(
     if (isMeaningful(unit.ownText)) {
       const parts = splitBlockOwnText(unit);
       for (const [index, part] of parts.entries()) {
-        if (!addPassage(state, part, sourceFor(unit, parts.length > 1 ? index : undefined))) {
+        if (
+          !addPassage(
+            state,
+            part,
+            sourceFor(unit, parts.length > 1 ? index : undefined),
+            !unit.ownIndent,
+          )
+        ) {
           return;
         }
       }
