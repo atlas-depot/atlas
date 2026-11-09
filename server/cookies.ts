@@ -1,5 +1,14 @@
+/** Base name. Write and read the session cookie through sessionCookieName instead. */
 export const SESSION_COOKIE_NAME = "atlas_session";
 export const LOGIN_TRANSACTION_COOKIE_NAME = "atlas_login_transaction";
+
+/**
+ * HTTPS origins use the __Host- prefix, so the browser rejects the cookie unless it is
+ * Secure, has Path=/ and has no Domain. Loopback HTTP cannot set the prefix.
+ */
+export function sessionCookieName(secure: boolean): string {
+  return secure ? `__Host-${SESSION_COOKIE_NAME}` : SESSION_COOKIE_NAME;
+}
 
 export type CookieSettings = Readonly<{
   path: string;

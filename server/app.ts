@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import { routePath } from "hono/route";
+import { secureHeaders } from "hono/secure-headers";
 import { apiError } from "../shared/http.ts";
 import {
   requireAuth,
@@ -21,6 +22,7 @@ export type AppOptions = Readonly<{
 export function createApp(authenticateRequest: AuthenticateRequest, options: AppOptions = {}) {
   const app = new Hono();
 
+  app.use("*", secureHeaders());
   app.use("*", async (c, next) => {
     c.header("Cache-Control", "no-store");
     await next();

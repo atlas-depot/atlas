@@ -2,6 +2,9 @@ import { Hono } from "hono";
 import { describe, expect, it, onTestFinished, vi } from "vite-plus/test";
 import { createApp } from "./app.ts";
 import { createRequestAuthenticator, requireAuth, type AuthEnv } from "./auth.ts";
+import { sessionCookieName } from "./cookies.ts";
+
+const SESSION_COOKIE = sessionCookieName(true);
 
 describe("Hono authentication boundary", () => {
   it.each([
@@ -65,18 +68,42 @@ describe("Hono authentication boundary", () => {
     });
     const app = createApp(
       async (_request, headers) => {
-        headers?.append("Set-Cookie", "atlas_session=refreshed; Path=/; HttpOnly");
+        headers?.append("Set-Cookie", `${SESSION_COOKIE}=refreshed; Path=/; HttpOnly`);
         return { userId: "user_alice" };
       },
       { protectedRoutes },
     );
     const response = await app.request("/api/fail");
     expect(response.status).toBe(500);
-    expect(response.headers.getSetCookie()).toEqual(["atlas_session=refreshed; Path=/; HttpOnly"]);
+    expect(response.headers.getSetCookie()).toEqual([
+      `${SESSION_COOKIE}=refreshed; Path=/; HttpOnly`,
+    ]);
     expect(response.headers.get("Cache-Control")).toBe("no-store");
     expect(await response.json()).toEqual({
       error: { code: "INTERNAL_ERROR", message: "Request failed." },
     });
+  });
+
+  it("sets browser security headers on success, not-found and failure responses", async () => {
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    onTestFinished(() => log.mockRestore());
+    const protectedRoutes = new Hono<AuthEnv>();
+    protectedRoutes.get("/fail", () => {
+      throw new Error("SYNTHETIC_FAILURE");
+    });
+    const app = createApp(async () => ({ userId: "user_alice" }), { protectedRoutes });
+    for (const [path, status] of [
+      ["/api/health", 200],
+      ["/missing", 404],
+      ["/api/fail", 500],
+    ] as const) {
+      const response = await app.request(path);
+      expect(response.status).toBe(status);
+      expect(response.headers.get("X-Content-Type-Options")).toBe("nosniff");
+      expect(response.headers.get("X-Frame-Options")).toBe("SAMEORIGIN");
+      expect(response.headers.get("Strict-Transport-Security")).toMatch(/^max-age=\d+/);
+      expect(response.headers.get("Cache-Control")).toBe("no-store");
+    }
   });
 
   it("returns JSON for unknown routes", async () => {
@@ -108,7 +135,7 @@ describe("Hono authentication boundary", () => {
         {
           headers: {
             Authorization: authorization,
-            Cookie: "atlas_session=valid-looking-cookie",
+            Cookie: `${SESSION_COOKIE}=valid-looking-cookie`,
           },
         },
       );
@@ -123,7 +150,7 @@ describe("Hono authentication boundary", () => {
     const browser = vi.fn(async () => ({ userId: "cookie-user" }));
     const response = await createApp(createRequestAuthenticator(bearer, browser)).request(
       "/api/notes",
-      { headers: { Cookie: "atlas_session=valid-looking-cookie" } },
+      { headers: { Cookie: `${SESSION_COOKIE}=valid-looking-cookie` } },
     );
     expect(response.status).toBe(503);
     expect(browser).toHaveBeenCalledTimes(1);

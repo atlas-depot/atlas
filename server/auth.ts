@@ -1,6 +1,6 @@
 import { createMiddleware } from "hono/factory";
 import { apiError } from "../shared/http.ts";
-import { SESSION_COOKIE_NAME, readCookie } from "./cookies.ts";
+import { SESSION_COOKIE_NAME, readCookie, sessionCookieName } from "./cookies.ts";
 
 export type AuthenticatedUser = Readonly<{ userId: string }>;
 export type AuthEnv = {
@@ -66,12 +66,16 @@ export function createRequestAuthenticator(
  * are exempt from the origin check.
  */
 export function requireCookieRequestOrigin(appOrigin: string) {
+  // The current name for this origin and the older unprefixed one both count as ambient
+  // cookie identity, so a renamed cookie can never skip this check.
+  const secure = new URL(appOrigin).protocol === "https:";
+  const cookieNames = [sessionCookieName(secure), SESSION_COOKIE_NAME];
   return createMiddleware(async (c, next) => {
     const method = c.req.method.toUpperCase();
     const unsafe = method !== "GET" && method !== "HEAD" && method !== "OPTIONS";
     const authorizationPresent = c.req.raw.headers.has("Authorization");
-    const cookiePresent =
-      readCookie(c.req.header("Cookie") ?? null, SESSION_COOKIE_NAME) !== undefined;
+    const cookieHeader = c.req.header("Cookie") ?? null;
+    const cookiePresent = cookieNames.some((name) => readCookie(cookieHeader, name) !== undefined);
     if (unsafe && !authorizationPresent && cookiePresent) {
       if (c.req.header("Origin") !== appOrigin) {
         return c.json(apiError("FORBIDDEN", "Request origin is not allowed."), 403);

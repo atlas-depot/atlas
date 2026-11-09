@@ -6,14 +6,16 @@ import { Pool } from "pg";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vite-plus/test";
 import type { SessionUser } from "../../shared/auth.ts";
 import { apiErrorSchema } from "../../shared/http.ts";
-import { noteListSchema, noteSchema, type Note } from "../../shared/notes.ts";
+import { noteListSchema, noteSchema, type Note, type NoteSummary } from "../../shared/notes.ts";
 import { createApp } from "../app.ts";
 import { createAuthRoutes } from "../auth-routes.ts";
 import { createRequestAuthenticator, type AuthenticateRequest } from "../auth.ts";
 import type { BrowserAuth } from "../browser-auth.ts";
-import { SESSION_COOKIE_NAME, readCookie } from "../cookies.ts";
+import { readCookie, sessionCookieName } from "../cookies.ts";
+
+const SESSION_COOKIE = sessionCookieName(true);
 import { openDatabase, readTestDatabaseUrl } from "./connection.ts";
-import { createNoteStore } from "./notes.ts";
+import { createNoteStore, noteTag } from "./notes.ts";
 import { noteCreateRequests, notes } from "./schema.ts";
 
 /**
@@ -53,7 +55,7 @@ const bobDraft = {
 };
 
 function sessionCookie(value: string): string {
-  return `${SESSION_COOKIE_NAME}=${value}; Path=/; HttpOnly; SameSite=Lax`;
+  return `${SESSION_COOKIE}=${value}; Path=/; HttpOnly; SameSite=Lax`;
 }
 
 function authorization(token: string): Record<string, string> {
@@ -68,7 +70,7 @@ const authenticateBearer: AuthenticateRequest = async (request) => {
 };
 
 const authenticateBrowser: AuthenticateRequest = async (request) => {
-  const session = readCookie(request.headers.get("Cookie"), SESSION_COOKIE_NAME);
+  const session = readCookie(request.headers.get("Cookie"), SESSION_COOKIE);
   if (session === "session_alice") return aliceIdentity;
   if (session === "session_bob") return bobIdentity;
   return null;
@@ -79,7 +81,7 @@ const authenticateRequest = createRequestAuthenticator(authenticateBearer, authe
 const browserAuth: BrowserAuth = {
   authenticate: authenticateBrowser,
   readSession: async (request) => {
-    const session = readCookie(request.headers.get("Cookie"), SESSION_COOKIE_NAME);
+    const session = readCookie(request.headers.get("Cookie"), SESSION_COOKIE);
     if (session === "session_alice") return aliceSession;
     if (session === "session_bob") return bobSession;
     return null;
@@ -98,7 +100,7 @@ const browserAuth: BrowserAuth = {
   cancelLogin: () => ({ ok: false, error: "invalid_transaction" }),
   logout: async () => ({
     redirectTo: `${appOrigin}/`,
-    sessionCookie: `${SESSION_COOKIE_NAME}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0`,
+    sessionCookie: `${SESSION_COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0`,
   }),
 };
 
@@ -168,7 +170,12 @@ async function createNote(
   return { note: noteSchema.parse(body), etag };
 }
 
-async function listNotes(app: ReturnType<typeof createApp>, token: string): Promise<Note[]> {
+/** The list contract: every note field except content. */
+function summaryOf({ id, title, origin, createdAt, updatedAt }: Note): NoteSummary {
+  return { id, title, ...(origin ? { origin } : {}), createdAt, updatedAt };
+}
+
+async function listNotes(app: ReturnType<typeof createApp>, token: string): Promise<NoteSummary[]> {
   const response = await app.request("/api/notes", { headers: authorization(token) });
   expect(response.status).toBe(200);
   const body: unknown = await response.json();
@@ -222,9 +229,9 @@ describe("authenticated note ownership and stale-write boundaries (synthetic ide
     const bobNote = await createNote(appA, "synthetic-bob", bobDraft);
 
     expect(aliceNote.note).toMatchObject(aliceDraft);
-    expect(aliceNote.etag).toBe(`"${aliceNote.note.id}:1"`);
+    expect(aliceNote.etag).toBe(noteTag(aliceNote.note.id, 1));
     expect(bobNote.note).toMatchObject(bobDraft);
-    expect(bobNote.etag).toBe(`"${bobNote.note.id}:1"`);
+    expect(bobNote.etag).toBe(noteTag(bobNote.note.id, 1));
 
     expect((await listNotes(appA, "synthetic-alice")).map((note) => note.id)).toEqual([
       aliceNote.note.id,
@@ -308,8 +315,8 @@ describe("authenticated note ownership and stale-write boundaries (synthetic ide
     ]);
 
     expect(second).toEqual(first);
-    expect(first.etag).toBe(`"${first.note.id}:1"`);
-    expect(await listNotes(appA, "synthetic-alice")).toEqual([first.note]);
+    expect(first.etag).toBe(noteTag(first.note.id, 1));
+    expect(await listNotes(appA, "synthetic-alice")).toEqual([summaryOf(first.note)]);
     expect(await readNote(appB, "synthetic-alice", first.note.id)).toEqual(first);
   });
 
@@ -331,7 +338,7 @@ describe("authenticated note ownership and stale-write boundaries (synthetic ide
     expect(committed).toHaveLength(1);
 
     const retry = await createNote(appB, "synthetic-alice", aliceDraft, key);
-    expect(retry.note).toEqual(committed[0]);
+    expect(summaryOf(retry.note)).toEqual(committed[0]);
     expect(retry.etag).toBe(discarded.headers.get("ETag"));
     expect(await listNotes(appA, "synthetic-alice")).toEqual(committed);
   });
@@ -341,8 +348,8 @@ describe("authenticated note ownership and stale-write boundaries (synthetic ide
     const alice = await createNote(appA, "synthetic-alice", aliceDraft, key);
     const bob = await createNote(appB, "synthetic-bob", bobDraft, key);
     expect(bob.note.id).not.toBe(alice.note.id);
-    expect(await listNotes(appA, "synthetic-alice")).toEqual([alice.note]);
-    expect(await listNotes(appB, "synthetic-bob")).toEqual([bob.note]);
+    expect(await listNotes(appA, "synthetic-alice")).toEqual([summaryOf(alice.note)]);
+    expect(await listNotes(appB, "synthetic-bob")).toEqual([summaryOf(bob.note)]);
 
     async function rejectedRetry(draft: typeof aliceDraft) {
       const response = await appB.request("/api/notes", {
@@ -368,7 +375,7 @@ describe("authenticated note ownership and stale-write boundaries (synthetic ide
     expect(updated.status).toBe(200);
     const latest = await readNote(appA, "synthetic-alice", alice.note.id);
     await rejectedRetry(aliceDraft);
-    expect(await listNotes(appA, "synthetic-alice")).toEqual([latest.note]);
+    expect(await listNotes(appA, "synthetic-alice")).toEqual([summaryOf(latest.note)]);
 
     const deleted = await deleteNote(appA, "synthetic-alice", alice.note.id, latest.etag);
     expect(deleted.status).toBe(204);
@@ -456,16 +463,16 @@ describe("authenticated note ownership and stale-write boundaries (synthetic ide
     expect(logout.status).toBe(303);
     const cleared = logout.headers
       .getSetCookie()
-      .find((cookie) => cookie.startsWith(`${SESSION_COOKIE_NAME}=;`));
+      .find((cookie) => cookie.startsWith(`${SESSION_COOKIE}=;`));
     expect(cleared).toContain("Max-Age=0");
 
     const afterLogout = await appA.request("/api/notes", {
-      headers: { Cookie: `${SESSION_COOKIE_NAME}=` },
+      headers: { Cookie: `${SESSION_COOKIE}=` },
     });
     expect(afterLogout.status).toBe(401);
 
     const afterLogoutRead = await appA.request(`/api/notes/${aliceNote.note.id}`, {
-      headers: { Cookie: `${SESSION_COOKIE_NAME}=` },
+      headers: { Cookie: `${SESSION_COOKIE}=` },
     });
     expect(afterLogoutRead.status).toBe(401);
     const afterLogoutReadText = await afterLogoutRead.text();
@@ -643,7 +650,7 @@ describe("authenticated note ownership and stale-write boundaries (synthetic ide
     expect(malformedCreate.status).toBe(400);
 
     expect(await readNote(appA, "synthetic-alice", created.note.id)).toEqual(created);
-    expect(await listNotes(appA, "synthetic-alice")).toEqual([created.note]);
+    expect(await listNotes(appA, "synthetic-alice")).toEqual([summaryOf(created.note)]);
   });
 
   it("compares the exact per-note ETag and rejects unissued or cross-note tags", async () => {
@@ -653,8 +660,8 @@ describe("authenticated note ownership and stale-write boundaries (synthetic ide
       title: "Second note",
       content: "Second note content",
     });
-    expect(created.etag).toBe(`"${created.note.id}:1"`);
-    expect(other.etag).toBe(`"${other.note.id}:1"`);
+    expect(created.etag).toBe(noteTag(created.note.id, 1));
+    expect(other.etag).toBe(noteTag(other.note.id, 1));
 
     for (const tag of [
       '"01"',
@@ -663,7 +670,7 @@ describe("authenticated note ownership and stale-write boundaries (synthetic ide
       '"1.0"',
       '"0b1"',
       '"+1"',
-      `"${created.note.id}:2"`,
+      noteTag(created.note.id, 2),
       other.etag,
     ]) {
       const update = await updateNote(appA, "synthetic-alice", created.note.id, tag, {
@@ -690,12 +697,12 @@ describe("authenticated note ownership and stale-write boundaries (synthetic ide
       content: "Edited content",
     });
     expect(saved.status).toBe(200);
-    expect(saved.headers.get("ETag")).toBe(`"${created.note.id}:2"`);
+    expect(saved.headers.get("ETag")).toBe(noteTag(created.note.id, 2));
     const savedNote = noteSchema.parse((await saved.json()) as unknown);
     expect(savedNote).toMatchObject({ title: "Edited", content: "Edited content" });
     expect(await readNote(appA, "synthetic-alice", created.note.id)).toEqual({
       note: savedNote,
-      etag: `"${created.note.id}:2"`,
+      etag: noteTag(created.note.id, 2),
     });
   });
 });

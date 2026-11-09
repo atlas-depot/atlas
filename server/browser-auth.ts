@@ -4,10 +4,10 @@ import type { SessionUser } from "../shared/auth.ts";
 import type { AuthenticateRequest } from "./auth.ts";
 import {
   LOGIN_TRANSACTION_COOKIE_NAME,
-  SESSION_COOKIE_NAME,
   clearCookie,
   readCookie,
   serializeCookie,
+  sessionCookieName,
   type CookieSettings,
 } from "./cookies.ts";
 import { createTransactionSealer } from "./transaction.ts";
@@ -91,15 +91,17 @@ export function createBrowserAuth(workos: WorkOS, options: BrowserAuthOptions): 
   const transactionTtlSeconds = options.transactionTtlSeconds ?? DEFAULT_TRANSACTION_TTL_SECONDS;
   const now = options.now ?? Date.now;
   const sealer = createTransactionSealer(options.cookiePassword);
+  // The __Host- prefix on HTTPS requires exactly these settings: Secure, Path=/, no Domain.
   const sessionCookieSettings: CookieSettings = { path: "/", secure };
+  const sessionCookieKey = sessionCookieName(secure);
   const loginCookieSettings: CookieSettings = { path: "/api/auth", secure };
 
   function sessionCookie(sealedSession: string): string {
-    return serializeCookie(SESSION_COOKIE_NAME, sealedSession, sessionCookieSettings);
+    return serializeCookie(sessionCookieKey, sealedSession, sessionCookieSettings);
   }
 
   function clearSessionCookie(): string {
-    return clearCookie(SESSION_COOKIE_NAME, sessionCookieSettings);
+    return clearCookie(sessionCookieKey, sessionCookieSettings);
   }
 
   function clearLoginTransactionCookie(): string {
@@ -121,7 +123,7 @@ export function createBrowserAuth(workos: WorkOS, options: BrowserAuthOptions): 
     request: Request,
     responseHeaders?: Headers,
   ): Promise<SessionUser | null> {
-    const sealedSession = readCookie(request.headers.get("Cookie"), SESSION_COOKIE_NAME);
+    const sealedSession = readCookie(request.headers.get("Cookie"), sessionCookieKey);
     if (!sealedSession) return null;
     const session = workos.userManagement.loadSealedSession({
       sessionData: sealedSession,
@@ -212,7 +214,7 @@ export function createBrowserAuth(workos: WorkOS, options: BrowserAuthOptions): 
     },
 
     logout: async (request) => {
-      const sealedSession = readCookie(request.headers.get("Cookie"), SESSION_COOKIE_NAME);
+      const sealedSession = readCookie(request.headers.get("Cookie"), sessionCookieKey);
       if (sealedSession) {
         try {
           const session = workos.userManagement.loadSealedSession({
