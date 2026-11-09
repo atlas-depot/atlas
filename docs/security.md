@@ -26,7 +26,9 @@ Backend policy authorizes execution. Tool names, a prompt, or an LLM classifier 
 
 Use least-privilege OAuth scopes and protected token storage with encryption and restricted backend access. Implement revocation and refresh through the chosen connector. Never expose access/refresh tokens, passwords, API keys, session cookies, or recovery secrets to model context, browser bundles, logs, screenshots, fixtures, or exports.
 
-The browser session cookie is `HttpOnly` and `SameSite=Lax`. It is named `__Host-atlas_session` on HTTPS and `atlas_session` only on loopback HTTP during local development.
+The browser session cookie is `HttpOnly` and `SameSite=Lax`. It is named `__Host-atlas_session` on HTTPS and `atlas_session` only on loopback HTTP during local development. Its `Max-Age` comes from `SESSION_MAX_AGE_SECONDS` (default 30 days) as a client-side ceiling; WorkOS decides when a refresh is refused and the server then clears the cookie.
+
+The API has no per-client throttle on `/api/auth/login` and `/api/auth/callback`. Anyone can mint a login transaction, and every callback with a matching state calls WorkOS with the server API key, so a flood exhausts that key's quota and blocks sign-in for everyone; it cannot sign anyone in without a valid code. Before the first public deployment, add an edge rate limit for `/api/auth/*` (a Vercel Firewall rule) and record it in the deploy checklist. A single-use transaction store was considered and rejected: codes are already single-use at WorkOS, and a new transaction is free, so it would not reduce the call volume.
 
 Send providers only the content needed for the requested task. Enforce disclosure rules in backend code; a model's sensitivity classification is advisory. Review provider retention and routing settings before sending real private data. Do not promise private/local processing while calling a cloud model.
 
