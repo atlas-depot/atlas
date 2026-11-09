@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { expect, it } from "vite-plus/test";
 import { EMBEDDING_DIMENSIONS, EMBEDDING_FINGERPRINT } from "../../shared/embedding.ts";
 import { projectNotePassages } from "../passages.ts";
@@ -169,4 +169,41 @@ it("distinguishes a complete empty index from unfinished coverage", async () => 
     pendingCoverage: true,
     failedCoverage: false,
   });
+});
+
+it("suppresses a candidate when a source edit commits while search waits on its lock", async () => {
+  const owner = randomUUID();
+  const note = await published(owner, "Evidence about to change.");
+  let entered!: () => void;
+  let release!: () => void;
+  const writerEntered = new Promise<void>((resolve) => (entered = resolve));
+  const writerGate = new Promise<void>((resolve) => (release = resolve));
+  const writer = database.other.transaction(async (tx) => {
+    await tx.select().from(notes).where(eq(notes.id, note.note.id)).for("update");
+    await tx
+      .update(notes)
+      .set({ content: "Replacement text.", revision: 2 })
+      .where(eq(notes.id, note.note.id));
+    await tx.delete(noteIndexes).where(eq(noteIndexes.noteId, note.note.id));
+    entered();
+    await writerGate;
+  });
+  await writerEntered;
+  const search = createNoteSearchStore(database.db).candidates(owner, vector());
+  try {
+    const deadline = Date.now() + 5_000;
+    let waiting = false;
+    while (Date.now() < deadline && !waiting) {
+      const result = await database.db.execute(
+        sql`select exists(select 1 from pg_stat_activity where datname = current_database() and wait_event_type = 'Lock') as waiting`,
+      );
+      waiting = result.rows[0].waiting === true;
+      if (!waiting) await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    expect(waiting).toBe(true);
+  } finally {
+    release();
+    await writer;
+  }
+  expect((await search).passages).toEqual([]);
 });
