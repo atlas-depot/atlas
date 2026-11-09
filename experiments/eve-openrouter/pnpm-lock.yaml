@@ -15,8 +15,8 @@ importers:
         specifier: 7.0.152
         version: 7.0.152(zod@4.6.7)
       eve:
-        specifier: 0.83.0
-        version: 0.83.0(ai@7.0.152(zod@4.6.7))
+        specifier: 0.91.0
+        version: 0.91.0(ai@7.0.152(zod@4.6.7))
       zod:
         specifier: 4.6.7
         version: 4.6.7
@@ -193,19 +193,36 @@ packages:
     resolution: {integrity: sha512-S8EFBKyznRwPVwayK187cYjvnpgC92xy+q0BIF++V965pfjMVVRbQ/HoTYGA/1EHmZ7E68k6Heq+4WnvVhOL5w==}
     hasBin: true
 
-  eve@0.83.0:
-    resolution: {integrity: sha512-qxw8Ck/vBrfIAqgodalXKkpE86eDcydNaJ2ww2AiHVs7CgGCu5qSipr5vOSc4GXkDssbJ9DaV4iVtol2kwV8Hg==}
+  eve@0.91.0:
+    resolution: {integrity: sha512-IVZ73uGFUm3k5sUju/XNi/O3z9Rmq6Iv8mfA0nzrDMypRu+N7iJUIcOhxuU6qDWxLglfqoXimfoOZiyd9/UCxg==}
     engines: {node: '>=24'}
     hasBin: true
     peerDependencies:
+      '@linqapp/sdk': ^0.47.1
+      '@nuxt/kit': ^4.0.0
+      '@nuxt/schema': ^4.0.0
       '@opentelemetry/api': ^1.0.0
+      '@vercel/connect': ^2.5.2
       ai: ^7.0.137
       braintrust: ^3.0.0
       chat: ^4.42.0
       dd-trace: ^6.13.0
-      just-bash: ^3.1.0
+      just-bash: ^3.6.0
+      next: ^16.0.0
+      react: ^19.0.0
+      svelte: ^5.0.0
+      vite: ^8.3.1
+      vue: ^3.5.0
     peerDependenciesMeta:
+      '@linqapp/sdk':
+        optional: true
+      '@nuxt/kit':
+        optional: true
+      '@nuxt/schema':
+        optional: true
       '@opentelemetry/api':
+        optional: true
+      '@vercel/connect':
         optional: true
       braintrust:
         optional: true
@@ -214,6 +231,16 @@ packages:
       dd-trace:
         optional: true
       just-bash:
+        optional: true
+      next:
+        optional: true
+      react:
+        optional: true
+      svelte:
+        optional: true
+      vite:
+        optional: true
+      vue:
         optional: true
 
   eventsource-parser@3.1.1:
@@ -288,8 +315,8 @@ packages:
     resolution: {integrity: sha512-03KrMbjIFDWQR5RNPrSw3bd1r12JpyFQl9/yxjUbJtqkjmllqC5lFjZh6ujeuJCKr8EOQvRW872Oy/az+nLYxg==}
     engines: {node: '>=20.18.1'}
 
-  undici@8.10.2:
-    resolution: {integrity: sha512-/y4/bH9YNU5hi9NIrpOuvGXFcxrj3CMrV+/AYpowAYTpHn8gX/XPFjNy766FPoYY0miQhdW977JFWKGNhBdwyQ==}
+  undici@8.12.3:
+    resolution: {integrity: sha512-+fdndUTwBP86cVjihTp21hZHo7d6oj1c/47XPA3lL8mM0XHs+C4EkcjmgRsFnFk2f/UONGDy9ItBItmXsLOQHw==}
     engines: {node: '>=22.19.0'}
 
   unenv@2.0.0-rc.24:
@@ -409,11 +436,11 @@ snapshots:
       httpxy: 0.5.6
       srvx: 1.0.6
 
-  eve@0.83.0(ai@7.0.152(zod@4.6.7)):
+  eve@0.91.0(ai@7.0.152(zod@4.6.7)):
     dependencies:
       ai: 7.0.152(zod@4.6.7)
       nitro: 3.0.260903-beta
-      undici: 8.10.2
+      undici: 8.12.3
 
   eventsource-parser@3.1.1: {}
 
@@ -488,7 +515,7 @@ snapshots:
 
   undici@7.30.1: {}
 
-  undici@8.10.2: {}
+  undici@8.12.3: {}
 
   unenv@2.0.0-rc.24:
     dependencies:
