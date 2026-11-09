@@ -50,6 +50,13 @@
       "when": 1794168042887,
       "tag": "0006_note-index-intents",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1794205627427,
+      "tag": "0007_note-index-publication",
+      "breakpoints": true
     }
   ]
 }

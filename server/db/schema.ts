@@ -11,12 +11,15 @@ import {
   timestamp,
   uniqueIndex,
   uuid,
+  vector,
 } from "drizzle-orm/pg-core";
 import type { OrganizeRunState } from "../organize-runs.ts";
 import type { OrganizeUsage } from "../organize-note.ts";
 import type { RunTerminalState } from "./organize-runs.ts";
 import type { NoteOrigin } from "../../shared/organize.ts";
 import type { NoteContent } from "../../shared/document.ts";
+import type { NotePassageSource } from "../../shared/passages.ts";
+import { EMBEDDING_DIMENSIONS } from "../../shared/embedding.ts";
 
 export const notes = pgTable(
   "notes",
@@ -53,6 +56,39 @@ export const noteIndexIntents = pgTable(
       .defaultNow(),
   },
   (table) => [check("note_index_intents_revision_positive", sql`${table.revision} > 0`)],
+);
+
+/** Only the current publication is retained; an empty publication has no passage rows. */
+export const noteIndexes = pgTable(
+  "note_indexes",
+  {
+    noteId: uuid("note_id")
+      .primaryKey()
+      .references(() => notes.id, { onDelete: "cascade" }),
+    revision: integer("revision").notNull(),
+    fingerprint: text("fingerprint").notNull(),
+    publishedAt: timestamp("published_at", { withTimezone: true, mode: "string" })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [check("note_indexes_revision_positive", sql`${table.revision} > 0`)],
+);
+
+export const notePassages = pgTable(
+  "note_passages",
+  {
+    noteId: uuid("note_id")
+      .notNull()
+      .references(() => noteIndexes.noteId, { onDelete: "cascade" }),
+    ordinal: integer("ordinal").notNull(),
+    text: text("text").notNull(),
+    source: jsonb("source").$type<NotePassageSource>().notNull(),
+    embedding: vector("embedding", { dimensions: EMBEDDING_DIMENSIONS }).notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.noteId, table.ordinal] }),
+    check("note_passages_ordinal_nonnegative", sql`${table.ordinal} >= 0`),
+  ],
 );
 
 /** Content-free creation receipts survive note deletion to prevent duplicate retries. */

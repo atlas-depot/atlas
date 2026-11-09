@@ -14,7 +14,13 @@ import type { BrowserAuth } from "../browser-auth.ts";
 import { SESSION_COOKIE_NAME, readCookie } from "../cookies.ts";
 import { openDatabase, readTestDatabaseUrl } from "./connection.ts";
 import { createNoteStore } from "./notes.ts";
-import { noteCreateRequests, noteIndexIntents, notes } from "./schema.ts";
+import {
+  noteCreateRequests,
+  noteIndexes,
+  noteIndexIntents,
+  notePassages,
+  notes,
+} from "./schema.ts";
 
 /**
  * Identity here is synthetic and mocked: this suite verifies that the verified
@@ -144,7 +150,7 @@ afterAll(async () => {
 
 beforeEach(async () => {
   await connectionA.db.execute(
-    sql`TRUNCATE TABLE ${noteCreateRequests}, ${noteIndexIntents}, ${notes}`,
+    sql`TRUNCATE TABLE ${noteCreateRequests}, ${noteIndexIntents}, ${notePassages}, ${noteIndexes}, ${notes}`,
   );
 });
 

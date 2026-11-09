@@ -64,6 +64,14 @@ beforeAll(async () => {
       await readFile(new URL("../../drizzle/0006_note-index-intents.sql", import.meta.url), "utf8"),
     ),
   );
+  await connection.db.execute(
+    sql.raw(
+      await readFile(
+        new URL("../../drizzle/0007_note-index-publication.sql", import.meta.url),
+        "utf8",
+      ),
+    ),
+  );
   store = createNoteStore(connection.db);
   reopened = openDatabase(url.href);
 });
