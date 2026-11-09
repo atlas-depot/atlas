@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { expect, test, type BrowserContext, type Page } from "@playwright/test";
-import { noteListSchema, noteSchema } from "../shared/notes.ts";
+import { noteListSchema, noteSchema, type Note, type NoteSummary } from "../shared/notes.ts";
 import { organizeWorkSchema } from "../shared/drafts.ts";
 import { organizeRunResponseSchema } from "../shared/organize.ts";
 import { expectEditorContent } from "./notes-editor.ts";
@@ -12,6 +12,14 @@ async function signIn(context: BrowserContext, user = account()) {
     { name: "atlas_session", value: user, url: origin, httpOnly: true, sameSite: "Lax" },
   ]);
   return user;
+}
+function summaryOf({ id, title, createdAt, updatedAt, origin }: Note): NoteSummary {
+  return { id, title, createdAt, updatedAt, origin };
+}
+async function readNote(page: Page, id: string) {
+  const response = await page.request.get(`/api/notes/${id}`);
+  expect(response.status()).toBe(200);
+  return noteSchema.parse(await response.json());
 }
 async function notes(page: Page) {
   const response = await page.request.get("/api/notes");
@@ -69,7 +77,7 @@ test("reload reconnects to the same persisted generation", async ({ page }) => {
   expect(resumed.runs).toEqual([]);
   expect(resumed.drafts).toHaveLength(1);
   expect(resumed.drafts[0].source.noteId).toBe(source.id);
-  expect(await notes(page)).toEqual([source]);
+  expect(await notes(page)).toEqual([summaryOf(source)]);
 });
 
 test("Save & organize keeps its source and saves an edited derivative through reload", async ({
@@ -96,7 +104,7 @@ test("Save & organize keeps its source and saves an edited derivative through re
     stale: false,
     deleted: false,
   });
-  const original = (await notes(page)).find((note) => note.id === source.id);
+  const original = await readNote(page, source.id);
   expect(original).toMatchObject({ title: "Saved revision for Organize", content: source.content });
 
   await panel
@@ -119,8 +127,8 @@ test("Save & organize keeps its source and saves an edited derivative through re
   await panel.getByRole("button", { name: "Save as new note", exact: true }).click();
   await expect.poll(async () => (await notes(page)).length).toBe(2);
   const after = await notes(page);
-  expect(after.find((note) => note.id === source.id)).toEqual(original);
-  const derivative = after.find((note) => note.id !== source.id)!;
+  expect(after.find((note) => note.id === source.id)).toEqual(summaryOf(original));
+  const derivative = await readNote(page, after.find((note) => note.id !== source.id)!.id);
   expect(derivative).toMatchObject({
     title: "My edited derivative",
     content: edited.content,
@@ -190,5 +198,5 @@ test("temporary drafts stay account-scoped and discard removes them across reloa
   await expect.poll(async () => (await work(page)).drafts.length).toBe(0);
   await page.reload();
   await expect(panel).toHaveCount(0);
-  expect(await notes(page)).toEqual([source]);
+  expect(await notes(page)).toEqual([summaryOf(source)]);
 });

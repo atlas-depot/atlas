@@ -1,6 +1,7 @@
+import { DrizzleQueryError } from "drizzle-orm";
 import { Hono } from "hono";
-import { afterEach, describe, expect, it, vi } from "vite-plus/test";
-import type { CreateNote, Note } from "../shared/notes.ts";
+import { afterEach, describe, expect, it, onTestFinished, vi } from "vite-plus/test";
+import type { CreateNote, Note, NoteSummary } from "../shared/notes.ts";
 import { requireAuth, type AuthEnv } from "./auth.ts";
 import type { StoredNote } from "./db/notes.ts";
 import { createNoteRoutes, type NoteService } from "./notes.ts";
@@ -14,13 +15,19 @@ const input: CreateNote = {
   createdAt: "2026-10-30T10:00:00.000Z",
 };
 const note: Note = { ...input, id, updatedAt: input.createdAt };
+const summary: NoteSummary = {
+  id,
+  title: input.title,
+  createdAt: input.createdAt,
+  updatedAt: input.createdAt,
+};
 const stored: StoredNote = { note, revision: 7 };
 const tag = `"${id}:7"`;
 const edit = { title: "Edited", content: "New source" };
 
 function service() {
   return {
-    list: vi.fn<NoteService["list"]>().mockResolvedValue([note]),
+    list: vi.fn<NoteService["list"]>().mockResolvedValue([summary]),
     read: vi.fn<NoteService["read"]>().mockResolvedValue(stored),
     createIdempotent: vi
       .fn<NoteService["createIdempotent"]>()
@@ -82,7 +89,7 @@ describe("notes HTTP contract with a stubbed persistence boundary", () => {
       headers: { "X-User-Id": "forged" },
     });
     expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({ notes: [note] });
+    expect(await response.json()).toEqual({ notes: [summary] });
     expect(store.list).toHaveBeenCalledExactlyOnceWith(owner);
   });
 
@@ -342,8 +349,10 @@ describe("notes HTTP contract with a stubbed persistence boundary", () => {
   );
 
   it.each(["list", "read", "createIdempotent", "update", "delete"] as const)(
-    "sanitizes %s storage errors",
+    "sanitizes %s storage errors and logs one content-free line",
     async (operation) => {
+      const log = vi.spyOn(console, "error").mockImplementation(() => {});
+      onTestFinished(() => log.mockRestore());
       const store = service();
       store[operation].mockRejectedValue(new Error("DATABASE_URL=private-note-content"));
       const method =
@@ -367,6 +376,44 @@ describe("notes HTTP contract with a stubbed persistence boundary", () => {
       expect(await response.json()).toEqual({
         error: { code: "SERVICE_UNAVAILABLE", message: "Note storage is temporarily unavailable." },
       });
+      expect(log).toHaveBeenCalledOnce();
+      const line = String(log.mock.calls[0]?.[0]);
+      expect(JSON.parse(line)).toEqual({
+        event: "storage_failure",
+        method,
+        route: path === "/notes" ? "/notes" : "/notes/:id",
+        name: "Error",
+      });
+      for (const value of [id, key, "Draft", "# Source", edit.content, "private-note-content"]) {
+        expect(line).not.toContain(value);
+      }
     },
   );
+
+  it("logs the driver error, never Drizzle's parameter-bearing message", async () => {
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    onTestFinished(() => log.mockRestore());
+    const store = service();
+    const cause = Object.assign(new Error("connect ECONNREFUSED"), { code: "ECONNREFUSED" });
+    store.createIdempotent.mockRejectedValue(
+      new DrizzleQueryError('insert into "notes"', [owner, input.title, input.content], cause),
+    );
+    const response = await app(store).request(
+      "/notes",
+      request("POST", input, { "Idempotency-Key": key }),
+    );
+    expect(response.status).toBe(503);
+    expect(log).toHaveBeenCalledOnce();
+    const line = String(log.mock.calls[0]?.[0]);
+    expect(JSON.parse(line)).toEqual({
+      event: "storage_failure",
+      method: "POST",
+      route: "/notes",
+      name: "Error",
+      code: "ECONNREFUSED",
+    });
+    for (const value of [owner, "Draft", "# Source", "insert into"]) {
+      expect(line).not.toContain(value);
+    }
+  });
 });

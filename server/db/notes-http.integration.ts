@@ -3,14 +3,16 @@ import { once } from "node:events";
 import { createServer } from "node:http";
 import { getRequestListener } from "@hono/node-server";
 import { Pool } from "pg";
-import { afterAll, afterEach, beforeAll, expect, it } from "vite-plus/test";
-import { noteListSchema, noteSchema } from "../../shared/notes.ts";
+import { afterAll, afterEach, beforeAll, expect, it, onTestFinished, vi } from "vite-plus/test";
+import { noteListSchema, noteSchema, type Note, type NoteSummary } from "../../shared/notes.ts";
 import { createApp } from "../app.ts";
 import { createRequestAuthenticator } from "../auth.ts";
-import { readCookie, SESSION_COOKIE_NAME } from "../cookies.ts";
+import { readCookie, sessionCookieName } from "../cookies.ts";
+
+const SESSION_COOKIE = sessionCookieName(true);
 import { openDatabase, readTestDatabaseUrl } from "./connection.ts";
 import { applyMigrations } from "./migrations.ts";
-import { createNoteStore } from "./notes.ts";
+import { createNoteStore, noteTag } from "./notes.ts";
 import { noteCreateRequests, notes } from "./schema.ts";
 
 // Actual TCP HTTP and migrated PostgreSQL; identity is synthetic, not live WorkOS.
@@ -75,7 +77,7 @@ async function fixture() {
       return null;
     },
     async (request) =>
-      readCookie(request.headers.get("Cookie"), SESSION_COOKIE_NAME) === "synthetic-owner"
+      readCookie(request.headers.get("Cookie"), SESSION_COOKIE) === "synthetic-owner"
         ? { userId: owner }
         : null,
   );
@@ -127,6 +129,11 @@ async function fixture() {
   return { owner, stranger, http, listen, create };
 }
 
+/** The list contract: every note field except content. */
+function summaryOf({ id, title, origin, createdAt, updatedAt }: Note): NoteSummary {
+  return { id, title, ...(origin ? { origin } : {}), createdAt, updatedAt };
+}
+
 function json(method: string, body: unknown, headers: Record<string, string> = {}): RequestInit {
   return {
     method,
@@ -139,7 +146,7 @@ it("persists CRUD across a new app/pool with immutable creation time and revisio
   const f = await fixture();
   const created = await f.create();
   expect(created.note).toEqual({ ...source, id: expect.any(String), updatedAt: source.createdAt });
-  expect(created.tag).toBe(`"${created.note.id}:1"`);
+  expect(created.tag).toBe(noteTag(created.note.id, 1));
   const update = await f.http.request(
     `/notes/${created.note.id}`,
     json("PUT", { title: "Edited", content: "# New source" }, { "If-Match": created.tag }),
@@ -147,7 +154,7 @@ it("persists CRUD across a new app/pool with immutable creation time and revisio
   expect(update.status).toBe(200);
   const updated = noteSchema.parse(await update.json());
   const updatedTag = update.headers.get("ETag")!;
-  expect(updatedTag).toBe(`"${created.note.id}:2"`);
+  expect(updatedTag).toBe(noteTag(created.note.id, 2));
   expect(updated).toMatchObject({
     id: created.note.id,
     title: "Edited",
@@ -161,7 +168,7 @@ it("persists CRUD across a new app/pool with immutable creation time and revisio
   expect(read.headers.get("ETag")).toBe(updatedTag);
   expect(await read.json()).toEqual(updated);
   expect(noteListSchema.parse(await (await reloaded.request("/notes")).json()).notes).toEqual([
-    updated,
+    summaryOf(updated),
   ]);
   const removed = await reloaded.request(`/notes/${created.note.id}`, {
     method: "DELETE",
@@ -185,7 +192,7 @@ it("rejects missing/stale preconditions and permits only one concurrent update",
     await missing.text();
     const stale = await f.http.request(path, {
       ...body,
-      headers: { "If-Match": `"${created.note.id}:0"` },
+      headers: { "If-Match": noteTag(created.note.id, 0) },
     });
     expect(stale.status).toBe(412);
     await stale.text();
@@ -227,7 +234,7 @@ it("enforces ownership, anonymous access and cookie origin through the productio
   const blocked = await fetch(`${f.http.origin}/api/notes/${created.note.id}`, {
     ...json("PUT", { title: "forged", content: "forged" }),
     headers: {
-      Cookie: `${SESSION_COOKIE_NAME}=synthetic-owner`,
+      Cookie: `${SESSION_COOKIE}=synthetic-owner`,
       Origin: "https://attacker.example",
       "If-Match": created.tag,
     },
@@ -291,7 +298,7 @@ it.each([
     );
     expect.soft(invalidCreate.status).toBe(400);
     await invalidCreate.text();
-    expect.soft(await store.list(f.owner)).toEqual([created.note]);
+    expect.soft(await store.list(f.owner)).toEqual([summaryOf(created.note)]);
     expect.soft(await connection.db.select().from(noteCreateRequests)).toEqual(receipts);
     const invalidUpdate = await f.http.request(
       `/notes/${created.note.id}`,
@@ -365,7 +372,7 @@ it("coalesces concurrent creates and returns 409 for changed or deleted creation
   );
   expect(new Set(bodies.map((note) => note.id)).size).toBe(1);
   expect(new Set(responses.map((response) => response.headers.get("ETag"))).size).toBe(1);
-  expect(await createNoteStore(connection.db).list(f.owner)).toEqual([bodies[0]]);
+  expect(await createNoteStore(connection.db).list(f.owner)).toEqual([summaryOf(bodies[0])]);
   const changedPayload = await f.http.request(
     "/notes",
     json("POST", { ...source, title: "Different" }, { "Idempotency-Key": key }),
@@ -429,8 +436,11 @@ it("recovers the same persisted note after a response is lost and a new app/pool
   );
   try {
     await responseReady;
-    const before = await createNoteStore(connection.db).list(f.owner);
+    const store = createNoteStore(connection.db);
+    const before = await store.list(f.owner);
     expect(before).toHaveLength(1);
+    const persisted = await store.read(f.owner, before[0].id);
+    expect(persisted).toBeDefined();
     abort.abort();
     expect(await lost).toBe("AbortError");
     release();
@@ -441,8 +451,8 @@ it("recovers the same persisted note after a response is lost and a new app/pool
       json("POST", source, { "Idempotency-Key": key }),
     );
     expect(replay.status).toBe(201);
-    expect(await replay.json()).toEqual(before[0]);
-    expect(await createNoteStore(connection.db).list(f.owner)).toEqual(before);
+    expect(await replay.json()).toEqual(persisted?.note);
+    expect(await store.list(f.owner)).toEqual(before);
   } finally {
     abort.abort();
     release();
@@ -450,6 +460,8 @@ it("recovers the same persisted note after a response is lost and a new app/pool
 });
 
 it("sanitizes an actual failed PostgreSQL pool without leaking connection details", async () => {
+  const log = vi.spyOn(console, "error").mockImplementation(() => {});
+  onTestFinished(() => log.mockRestore());
   const f = await fixture();
   const failedConnection = extraConnection();
   const failedHttp = await f.listen(failedConnection);
@@ -461,5 +473,15 @@ it("sanitizes an actual failed PostgreSQL pool without leaking connection detail
     expect(await response.json()).toEqual({
       error: { code: "SERVICE_UNAVAILABLE", message: "Note storage is temporarily unavailable." },
     });
+  }
+  // Real Drizzle errors carry SQL parameters in their message; the log line must not.
+  const lines = log.mock.calls.map(([line]) => String(line));
+  expect(lines).toHaveLength(2);
+  for (const line of lines) {
+    expect(JSON.parse(line)).toMatchObject({ event: "storage_failure", route: "/api/notes" });
+    for (const value of ["Failed query", "params", f.owner.slice(0, 8), "Private Markdown"]) {
+      expect(line).not.toContain(value);
+    }
+    expect(line).not.toContain(new URL(databaseUrl).host);
   }
 });

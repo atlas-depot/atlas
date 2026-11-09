@@ -2,6 +2,8 @@ import { Hono } from "hono";
 import { apiError, ifMatchSchema } from "../shared/http.ts";
 import { noteContentSchema, noteIdSchema } from "../shared/notes.ts";
 import type { AuthEnv } from "./auth.ts";
+import { noteTag } from "./db/notes.ts";
+import { reportStorageFailure } from "./http-errors.ts";
 import type { OrganizeService } from "./organize-routes.ts";
 import { hasEmptyBody, readJson } from "./request-body.ts";
 
@@ -17,7 +19,8 @@ export function createDraftRoutes(service?: OrganizeService) {
     if (!service?.work) return c.json(unavailable(), 503);
     try {
       return c.json(await service.work(c.get("user").userId));
-    } catch {
+    } catch (error) {
+      reportStorageFailure(c, error);
       return c.json(unavailable(), 503);
     }
   });
@@ -31,7 +34,8 @@ export function createDraftRoutes(service?: OrganizeService) {
       if (result.status !== "ready")
         return c.json(apiError("CONFLICT", "This run has no draft to deliver."), 409);
       return c.json(result.draft, 200, { ETag: result.draft.etag });
-    } catch {
+    } catch (error) {
+      reportStorageFailure(c, error);
       return c.json(unavailable(), 503);
     }
   });
@@ -42,7 +46,8 @@ export function createDraftRoutes(service?: OrganizeService) {
     try {
       const draft = await service.drafts.read(c.get("user").userId, id.data);
       return draft ? c.json(draft, 200, { ETag: draft.etag }) : c.json(missing(), 404);
-    } catch {
+    } catch (error) {
+      reportStorageFailure(c, error);
       return c.json(unavailable(), 503);
     }
   });
@@ -81,10 +86,11 @@ export function createDraftRoutes(service?: OrganizeService) {
           if ("draft" in result) return c.json(result.draft, 200, { ETag: result.draft.etag });
           if ("value" in result)
             return c.json(result.value.note, 201, {
-              ETag: JSON.stringify(`${result.value.note.id}:${result.value.revision}`),
+              ETag: noteTag(result.value.note.id, result.value.revision),
             });
           return c.json(unavailable(), 503);
-        } catch {
+        } catch (error) {
+          reportStorageFailure(c, error);
           return c.json(unavailable(), 503);
         }
       },

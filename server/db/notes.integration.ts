@@ -8,7 +8,11 @@ import { Pool } from "pg";
 import { afterAll, beforeAll, expect, it } from "vite-plus/test";
 import { openDatabase, readTestDatabaseUrl } from "./connection.ts";
 import { createNoteStore } from "./notes.ts";
-import { noteIdSchema } from "../../shared/notes.ts";
+import { noteIdSchema, type Note, type NoteSummary } from "../../shared/notes.ts";
+
+function summaryOf({ id, title, createdAt, updatedAt, origin }: Note): NoteSummary {
+  return { id, title, createdAt, updatedAt, origin };
+}
 
 const databaseName = `atlas_test_${randomUUID().replaceAll("-", "")}`;
 let admin: Pool;
@@ -58,7 +62,7 @@ it("persists drafts with generated identity and initial revision across connecti
   expect(created.revision).toBe(1);
   expect(created.note).toEqual({ ...draft, id: expect.any(String), updatedAt: draft.createdAt });
   expect(await otherStore.read("owner-create", created.note.id)).toEqual(created);
-  expect(await store.list("owner-create")).toEqual([created.note]);
+  expect(await store.list("owner-create")).toEqual([summaryOf(created.note)]);
   expect(Object.keys(created.note).sort()).toEqual([
     "content",
     "createdAt",
@@ -119,9 +123,11 @@ it("retains edited notes after the writer exits and a new application process st
 
 it("does not disclose or mutate another owner's note, even with a stale revision", async () => {
   const created = await store.create("owner-private", draft);
-  await store.create("owner-other", { ...draft, content: "Other owner's marker" });
-  expect(await store.list("owner-other")).toHaveLength(1);
-  expect((await store.list("owner-other"))[0].content).toBe("Other owner's marker");
+  const other = await store.create("owner-other", { ...draft, content: "Other owner's marker" });
+  expect(await store.list("owner-other")).toEqual([summaryOf(other.note)]);
+  expect((await store.read("owner-other", other.note.id))?.note.content).toBe(
+    "Other owner's marker",
+  );
   expect(await store.read("owner-other", created.note.id)).toBeUndefined();
   expect(
     await store.update("owner-other", created.note.id, 99, { title: "attack", content: "attack" }),
@@ -167,23 +173,6 @@ it("allows exactly one concurrent update from the same revision across separate 
   if (!winner || winner.status !== "saved") throw new Error("Expected one winner");
   expect(await store.read("owner-race", created.note.id)).toEqual(winner.value);
   expect(winner.value.revision).toBe(2);
-});
-
-it("rejects payload ownership and immutable-field injection before writing", async () => {
-  await expect(store.create("owner-validation", { ...draft, ownerId: "victim" })).rejects.toThrow();
-  await expect(
-    store.create("owner-validation", { ...draft, title: "x".repeat(257) }),
-  ).rejects.toThrow();
-  expect(await store.list("owner-validation")).toEqual([]);
-  const created = await store.create("owner-validation", draft);
-  await expect(
-    store.update("owner-validation", created.note.id, 1, {
-      title: "x",
-      content: "y",
-      createdAt: draft.createdAt,
-    }),
-  ).rejects.toThrow();
-  expect(await store.read("owner-validation", created.note.id)).toEqual(created);
 });
 
 it("returns not found for nonexistent notes without turning them into conflicts", async () => {

@@ -151,7 +151,11 @@ it("replays reordered JSON keys but never confuses JSON with a legacy string", a
   const content = document();
   const key = randomUUID();
   const first = await store.createIdempotent("json-replay", key, { ...legacy, content });
-  const reordered = { blocks: content.blocks, schemaVersion: 1, format: "blocknote" };
+  const reordered = {
+    blocks: content.blocks,
+    schemaVersion: 1 as const,
+    format: "blocknote" as const,
+  };
   expect(
     await createNoteStore(reopened.db).createIdempotent("json-replay", key, {
       ...legacy,

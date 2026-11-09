@@ -41,8 +41,12 @@ async function main() {
       )
     : undefined;
   const database = configuration.databaseUrl ? openDatabase(configuration.databaseUrl) : undefined;
-  const closeDatabases = async () => {
-    await Promise.all([database?.close(), organizer?.close()]);
+  // Memoized: the shutdown deadline and the normal close path can both reach this, and a pg
+  // pool rejects a second end().
+  let databasesClosing: Promise<void> | undefined;
+  const closeDatabases = (): Promise<void> => {
+    databasesClosing ??= Promise.all([database?.close(), organizer?.close()]).then(() => undefined);
+    return databasesClosing;
   };
   const app = createApp(authenticateRequest, {
     notes: database ? createNoteStore(database.db) : undefined,
@@ -73,7 +77,18 @@ async function main() {
   const shutdown = () => {
     if (closing) return;
     closing = true;
-    const deadline = setTimeout(() => process.exit(1), 5_000);
+    const deadline = setTimeout(() => {
+      console.error(
+        "Atlas API shutdown deadline reached after a stop signal; cutting in-flight requests.",
+      );
+      // pool.end() waits for checked-out clients, so a stuck query still needs a hard stop.
+      setTimeout(() => process.exit(1), 2_000).unref();
+      // The signal was clean, so exit 0 once pools close. A failed close exits 1, as below.
+      void closeDatabases().then(
+        () => process.exit(0),
+        () => process.exit(1),
+      );
+    }, 5_000);
     deadline.unref();
     server.close(async (error) => {
       try {
