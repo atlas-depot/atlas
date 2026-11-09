@@ -2,9 +2,8 @@ import { EMBEDDING_FINGERPRINT } from "../../shared/embedding.ts";
 import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { eq, sql } from "drizzle-orm";
-import { Pool } from "pg";
-import { afterAll, beforeAll, expect, it } from "vite-plus/test";
-import { openDatabase, readTestDatabaseUrl } from "./connection.ts";
+import { expect, it } from "vite-plus/test";
+import { setupIndexTestDatabase } from "./index-test-database.ts";
 import { createNoteDraftStore, draftTag } from "./note-drafts.ts";
 import { createNoteStore } from "./notes.ts";
 import {
@@ -17,24 +16,14 @@ import {
 import { seedNotes } from "./seed.ts";
 
 // Real PostgreSQL transactions and separate pools, without a model or Workflow runtime.
-const databaseName = `atlas_index_${randomUUID().replaceAll("-", "")}`;
 const legacyId = randomUUID();
-let admin: Pool;
-let connection: ReturnType<typeof openDatabase>;
-let other: ReturnType<typeof openDatabase>;
 const input = {
   title: "Synthetic source",
   content: "The launch is Tuesday.",
   createdAt: "2026-11-08T10:00:00.000Z",
 };
 
-beforeAll(async () => {
-  const url = new URL(readTestDatabaseUrl(process.env));
-  admin = new Pool({ connectionString: url.href });
-  await admin.query(`CREATE DATABASE "${databaseName}"`);
-  url.pathname = `/${databaseName}`;
-  connection = openDatabase(url.href);
-  other = openDatabase(url.href);
+const database = setupIndexTestDatabase(async (connection) => {
   // Upgrade an existing database, not only a freshly empty schema.
   for (const name of [
     "0000_create-notes",
@@ -56,39 +45,12 @@ beforeAll(async () => {
     updatedAt: input.createdAt,
   });
   await connection.db.execute(
-    sql.raw(
-      await readFile(new URL("../../drizzle/0006_note-index-intents.sql", import.meta.url), "utf8"),
-    ),
+    sql.raw(await readFile(new URL("../../drizzle/0006_note-index.sql", import.meta.url), "utf8")),
   );
-  await connection.db.execute(
-    sql.raw(
-      await readFile(
-        new URL("../../drizzle/0007_note-index-publication.sql", import.meta.url),
-        "utf8",
-      ),
-    ),
-  );
-  await connection.db.execute(
-    sql.raw(
-      await readFile(new URL("../../drizzle/0008_note-index-jobs.sql", import.meta.url), "utf8"),
-    ),
-  );
-});
-
-afterAll(async () => {
-  await connection?.close();
-  await other?.close();
-  if (admin) {
-    try {
-      await admin.query(`DROP DATABASE IF EXISTS "${databaseName}"`);
-    } finally {
-      await admin.end();
-    }
-  }
 });
 
 const intents = (id: string) =>
-  other.db
+  database.other
     .select({
       noteId: noteIndexIntents.noteId,
       revision: noteIndexIntents.revision,
@@ -98,8 +60,8 @@ const intents = (id: string) =>
     .where(eq(noteIndexIntents.noteId, id));
 
 async function temporaryDraft(owner: string) {
-  const source = await createNoteStore(connection.db).create(owner, input);
-  const [draft] = await connection.db
+  const source = await createNoteStore(database.db).create(owner, input);
+  const [draft] = await database.db
     .insert(noteDrafts)
     .values({
       id: randomUUID(),
@@ -120,7 +82,7 @@ it("backfills an existing note at its current revision without changing its cont
   expect(await intents(legacyId)).toEqual([
     { noteId: legacyId, revision: 7, requestedAt: expect.any(String) },
   ]);
-  const [backfilled] = await connection.db
+  const [backfilled] = await database.db
     .select()
     .from(noteIndexIntents)
     .where(eq(noteIndexIntents.noteId, legacyId));
@@ -134,15 +96,15 @@ it("backfills an existing note at its current revision without changing its cont
     attempts: 0,
     retryAt: expect.any(String),
   });
-  expect(await createNoteStore(other.db).read("legacy-owner", legacyId)).toEqual({
+  expect(await createNoteStore(database.other).read("legacy-owner", legacyId)).toEqual({
     note: { ...input, id: legacyId, updatedAt: input.createdAt },
     revision: 7,
   });
 });
 
 it("enqueues only newly inserted development seeds, never a replay", async () => {
-  expect(await seedNotes(connection.db)).toBe(2);
-  const seeds = await other.db
+  expect(await seedNotes(database.db)).toBe(2);
+  const seeds = await database.other
     .select()
     .from(noteIndexIntents)
     .innerJoin(notes, eq(notes.id, noteIndexIntents.noteId));
@@ -150,16 +112,16 @@ it("enqueues only newly inserted development seeds, never a replay", async () =>
   expect(seeded).toHaveLength(2);
   for (const { note_index_intents: intent } of seeded) {
     expect(intent.revision).toBe(1);
-    await connection.db.delete(noteIndexIntents).where(eq(noteIndexIntents.noteId, intent.noteId));
+    await database.db.delete(noteIndexIntents).where(eq(noteIndexIntents.noteId, intent.noteId));
   }
-  expect(await seedNotes(connection.db)).toBe(0);
+  expect(await seedNotes(database.db)).toBe(0);
   for (const { note_index_intents: intent } of seeded)
     expect(await intents(intent.noteId)).toEqual([]);
 });
 
 it("commits a durable revision-bound intent with ordinary and idempotent creates", async () => {
   const owner = randomUUID();
-  const store = createNoteStore(connection.db);
+  const store = createNoteStore(database.db);
   const ordinary = await store.create(owner, input);
   const idempotent = await store.createIdempotent(owner, randomUUID(), input);
   if (idempotent.status !== "saved") throw new Error("Expected saved note");
@@ -173,19 +135,21 @@ it("commits a durable revision-bound intent with ordinary and idempotent creates
 it("does not requeue an already consumed intent when a creation response is replayed", async () => {
   const owner = randomUUID();
   const key = randomUUID();
-  const store = createNoteStore(connection.db);
+  const store = createNoteStore(database.db);
   const created = await store.createIdempotent(owner, key, input);
   if (created.status !== "saved") throw new Error("Expected saved note");
-  await connection.db
+  await database.db
     .delete(noteIndexIntents)
     .where(eq(noteIndexIntents.noteId, created.value.note.id));
-  expect(await createNoteStore(other.db).createIdempotent(owner, key, input)).toEqual(created);
+  expect(await createNoteStore(database.other).createIdempotent(owner, key, input)).toEqual(
+    created,
+  );
   expect(await intents(created.value.note.id)).toEqual([]);
 });
 
 it("coalesces edits to the newest revision without changing intent on rejected writes", async () => {
   const owner = randomUUID();
-  const store = createNoteStore(connection.db);
+  const store = createNoteStore(database.db);
   const created = await store.create(owner, input);
   const id = created.note.id;
   const update = { title: input.title, content: "The launch is Wednesday." };
@@ -204,11 +168,11 @@ it("coalesces edits to the newest revision without changing intent on rejected w
 
 it("keeps concurrent edits and the pending revision consistent across connection pools", async () => {
   const owner = randomUUID();
-  const store = createNoteStore(connection.db);
+  const store = createNoteStore(database.db);
   const created = await store.create(owner, input);
   const results = await Promise.all([
     store.update(owner, created.note.id, 1, { title: "A", content: "First writer" }),
-    createNoteStore(other.db).update(owner, created.note.id, 1, {
+    createNoteStore(database.other).update(owner, created.note.id, 1, {
       title: "B",
       content: "Second writer",
     }),
@@ -225,7 +189,7 @@ it("indexes a saved AI draft once while preserving the original note's intent", 
   const draft = await temporaryDraft(owner);
   const original = await intents(draft.sourceNoteId);
   const data = { title: draft.title, content: draft.content };
-  const saved = await createNoteDraftStore(connection.db).save(
+  const saved = await createNoteDraftStore(database.db).save(
     owner,
     draft.id,
     draftTag(draft),
@@ -235,25 +199,25 @@ it("indexes a saved AI draft once while preserving the original note's intent", 
   expect(await intents(saved.value.note.id)).toEqual([
     { noteId: saved.value.note.id, revision: 1, requestedAt: expect.any(String) },
   ]);
-  await connection.db
+  await database.db
     .delete(noteIndexIntents)
     .where(eq(noteIndexIntents.noteId, saved.value.note.id));
-  expect(await createNoteDraftStore(other.db).save(owner, draft.id, draftTag(draft), data)).toEqual(
-    saved,
-  );
+  expect(
+    await createNoteDraftStore(database.other).save(owner, draft.id, draftTag(draft), data),
+  ).toEqual(saved);
   expect(await intents(saved.value.note.id)).toEqual([]);
   expect(await intents(draft.sourceNoteId)).toEqual(original);
 });
 
 it("rolls back notes, receipts and draft removal when the indexing intent cannot be written", async () => {
   const owner = randomUUID();
-  const store = createNoteStore(connection.db);
+  const store = createNoteStore(database.db);
   const existing = await store.create(owner, input);
   const pending = await intents(existing.note.id);
   const draft = await temporaryDraft(owner);
   const before = await store.list(owner);
   const key = randomUUID();
-  await connection.db.execute(
+  await database.db.execute(
     sql.raw(`
     CREATE FUNCTION reject_index_intent() RETURNS trigger LANGUAGE plpgsql AS $$
       BEGIN RAISE EXCEPTION 'synthetic intent outage'; END $$;
@@ -268,25 +232,25 @@ it("rolls back notes, receipts and draft removal when the indexing intent cannot
       store.update(owner, existing.note.id, 1, { title: "Changed", content: "Must roll back" }),
     ).rejects.toThrow();
     await expect(
-      createNoteDraftStore(connection.db).save(owner, draft.id, draftTag(draft), {
+      createNoteDraftStore(database.db).save(owner, draft.id, draftTag(draft), {
         title: draft.title,
         content: draft.content,
       }),
     ).rejects.toThrow();
-    expect(await createNoteStore(other.db).list(owner)).toEqual(before);
+    expect(await createNoteStore(database.other).list(owner)).toEqual(before);
     expect(await intents(existing.note.id)).toEqual(pending);
     expect(
-      await other.db.select().from(noteCreateRequests).where(eq(noteCreateRequests.key, key)),
+      await database.other.select().from(noteCreateRequests).where(eq(noteCreateRequests.key, key)),
     ).toEqual([]);
     expect(
-      await other.db
+      await database.other
         .select()
         .from(draftSaveRequests)
         .where(eq(draftSaveRequests.draftId, draft.id)),
     ).toEqual([]);
-    expect(await createNoteDraftStore(other.db).read(owner, draft.id)).toBeDefined();
+    expect(await createNoteDraftStore(database.other).read(owner, draft.id)).toBeDefined();
   } finally {
-    await connection.db.execute(
+    await database.db.execute(
       sql.raw(`
       DROP TRIGGER reject_index_intent ON note_index_intents;
       DROP FUNCTION reject_index_intent();

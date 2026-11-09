@@ -1,5 +1,5 @@
 {
-  "id": "247d1275-b54c-495d-aef2-131f560df1f5",
+  "id": "1646b1a1-b2f2-4d88-ad53-bc672217b556",
   "prevId": "22816946-ce47-4c1b-9e17-ec0b25717af4",
   "version": "7",
   "dialect": "postgresql",
@@ -220,6 +220,63 @@
           "primaryKey": false,
           "notNull": true
         },
+        "fingerprint": {
+          "name": "fingerprint",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "last_checked_at": {
+          "name": "last_checked_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "claim_token": {
+          "name": "claim_token",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "run_id": {
+          "name": "run_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "runtime_url": {
+          "name": "runtime_url",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "claimed_at": {
+          "name": "claimed_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "retry_at": {
+          "name": "retry_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false,
+          "default": "now()"
+        },
+        "failure_code": {
+          "name": "failure_code",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "attempts": {
+          "name": "attempts",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
         "requested_at": {
           "name": "requested_at",
           "type": "timestamp with time zone",
@@ -228,7 +285,29 @@
           "default": "now()"
         }
       },
-      "indexes": {},
+      "indexes": {
+        "note_index_intents_checked_idx": {
+          "name": "note_index_intents_checked_idx",
+          "columns": [
+            {
+              "expression": "last_checked_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "note_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
       "foreignKeys": {
         "note_index_intents_note_id_notes_id_fk": {
           "name": "note_index_intents_note_id_notes_id_fk",
@@ -247,6 +326,130 @@
         "note_index_intents_revision_positive": {
           "name": "note_index_intents_revision_positive",
           "value": "\"note_index_intents\".\"revision\" > 0"
+        },
+        "note_index_intents_attempts_nonnegative": {
+          "name": "note_index_intents_attempts_nonnegative",
+          "value": "\"note_index_intents\".\"attempts\" >= 0"
+        },
+        "note_index_intents_claim_complete": {
+          "name": "note_index_intents_claim_complete",
+          "value": "(\"note_index_intents\".\"claim_token\" IS NULL AND \"note_index_intents\".\"run_id\" IS NULL AND \"note_index_intents\".\"runtime_url\" IS NULL AND \"note_index_intents\".\"claimed_at\" IS NULL) OR (\"note_index_intents\".\"claim_token\" IS NOT NULL AND \"note_index_intents\".\"runtime_url\" IS NOT NULL AND \"note_index_intents\".\"claimed_at\" IS NOT NULL)"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.note_indexes": {
+      "name": "note_indexes",
+      "schema": "",
+      "columns": {
+        "note_id": {
+          "name": "note_id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "revision": {
+          "name": "revision",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "fingerprint": {
+          "name": "fingerprint",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "published_at": {
+          "name": "published_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "note_indexes_note_id_notes_id_fk": {
+          "name": "note_indexes_note_id_notes_id_fk",
+          "tableFrom": "note_indexes",
+          "tableTo": "notes",
+          "columnsFrom": ["note_id"],
+          "columnsTo": ["id"],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "note_indexes_revision_positive": {
+          "name": "note_indexes_revision_positive",
+          "value": "\"note_indexes\".\"revision\" > 0"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.note_passages": {
+      "name": "note_passages",
+      "schema": "",
+      "columns": {
+        "note_id": {
+          "name": "note_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "ordinal": {
+          "name": "ordinal",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "text": {
+          "name": "text",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "source": {
+          "name": "source",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "embedding": {
+          "name": "embedding",
+          "type": "vector(1536)",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "note_passages_note_id_note_indexes_note_id_fk": {
+          "name": "note_passages_note_id_note_indexes_note_id_fk",
+          "tableFrom": "note_passages",
+          "tableTo": "note_indexes",
+          "columnsFrom": ["note_id"],
+          "columnsTo": ["note_id"],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "note_passages_note_id_ordinal_pk": {
+          "name": "note_passages_note_id_ordinal_pk",
+          "columns": ["note_id", "ordinal"]
+        }
+      },
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "note_passages_ordinal_nonnegative": {
+          "name": "note_passages_ordinal_nonnegative",
+          "value": "\"note_passages\".\"ordinal\" >= 0"
         }
       },
       "isRLSEnabled": false

@@ -1,49 +1,23 @@
 import { randomUUID } from "node:crypto";
 import { eq, sql } from "drizzle-orm";
-import { Pool } from "pg";
-import { afterAll, beforeAll, expect, it } from "vite-plus/test";
+import { expect, it } from "vite-plus/test";
 import { EMBEDDING_DIMENSIONS, EMBEDDING_FINGERPRINT } from "../../shared/embedding.ts";
 import { projectNotePassages } from "../passages.ts";
-import { openDatabase, readTestDatabaseUrl } from "./connection.ts";
-import { applyMigrations } from "./migrations.ts";
+
+import { setupIndexTestDatabase } from "./index-test-database.ts";
 import { createNoteIndexJobs } from "./note-index-jobs.ts";
 import { createNoteIndexStore } from "./note-index.ts";
 import { createNoteStore } from "./notes.ts";
 import { noteIndexes, noteIndexIntents, notePassages } from "./schema.ts";
 
 // Real PostgreSQL + pgvector. Embeddings are synthetic, not provider/model-quality evidence.
-const databaseName = `atlas_vectors_${randomUUID().replaceAll("-", "")}`;
-let admin: Pool;
-let connection: ReturnType<typeof openDatabase>;
-let other: ReturnType<typeof openDatabase>;
-
-beforeAll(async () => {
-  const url = new URL(readTestDatabaseUrl(process.env));
-  admin = new Pool({ connectionString: url.href });
-  await admin.query(`CREATE DATABASE "${databaseName}"`);
-  url.pathname = `/${databaseName}`;
-  connection = openDatabase(url.href);
-  other = openDatabase(url.href);
-  await applyMigrations(connection.db);
-});
-
-afterAll(async () => {
-  await connection?.close();
-  await other?.close();
-  if (admin) {
-    try {
-      await admin.query(`DROP DATABASE IF EXISTS "${databaseName}"`);
-    } finally {
-      await admin.end();
-    }
-  }
-});
+const database = setupIndexTestDatabase();
 
 const vector = () =>
   Array.from({ length: EMBEDDING_DIMENSIONS }, (_, index) => (index === 0 ? 1 : 0));
 async function fixture(content = "First fact.\n\nSecond fact.") {
   const owner = randomUUID();
-  const note = await createNoteStore(connection.db).create(owner, {
+  const note = await createNoteStore(database.db).create(owner, {
     title: "Synthetic source",
     content,
     createdAt: "2026-11-09T10:00:00.000Z",
@@ -53,10 +27,10 @@ async function fixture(content = "First fact.\n\nSecond fact.") {
     version: JSON.stringify(`${note.note.id}:${note.revision}`),
     content,
   });
-  const claim = await createNoteIndexJobs(connection.db).claim(note.note.id, "https://index.test");
+  const claim = await createNoteIndexJobs(database.db).claim(note.note.id, "https://index.test");
   if (!claim) throw new Error("Fixture claim failed");
   const runId = randomUUID();
-  await createNoteIndexJobs(connection.db).bind(claim, runId);
+  await createNoteIndexJobs(database.db).bind(claim, runId);
   return {
     job: { claim, runId },
     owner,
@@ -73,10 +47,10 @@ async function fixture(content = "First fact.\n\nSecond fact.") {
 
 it("publishes all current passages once and scopes reads to the live owner and profile", async () => {
   const f = await fixture();
-  const store = createNoteIndexStore(connection.db);
+  const store = createNoteIndexStore(database.db);
   const results = await Promise.all([
     store.publish(f.owner, f.publication, f.job),
-    createNoteIndexStore(other.db).publish(f.owner, f.publication, f.job),
+    createNoteIndexStore(database.other).publish(f.owner, f.publication, f.job),
   ]);
   expect(results.sort()).toEqual(["already_ready", "published"]);
   const current = await store.readCurrent(f.owner, f.note.note.id);
@@ -85,12 +59,12 @@ it("publishes all current passages once and scopes reads to the live owner and p
   expect(await store.readCurrent("foreign-owner", f.note.note.id)).toBeUndefined();
   expect(await store.publish("foreign-owner", f.publication, f.job)).toBe("unavailable");
   expect(
-    await connection.db
+    await database.db
       .select()
       .from(noteIndexIntents)
       .where(eq(noteIndexIntents.noteId, f.note.note.id)),
   ).toEqual([]);
-  await connection.db
+  await database.db
     .update(noteIndexes)
     .set({ fingerprint: "obsolete-profile" })
     .where(eq(noteIndexes.noteId, f.note.note.id));
@@ -99,7 +73,7 @@ it("publishes all current passages once and scopes reads to the live owner and p
 
 it("represents a supported empty note as ready with zero passages", async () => {
   const f = await fixture("");
-  const store = createNoteIndexStore(connection.db);
+  const store = createNoteIndexStore(database.db);
   expect(await store.publish(f.owner, f.publication, f.job)).toBe("published");
   expect(await store.readCurrent(f.owner, f.note.note.id)).toEqual({
     revision: 1,
@@ -110,11 +84,11 @@ it("represents a supported empty note as ready with zero passages", async () => 
 
 it("physically removes old derived content on edit and rejects a late completion", async () => {
   const f = await fixture();
-  const store = createNoteIndexStore(connection.db);
+  const store = createNoteIndexStore(database.db);
   expect(await store.publish(f.owner, f.publication, f.job)).toBe("published");
   expect(
     (
-      await createNoteStore(other.db).update(f.owner, f.note.note.id, 1, {
+      await createNoteStore(database.other).update(f.owner, f.note.note.id, 1, {
         title: "Updated",
         content: "New private fact",
       })
@@ -123,12 +97,12 @@ it("physically removes old derived content on edit and rejects a late completion
   expect(await store.publish(f.owner, f.publication, f.job)).toBe("stale");
   expect(await store.readCurrent(f.owner, f.note.note.id)).toBeUndefined();
   expect(
-    await connection.db.select().from(notePassages).where(eq(notePassages.noteId, f.note.note.id)),
+    await database.db.select().from(notePassages).where(eq(notePassages.noteId, f.note.note.id)),
   ).toEqual([]);
   expect(
-    await connection.db.select().from(noteIndexes).where(eq(noteIndexes.noteId, f.note.note.id)),
+    await database.db.select().from(noteIndexes).where(eq(noteIndexes.noteId, f.note.note.id)),
   ).toEqual([]);
-  const [intent] = await connection.db
+  const [intent] = await database.db
     .select()
     .from(noteIndexIntents)
     .where(eq(noteIndexIntents.noteId, f.note.note.id));
@@ -137,21 +111,21 @@ it("physically removes old derived content on edit and rejects a late completion
 
 it("cannot recreate deleted content and cascades both publication and passages", async () => {
   const f = await fixture();
-  const store = createNoteIndexStore(connection.db);
+  const store = createNoteIndexStore(database.db);
   expect(await store.publish(f.owner, f.publication, f.job)).toBe("published");
-  expect(await createNoteStore(other.db).delete(f.owner, f.note.note.id, 1)).toEqual({
+  expect(await createNoteStore(database.other).delete(f.owner, f.note.note.id, 1)).toEqual({
     status: "deleted",
   });
   expect(await store.publish(f.owner, f.publication, f.job)).toBe("unavailable");
   expect(await store.readCurrent(f.owner, f.note.note.id)).toBeUndefined();
   expect(
-    await connection.db.select().from(notePassages).where(eq(notePassages.noteId, f.note.note.id)),
+    await database.db.select().from(notePassages).where(eq(notePassages.noteId, f.note.note.id)),
   ).toEqual([]);
 });
 
 it("rejects invalid vectors, incomplete projections and mismatched source/configuration before publication", async () => {
   const f = await fixture();
-  const store = createNoteIndexStore(connection.db);
+  const store = createNoteIndexStore(database.db);
   for (const bad of [
     [],
     [1],
@@ -207,7 +181,7 @@ it("rejects invalid vectors, incomplete projections and mismatched source/config
   ).rejects.toThrow();
   expect(await store.readCurrent(f.owner, f.note.note.id)).toBeUndefined();
   expect(
-    await connection.db
+    await database.db
       .select()
       .from(noteIndexIntents)
       .where(eq(noteIndexIntents.noteId, f.note.note.id)),
@@ -216,39 +190,39 @@ it("rejects invalid vectors, incomplete projections and mismatched source/config
 
 it("rolls back metadata and preserves intent when a passage insert fails", async () => {
   const f = await fixture();
-  await connection.db.execute(
+  await database.db.execute(
     sql`ALTER TABLE note_passages ADD CONSTRAINT synthetic_failure CHECK (ordinal < 0) NOT VALID`,
   );
   try {
     await expect(
-      createNoteIndexStore(connection.db).publish(f.owner, f.publication, f.job),
+      createNoteIndexStore(database.db).publish(f.owner, f.publication, f.job),
     ).rejects.toThrow();
     expect(
-      await createNoteIndexStore(other.db).readCurrent(f.owner, f.note.note.id),
+      await createNoteIndexStore(database.other).readCurrent(f.owner, f.note.note.id),
     ).toBeUndefined();
     expect(
-      await connection.db.select().from(noteIndexes).where(eq(noteIndexes.noteId, f.note.note.id)),
+      await database.db.select().from(noteIndexes).where(eq(noteIndexes.noteId, f.note.note.id)),
     ).toEqual([]);
     expect(
-      await connection.db
+      await database.db
         .select()
         .from(noteIndexIntents)
         .where(eq(noteIndexIntents.noteId, f.note.note.id)),
     ).toHaveLength(1);
   } finally {
-    await connection.db.execute(sql`ALTER TABLE note_passages DROP CONSTRAINT synthetic_failure`);
+    await database.db.execute(sql`ALTER TABLE note_passages DROP CONSTRAINT synthetic_failure`);
   }
-  expect(await createNoteIndexStore(connection.db).publish(f.owner, f.publication, f.job)).toBe(
+  expect(await createNoteIndexStore(database.db).publish(f.owner, f.publication, f.job)).toBe(
     "published",
   );
 });
 
 it("serializes a racing edit and publication without retaining old vectors", async () => {
   const f = await fixture();
-  const store = createNoteIndexStore(connection.db);
+  const store = createNoteIndexStore(database.db);
   const [published, edited] = await Promise.all([
     store.publish(f.owner, f.publication, f.job),
-    createNoteStore(other.db).update(f.owner, f.note.note.id, 1, {
+    createNoteStore(database.other).update(f.owner, f.note.note.id, 1, {
       title: "Edited",
       content: "Updated source",
     }),
@@ -257,6 +231,6 @@ it("serializes a racing edit and publication without retaining old vectors", asy
   expect(edited.status).toBe("saved");
   expect(await store.readCurrent(f.owner, f.note.note.id)).toBeUndefined();
   expect(
-    await connection.db.select().from(notePassages).where(eq(notePassages.noteId, f.note.note.id)),
+    await database.db.select().from(notePassages).where(eq(notePassages.noteId, f.note.note.id)),
   ).toEqual([]);
 });
