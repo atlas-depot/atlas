@@ -11,11 +11,15 @@ import {
   timestamp,
   uniqueIndex,
   uuid,
+  vector,
 } from "drizzle-orm/pg-core";
 import type { OrganizeUsage } from "../organize-note.ts";
 import type { OrganizeRunState, RunTerminalState } from "./organize-runs.ts";
 import type { NoteOrigin } from "../../shared/organize.ts";
 import type { NoteContent } from "../../shared/document.ts";
+import type { NotePassageSource } from "../../shared/passages.ts";
+import type { IndexFailureCode } from "../../shared/index-jobs.ts";
+import { EMBEDDING_DIMENSIONS } from "../../shared/embedding.ts";
 
 export const notes = pgTable(
   "notes",
@@ -36,6 +40,73 @@ export const notes = pgTable(
   (table) => [
     index("notes_owner_id_idx").on(table.ownerId),
     check("notes_revision_positive", sql`${table.revision} > 0`),
+  ],
+);
+
+/** Pending indexing work contains identity/revision only, never a content snapshot. */
+export const noteIndexIntents = pgTable(
+  "note_index_intents",
+  {
+    noteId: uuid("note_id")
+      .primaryKey()
+      .references(() => notes.id, { onDelete: "cascade" }),
+    revision: integer("revision").notNull(),
+    fingerprint: text("fingerprint").notNull(),
+    lastCheckedAt: timestamp("last_checked_at", { withTimezone: true, mode: "string" })
+      .notNull()
+      .defaultNow(),
+    claimToken: uuid("claim_token"),
+    runId: text("run_id"),
+    runtimeUrl: text("runtime_url"),
+    claimedAt: timestamp("claimed_at", { withTimezone: true, mode: "string" }),
+    retryAt: timestamp("retry_at", { withTimezone: true, mode: "string" }).defaultNow(),
+    failureCode: text("failure_code").$type<IndexFailureCode>(),
+    attempts: integer("attempts").notNull().default(0),
+    requestedAt: timestamp("requested_at", { withTimezone: true, mode: "string" })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    check("note_index_intents_revision_positive", sql`${table.revision} > 0`),
+    check("note_index_intents_attempts_nonnegative", sql`${table.attempts} >= 0`),
+    check(
+      "note_index_intents_claim_complete",
+      sql`(${table.claimToken} IS NULL AND ${table.runId} IS NULL AND ${table.runtimeUrl} IS NULL AND ${table.claimedAt} IS NULL) OR (${table.claimToken} IS NOT NULL AND ${table.runtimeUrl} IS NOT NULL AND ${table.claimedAt} IS NOT NULL)`,
+    ),
+    index("note_index_intents_checked_idx").on(table.lastCheckedAt, table.noteId),
+  ],
+);
+
+/** Only the current publication is retained; an empty publication has no passage rows. */
+export const noteIndexes = pgTable(
+  "note_indexes",
+  {
+    noteId: uuid("note_id")
+      .primaryKey()
+      .references(() => notes.id, { onDelete: "cascade" }),
+    revision: integer("revision").notNull(),
+    fingerprint: text("fingerprint").notNull(),
+    publishedAt: timestamp("published_at", { withTimezone: true, mode: "string" })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [check("note_indexes_revision_positive", sql`${table.revision} > 0`)],
+);
+
+export const notePassages = pgTable(
+  "note_passages",
+  {
+    noteId: uuid("note_id")
+      .notNull()
+      .references(() => noteIndexes.noteId, { onDelete: "cascade" }),
+    ordinal: integer("ordinal").notNull(),
+    text: text("text").notNull(),
+    source: jsonb("source").$type<NotePassageSource>().notNull(),
+    embedding: vector("embedding", { dimensions: EMBEDDING_DIMENSIONS }).notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.noteId, table.ordinal] }),
+    check("note_passages_ordinal_nonnegative", sql`${table.ordinal} >= 0`),
   ],
 );
 

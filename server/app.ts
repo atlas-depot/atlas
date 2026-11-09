@@ -1,3 +1,8 @@
+import {
+  createNoteIndexRoutes,
+  type NoteIndexService,
+  type NoteSaved,
+} from "./note-index-routes.ts";
 import { Hono } from "hono";
 import { routePath } from "hono/route";
 import { secureHeaders } from "hono/secure-headers";
@@ -17,6 +22,8 @@ export type AppOptions = Readonly<{
   appOrigin?: string;
   organizer?: OrganizeService;
   notes?: NoteService;
+  indexing?: NoteIndexService;
+  onNoteSaved?: NoteSaved;
 }>;
 
 export function createApp(authenticateRequest: AuthenticateRequest, options: AppOptions = {}) {
@@ -34,8 +41,9 @@ export function createApp(authenticateRequest: AuthenticateRequest, options: App
 
   const api = new Hono<AuthEnv>();
   api.use("*", requireAuth(authenticateRequest));
-  api.route("/notes", createNoteRoutes(options.notes));
-  api.route("/", createOrganizeRoutes(options.organizer));
+  api.route("/notes", createNoteRoutes(options.notes, options.onNoteSaved));
+  api.route("/notes", createNoteIndexRoutes(options.indexing));
+  api.route("/", createOrganizeRoutes(options.organizer, options.onNoteSaved));
   if (options.protectedRoutes) api.route("/", options.protectedRoutes);
   app.route("/api", api);
   app.notFound((c) => c.json(apiError("NOT_FOUND", "Route not found."), 404));

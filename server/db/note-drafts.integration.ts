@@ -92,12 +92,13 @@ async function fixture() {
       now: () => clock,
     });
   const backend = manager();
+  const wakeIndex = vi.fn<(id: string) => Promise<void>>().mockResolvedValue(undefined);
   const app = createApp(
     async (request) => {
       const id = request.headers.get("X-Test-Owner");
       return id ? { userId: id } : null;
     },
-    { notes: sourceStore, organizer: backend },
+    { notes: sourceStore, organizer: backend, onNoteSaved: wakeIndex },
   );
   const request = async (path: string, init: RequestInit = {}, identity = owner) => {
     const headers = new Headers(init.headers);
@@ -127,6 +128,7 @@ async function fixture() {
     return draft;
   }
   return {
+    wakeIndex,
     owner,
     foreign,
     original,
@@ -466,4 +468,20 @@ it("recovers every unexpired owner draft and source status with one database que
   } finally {
     query.mockRestore();
   }
+});
+
+it("wakes indexing after draft Save without failing the saved note on a runtime outage", async () => {
+  const f = await fixture();
+  const runId = await f.complete();
+  const draft = await f.handoff(runId);
+  f.wakeIndex.mockRejectedValue(new Error("Synthetic index runtime outage"));
+  const response = await f.request(`/note-drafts/${runId}/save`, {
+    method: "POST",
+    headers: { "If-Match": draft.etag },
+    body: JSON.stringify({ title: "Saved AI draft", content: generated.markdown }),
+  });
+  expect(response.status).toBe(201);
+  const saved = noteSchema.parse(await response.json());
+  expect(f.wakeIndex).toHaveBeenCalledExactlyOnceWith(saved.id);
+  expect(await f.sourceStore.read(f.owner, saved.id)).toMatchObject({ note: saved });
 });

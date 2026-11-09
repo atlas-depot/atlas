@@ -59,6 +59,9 @@ beforeAll(async () => {
       await readFile(new URL("../../drizzle/0005_ai-note-drafts.sql", import.meta.url), "utf8"),
     ),
   );
+  await connection.db.execute(
+    sql.raw(await readFile(new URL("../../drizzle/0006_note-index.sql", import.meta.url), "utf8")),
+  );
   store = createNoteStore(connection.db);
   reopened = openDatabase(url.href);
 });

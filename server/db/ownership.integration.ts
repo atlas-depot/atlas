@@ -16,7 +16,13 @@ import { readCookie, sessionCookieName } from "../cookies.ts";
 const SESSION_COOKIE = sessionCookieName(true);
 import { openDatabase, readTestDatabaseUrl } from "./connection.ts";
 import { createNoteStore, noteTag } from "./notes.ts";
-import { noteCreateRequests, notes } from "./schema.ts";
+import {
+  noteCreateRequests,
+  noteIndexes,
+  noteIndexIntents,
+  notePassages,
+  notes,
+} from "./schema.ts";
 
 /**
  * Identity here is synthetic and mocked: this suite verifies that the verified
@@ -145,7 +151,9 @@ afterAll(async () => {
 });
 
 beforeEach(async () => {
-  await connectionA.db.execute(sql`TRUNCATE TABLE ${noteCreateRequests}, ${notes}`);
+  await connectionA.db.execute(
+    sql`TRUNCATE TABLE ${noteCreateRequests}, ${noteIndexIntents}, ${notePassages}, ${noteIndexes}, ${notes}`,
+  );
 });
 
 async function createNote(

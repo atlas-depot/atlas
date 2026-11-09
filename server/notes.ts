@@ -1,3 +1,4 @@
+import { wakeNoteIndex, type NoteSaved } from "./note-index-routes.ts";
 import { readJson, readBody } from "./request-body.ts";
 import { Hono } from "hono";
 import { apiError, ifMatchSchema } from "../shared/http.ts";
@@ -44,7 +45,7 @@ const stale = () =>
 const etag = (value: StoredNote) => noteTag(value.note.id, value.revision);
 
 /** Mounted behind requireAuth and the app's cookie-origin protection. */
-export function createNoteRoutes(store?: NoteService) {
+export function createNoteRoutes(store?: NoteService, onSaved?: NoteSaved) {
   const routes = new Hono<AuthEnv>();
 
   routes.get("/", async (c) => {
@@ -71,6 +72,7 @@ export function createNoteRoutes(store?: NoteService) {
           409,
         );
       }
+      wakeNoteIndex(onSaved, result.value.note.id);
       return c.json(result.value.note, 201, { ETag: etag(result.value) });
     } catch (error) {
       reportStorageFailure(c, error);
@@ -120,6 +122,7 @@ export function createNoteRoutes(store?: NoteService) {
       if (result.status === "not_found") return c.json(notFound(), 404);
       if (result.status === "conflict") return c.json(stale(), 412);
       if (result.status === "saved") {
+        wakeNoteIndex(onSaved, result.value.note.id);
         return c.json(result.value.note, 200, { ETag: etag(result.value) });
       }
       return c.body(null, 204);

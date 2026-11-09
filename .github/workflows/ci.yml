@@ -73,7 +73,7 @@ jobs:
       PLAYWRIGHT_CHANNEL: chrome
     services:
       postgres:
-        image: postgres:17
+        image: pgvector/pgvector:0.8.7-pg17
         env:
           POSTGRES_USER: atlas_test
           POSTGRES_PASSWORD: atlas_ci_synthetic

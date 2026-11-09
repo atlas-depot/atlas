@@ -1,5 +1,6 @@
 import type { openDatabase } from "./connection.ts";
 import { notes } from "./schema.ts";
+import { requestNoteIndex } from "./note-index-intents.ts";
 
 /** Synthetic owners intentionally do not identify real WorkOS accounts. */
 const sampleNotes = [
@@ -24,10 +25,13 @@ const sampleNotes = [
 
 export async function seedNotes(db: ReturnType<typeof openDatabase>["db"]) {
   // Fixed identities make reruns safe. Existing content and revisions are never reset.
-  const inserted = await db
-    .insert(notes)
-    .values(sampleNotes)
-    .onConflictDoNothing({ target: notes.id })
-    .returning({ id: notes.id });
-  return inserted.length;
+  return db.transaction(async (tx) => {
+    const inserted = await tx
+      .insert(notes)
+      .values(sampleNotes)
+      .onConflictDoNothing({ target: notes.id })
+      .returning({ id: notes.id, revision: notes.revision });
+    for (const note of inserted) await requestNoteIndex(tx, note);
+    return inserted.length;
+  });
 }

@@ -13,6 +13,7 @@ import {
 } from "../../shared/notes.ts";
 import type { openDatabase } from "./connection.ts";
 import { noteCreateRequests, notes } from "./schema.ts";
+import { requestNoteIndex } from "./note-index-intents.ts";
 
 type Database = ReturnType<typeof openDatabase>["db"];
 type Row = typeof notes.$inferSelect;
@@ -61,17 +62,20 @@ export function createNoteStore(db: Database) {
     /** Test support only; routes use createIdempotent. */
     async create(ownerId: string, data: CreateNote): Promise<StoredNote> {
       const owner = ownerSchema.parse(ownerId);
-      const [row] = await db
-        .insert(notes)
-        .values({
-          ownerId: owner,
-          title: data.title,
-          content: data.content,
-          createdAt: data.createdAt,
-          updatedAt: data.createdAt,
-        })
-        .returning();
-      return storedNote(row);
+      return db.transaction(async (tx) => {
+        const [row] = await tx
+          .insert(notes)
+          .values({
+            ownerId: owner,
+            title: data.title,
+            content: data.content,
+            createdAt: data.createdAt,
+            updatedAt: data.createdAt,
+          })
+          .returning();
+        await requestNoteIndex(tx, row);
+        return storedNote(row);
+      });
     },
 
     async createIdempotent(
@@ -104,6 +108,7 @@ export function createNoteStore(db: Database) {
                 updatedAt: data.createdAt,
               })
               .returning();
+            await requestNoteIndex(tx, row);
             return { status: "saved", value: storedNote(row) };
           }
 
@@ -178,6 +183,7 @@ export function createNoteStore(db: Database) {
           })
           .where(and(scope, eq(notes.revision, expected)))
           .returning();
+        await requestNoteIndex(tx, row);
         return { status: "saved", value: storedNote(row) };
       });
     },
