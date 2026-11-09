@@ -11,9 +11,10 @@ export default defineConfig(({ command, isPreview }) => {
   if (apiPort === 0) throw new Error("Use a nonzero API_PORT for the development proxy.");
   return {
     fmt: {
-      ignorePatterns: ["docs/**", ".agents/**", ".claude/**", "commitlint.config.cjs"],
+      ignorePatterns: ["docs/**", ".agents/**", ".claude/**"],
     },
     lint: {
+      ignorePatterns: ["experiments/**"],
       plugins: ["react", "typescript", "oxc"],
       rules: {
         "typescript/no-explicit-any": "error",

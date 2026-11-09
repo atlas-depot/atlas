@@ -19,12 +19,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: voidzero-dev/setup-vp@68f39c78aaf39be468cabd2afb09c162574c84af # v1.21.2
-        with:
-          node-version-file: .node-version
-          cache: true
-          run-install: false
-      - run: vp install --frozen-lockfile
+      - uses: ./.github/actions/setup
       - run: vp fmt --check
 
   lint:
@@ -34,15 +29,9 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: voidzero-dev/setup-vp@68f39c78aaf39be468cabd2afb09c162574c84af # v1.21.2
+      - uses: ./.github/actions/setup
         with:
-          node-version-file: .node-version
-          cache: true
-          run-install: false
-      - run: vp install --frozen-lockfile
-      - name: Install isolated experiment dependencies for type checking
-        working-directory: experiments/eve-openrouter
-        run: vp install --frozen-lockfile
+          experiment: "true"
       - run: vp lint
       - name: Check and test the private organizer without credentials
         working-directory: agents/organizer
@@ -56,16 +45,12 @@ jobs:
   coverage:
     name: coverage
     runs-on: ubuntu-24.04
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: voidzero-dev/setup-vp@68f39c78aaf39be468cabd2afb09c162574c84af # v1.21.2
-        with:
-          node-version-file: .node-version
-          cache: true
-          run-install: false
-      - run: vp install --frozen-lockfile
+      - uses: ./.github/actions/setup
       - name: Run tests with coverage
         run: vp test run --coverage
       - name: Publish coverage summary
@@ -84,6 +69,8 @@ jobs:
     name: database regression
     runs-on: ubuntu-24.04
     timeout-minutes: 10
+    env:
+      PLAYWRIGHT_CHANNEL: chrome
     services:
       postgres:
         image: postgres:17
@@ -102,17 +89,11 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: voidzero-dev/setup-vp@68f39c78aaf39be468cabd2afb09c162574c84af # v1.21.2
-        with:
-          node-version-file: .node-version
-          cache: true
-          run-install: false
-      - run: vp install --frozen-lockfile
+      - uses: ./.github/actions/setup
       - name: Replay migrations and test isolated PostgreSQL persistence
         env:
           TEST_DATABASE_URL: postgresql://atlas_test:atlas_ci_synthetic@127.0.0.1:${{ job.services.postgres.ports[5432] }}/postgres
         run: vp run test:db
-      - run: vp exec playwright install --with-deps chromium
       - name: Exercise the production editor against the real API and database
         env:
           TEST_DATABASE_URL: postgresql://atlas_test:atlas_ci_synthetic@127.0.0.1:${{ job.services.postgres.ports[5432] }}/postgres
@@ -131,28 +112,20 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: voidzero-dev/setup-vp@68f39c78aaf39be468cabd2afb09c162574c84af # v1.21.2
-        with:
-          node-version-file: .node-version
-          cache: true
-          run-install: false
-      - run: vp install --frozen-lockfile
+      - uses: ./.github/actions/setup
       - run: vp build
 
   browser:
     name: browser regression
     runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      PLAYWRIGHT_CHANNEL: chrome
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: voidzero-dev/setup-vp@68f39c78aaf39be468cabd2afb09c162574c84af # v1.21.2
-        with:
-          node-version-file: .node-version
-          cache: true
-          run-install: false
-      - run: vp install --frozen-lockfile
-      - run: vp exec playwright install --with-deps chromium
+      - uses: ./.github/actions/setup
       - run: vp exec playwright test
       - name: Upload browser screenshots and failure traces
         if: ${{ !cancelled() }}
@@ -163,7 +136,7 @@ jobs:
           retention-days: 7
 
   verify:
-    needs: [format, lint, build, database]
+    needs: [format, lint, build, database, coverage, browser]
     if: always()
     runs-on: ubuntu-24.04
     steps:
@@ -173,4 +146,6 @@ jobs:
           LINT: ${{ needs.lint.result }}
           BUILD: ${{ needs.build.result }}
           DATABASE: ${{ needs.database.result }}
-        run: test "$FORMAT" = success && test "$LINT" = success && test "$BUILD" = success && test "$DATABASE" = success
+          COVERAGE: ${{ needs.coverage.result }}
+          BROWSER: ${{ needs.browser.result }}
+        run: test "$FORMAT" = success && test "$LINT" = success && test "$BUILD" = success && test "$DATABASE" = success && test "$COVERAGE" = success && test "$BROWSER" = success
