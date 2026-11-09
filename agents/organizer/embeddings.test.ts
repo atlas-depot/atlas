@@ -67,8 +67,33 @@ await test("bounds sequential requests and keeps batch-local response indices in
   assert.deepEqual(sizes, [16, 16, 3]);
 });
 
+await test("accepts the official Qwen model name returned by the live OpenRouter response", async () => {
+  let calls = 0;
+  const embed = createNoteEmbedder({
+    apiKey: "synthetic-key",
+    fetch: async (_url, init) => {
+      calls++;
+      assert.ok(typeof init?.body === "string");
+      assert.equal(JSON.parse(init.body).model, EMBEDDING_MODEL);
+      return Response.json({
+        id: "synthetic-live-response",
+        object: "list",
+        model: "Qwen/Qwen3-Embedding-8B",
+        provider: "Synthetic",
+        data: [item(0)],
+        usage: { prompt_tokens: 9, total_tokens: 9, cost: 0.00000009, is_byok: false },
+      });
+    },
+  });
+  assert.deepEqual(await embed(["A fictional picnic needs bread."]), [vector()]);
+  assert.equal(calls, 1);
+});
+
 for (const [name, data, model] of [
   ["wrong model", [item(0)], "openai/text-embedding-3-small"],
+  ["different Qwen model", [item(0)], "Qwen/Qwen3-Embedding-4B"],
+  ["unrecognized model casing", [item(0)], "QWEN/QWEN3-EMBEDDING-8B"],
+  ["model name prefix match", [item(0)], "Qwen/Qwen3-Embedding-8B-other"],
   ["missing vector", [], EMBEDDING_MODEL],
   ["extra vector", [item(0), item(1)], EMBEDDING_MODEL],
   ["missing index", [{ object: "embedding", embedding: vector() }], EMBEDDING_MODEL],

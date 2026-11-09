@@ -10,7 +10,9 @@ import {
 
 const inputsSchema = z.array(noteTextSchema.min(1).max(100_000)).max(1_000);
 const responseSchema = z.object({
-  model: z.literal(EMBEDDING_MODEL),
+  // OpenRouter returns either its request slug or Qwen's official model ID.
+  // Accept only these observed names for the same model, without case/prefix matching.
+  model: z.enum([EMBEDDING_MODEL, "Qwen/Qwen3-Embedding-8B"]),
   data: z.array(
     z.object({ index: z.number().int().nonnegative(), embedding: embeddingVectorSchema }),
   ),
