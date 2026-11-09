@@ -51,3 +51,39 @@ void test("private query embedding requires service auth and validates before mo
     else process.env.ORGANIZER_SERVICE_TOKEN = previous;
   }
 });
+
+void test("private provider failures never disclose query or provider details", async () => {
+  const previous = process.env.ORGANIZER_SERVICE_TOKEN;
+  process.env.ORGANIZER_SERVICE_TOKEN = token;
+  const channel = createNoteSearchChannel(async () => {
+    throw new Error("PRIVATE provider response and credential");
+  });
+  const route = channel.routes.find(
+    (item) => item.transport !== "websocket" && item.path === "/internal/note-search/embed",
+  );
+  assert.ok(route && route.transport !== "websocket");
+  try {
+    const response = await route.handler(
+      new Request("http://127.0.0.1:2027/internal/note-search/embed", {
+        method: "POST",
+        headers: { authorization: `Basic ${Buffer.from(`atlas-api:${token}`).toString("base64")}` },
+        body: JSON.stringify({ query: "PRIVATE question" }),
+      }),
+      { params: {} } as Parameters<typeof route.handler>[1],
+    );
+    assert.equal(response.status, 503);
+    assert.deepEqual(await response.json(), { error: "Unavailable" });
+    delete process.env.ORGANIZER_SERVICE_TOKEN;
+    const unavailable = await route.handler(
+      new Request("http://127.0.0.1:2027/internal/note-search/embed", {
+        method: "POST",
+        body: JSON.stringify({ query: "PRIVATE question" }),
+      }),
+      { params: {} } as Parameters<typeof route.handler>[1],
+    );
+    assert.equal(unavailable.status, 503);
+  } finally {
+    if (previous === undefined) delete process.env.ORGANIZER_SERVICE_TOKEN;
+    else process.env.ORGANIZER_SERVICE_TOKEN = previous;
+  }
+});
