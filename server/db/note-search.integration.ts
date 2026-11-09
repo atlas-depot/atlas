@@ -144,3 +144,29 @@ it("ranks bounded candidates and reports failed indexing separately", async () =
   expect(result.pendingCoverage).toBe(false);
   expect(result.failedCoverage).toBe(true);
 });
+
+it("distinguishes a complete empty index from unfinished coverage", async () => {
+  const owner = randomUUID();
+  const search = createNoteSearchStore(database.db);
+  expect(await search.candidates(owner, vector())).toEqual({
+    passages: [],
+    pendingCoverage: false,
+    failedCoverage: false,
+  });
+  await published(owner, "");
+  expect(await search.candidates(owner, vector())).toEqual({
+    passages: [],
+    pendingCoverage: false,
+    failedCoverage: false,
+  });
+  await createNoteStore(database.db).create(owner, {
+    title: "Awaiting indexing",
+    content: "A future passage.",
+    createdAt: "2026-11-09T10:00:00.000Z",
+  });
+  expect(await search.candidates(owner, vector())).toEqual({
+    passages: [],
+    pendingCoverage: true,
+    failedCoverage: false,
+  });
+});
