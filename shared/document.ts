@@ -107,16 +107,16 @@ const tableContent = z
       if (occupied[rowIndex].includes(false)) return invalid();
     }
   });
-const id = noteTextSchema.min(1).max(128);
+export const blockIdSchema = noteTextSchema.min(1).max(128);
 const bodies = [
   z.strictObject({
-    id,
+    id: blockIdSchema,
     type: z.literal("paragraph"),
     props: paragraphProps,
     content: inlineContent,
   }),
   z.strictObject({
-    id,
+    id: blockIdSchema,
     type: z.literal("heading"),
     props: paragraphProps.extend({
       level: z.union([
@@ -132,31 +132,31 @@ const bodies = [
     content: inlineContent,
   }),
   z.strictObject({
-    id,
+    id: blockIdSchema,
     type: z.literal("bulletListItem"),
     props: paragraphProps,
     content: inlineContent,
   }),
   z.strictObject({
-    id,
+    id: blockIdSchema,
     type: z.literal("numberedListItem"),
     props: paragraphProps.extend({ start: z.number().int().min(0).max(1_000_000).optional() }),
     content: inlineContent,
   }),
   z.strictObject({
-    id,
+    id: blockIdSchema,
     type: z.literal("checkListItem"),
     props: paragraphProps.extend({ checked: z.boolean() }),
     content: inlineContent,
   }),
   z.strictObject({
-    id,
+    id: blockIdSchema,
     type: z.literal("quote"),
     props: z.strictObject(colors),
     content: inlineContent,
   }),
   z.strictObject({
-    id,
+    id: blockIdSchema,
     type: z.literal("codeBlock"),
     props: z.strictObject({ language: noteTextSchema.max(128) }),
     content: z.array(
@@ -164,13 +164,13 @@ const bodies = [
     ),
   }),
   z.strictObject({
-    id,
+    id: blockIdSchema,
     type: z.literal("divider"),
     props: z.strictObject({}),
     content: z.undefined().optional(),
   }),
   z.strictObject({
-    id,
+    id: blockIdSchema,
     type: z.literal("table"),
     props: z.strictObject({ textColor: color.default("default") }),
     content: tableContent,
