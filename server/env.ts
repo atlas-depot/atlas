@@ -49,6 +49,11 @@ const environmentSchema = z.object({
     .pipe(z.number().int().min(0).max(65535)),
 });
 
+/** 30 days. */
+export const DEFAULT_SESSION_MAX_AGE_SECONDS = 30 * 24 * 60 * 60;
+/** 400 days, the longest session duration WorkOS allows. */
+export const MAX_SESSION_MAX_AGE_SECONDS = 400 * 24 * 60 * 60;
+
 const workosSchema = z.object({
   WORKOS_CLIENT_ID: z.string().regex(/^client_[A-Za-z0-9]+$/),
   WORKOS_ISSUER: z.url({ protocol: /^https$/ }),
@@ -66,16 +71,33 @@ const browserAuthSchema = workosSchema.extend({
     }),
   WORKOS_API_KEY: z.string().min(1).max(512).regex(/^\S+$/),
   WORKOS_COOKIE_PASSWORD: z.string().min(32).max(512),
+  // Client-side ceiling for the session cookie. WorkOS still decides when a refresh is refused.
+  SESSION_MAX_AGE_SECONDS: z
+    .string()
+    .regex(/^\d+$/)
+    .default(String(DEFAULT_SESSION_MAX_AGE_SECONDS))
+    .transform(Number)
+    .pipe(z.number().int().min(60).max(MAX_SESSION_MAX_AGE_SECONDS)),
 });
 
-const browserSettings = ["APP_ORIGIN", "WORKOS_API_KEY", "WORKOS_COOKIE_PASSWORD"] as const;
+const browserSettings = [
+  "APP_ORIGIN",
+  "WORKOS_API_KEY",
+  "WORKOS_COOKIE_PASSWORD",
+  "SESSION_MAX_AGE_SECONDS",
+] as const;
 
 export function readServerEnv(environment: Record<string, string | undefined>): {
   port: number;
   databaseUrl?: string;
   organizer?: NonNullable<ReturnType<typeof readOrganizerEnv>>;
   workos?: { clientId: string; issuer: string };
-  browserAuth?: { appOrigin: string; apiKey: string; cookiePassword: string };
+  browserAuth?: {
+    appOrigin: string;
+    apiKey: string;
+    cookiePassword: string;
+    sessionMaxAgeSeconds: number;
+  };
 } {
   const parsed = environmentSchema.safeParse(environment);
   if (!parsed.success) {
@@ -104,6 +126,7 @@ export function readServerEnv(environment: Record<string, string | undefined>): 
         appOrigin: browser.data.APP_ORIGIN,
         apiKey: browser.data.WORKOS_API_KEY,
         cookiePassword: browser.data.WORKOS_COOKIE_PASSWORD,
+        sessionMaxAgeSeconds: browser.data.SESSION_MAX_AGE_SECONDS,
       },
     };
   }

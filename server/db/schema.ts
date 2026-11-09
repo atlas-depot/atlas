@@ -13,9 +13,8 @@ import {
   uuid,
   vector,
 } from "drizzle-orm/pg-core";
-import type { OrganizeRunState } from "../organize-runs.ts";
 import type { OrganizeUsage } from "../organize-note.ts";
-import type { RunTerminalState } from "./organize-runs.ts";
+import type { OrganizeRunState, RunTerminalState } from "./organize-runs.ts";
 import type { NoteOrigin } from "../../shared/organize.ts";
 import type { NoteContent } from "../../shared/document.ts";
 import type { NotePassageSource } from "../../shared/passages.ts";

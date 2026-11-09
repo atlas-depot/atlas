@@ -1,6 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 import { noteSchema, updateNoteSchema, type Note } from "../shared/notes.ts";
 import { type BlockNoteDocument } from "../shared/document.ts";
+import { toListRow } from "./notes-editor.ts";
 
 const noteId = "fa100001-1234-4000-8000-000000000053";
 const text = (value: string) => [{ type: "text" as const, text: value, styles: {} }];
@@ -38,7 +39,9 @@ async function openDocument(page: Page, blocks: unknown[]) {
   await page.route("**/api/organize-work", (route) =>
     route.fulfill({ json: { runs: [], drafts: [] } }),
   );
-  await page.route("**/api/notes", (route) => route.fulfill({ json: { notes: [note] } }));
+  await page.route("**/api/notes", (route) =>
+    route.fulfill({ json: { notes: [toListRow(note)] } }),
+  );
   await page.route(`**/api/notes/${noteId}`, (route) => {
     if (route.request().method() === "PUT") {
       const input = updateNoteSchema.parse(route.request().postDataJSON());

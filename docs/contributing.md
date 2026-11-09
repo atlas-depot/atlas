@@ -8,11 +8,11 @@ Name PR source branches `<type>/<description>` or `<type>/<issue-number>-<descri
 
 Dependent work may start before its parent PR merges when the contributors agree on the needed contract. Give each branch an owner and each concurrent local task a separate worktree. A dependent PR temporarily targets its parent branch, with the parent PR and incorporated revision recorded in its body. Once its own scope is complete and verified, it may be ready for review before the parent merges. Merge the parent first, then move only the child's changes onto current `main`, retarget its PR, and reverify the final diff, checks and approval before Efe's merge decision. Follow [parallel work](process/parallel-work.md) for commands and squash/rebase handling. A worktree isolates files, not ports, credentials or shared services.
 
-All five teammates are intended members of the human `atlas-reviewers` CODEOWNER team. Each PR needs approval from an eligible teammate other than its author. Efe makes the final merge decision, including for Efe-authored PRs after another teammate approves. Bot approvals never replace the required human CODEOWNER.
+All five teammates are members of the `atlas-reviewers` team. `.github/CODEOWNERS` routes every path to that team, and the team's auto-assignment requests one member per PR. Each PR needs approval from an eligible teammate other than its author. Efe makes the final merge decision, including for Efe-authored PRs after another teammate approves. Bot approvals never replace the required human review.
 
 Keep merge authority separate from review and CI requirements. Only the Efe-only `atlas-merge` team may bypass the update restriction, and only through a PR. Efe has no review/CI bypass. Organization owners can still administer these settings; ordinary merge restrictions do not remove organization administration rights.
 
-Protection setup must follow the base branch: enable mandatory CODEOWNER approval after this team ownership file lands on `main`, not while Efe is the sole owner. Verify active team access before claiming everyone can review. Once `.github/workflows/ci.yml` has run on a real pull request, its `verify` check is the CI status to require; do not require a check name before a workflow produces it. The `coverage` job is a separate check; read its summary and logs during review. It is not a required merge check and has no percentage gate. CI success, review approval and deployment are separate facts.
+The `main` ruleset requires one approval and the `verify` check, and requires the branch to be up to date with `main` before merge (decided 2026-11-09), so a PR that went green against an older `main` re-runs CI after the update. Code-owner review is not required by the ruleset on purpose: the team's automatic reviewer assignment already spreads reviews across the five members. Merged branches are deleted automatically. Verify active team access before claiming everyone can review. Once `.github/workflows/ci.yml` has run on a real pull request, its `verify` check is the CI status to require; do not require a check name before a workflow produces it. `verify` passes only when all six jobs pass: format, lint and typecheck, build, database regression, coverage and browser regression. Coverage has no percentage gate; read its summary and logs during review. CI success, review approval and deployment are separate facts.
 
 ## Issues
 
@@ -24,7 +24,7 @@ Keep decisions and scope changes in the issue, with links to the implementing PR
 
 ## Pull requests
 
-Keep one reviewable change per PR. Use atomic Conventional Commits without AI co-author or generated-by footers. Never commit secrets or unrelated local edits.
+Keep one reviewable change per PR. Use atomic Conventional Commits without AI co-author or generated-by footers. Reviewers check the commit format; no hook or CI job enforces it. Never commit secrets or unrelated local edits.
 
 Use three short fields, normally about 100 words rather than a hard word limit:
 

@@ -1,0 +1,25 @@
+name: Set up Vite+
+description: Install the pinned Node.js and Vite+ toolchain, then the locked workspace dependencies.
+
+inputs:
+  experiment:
+    description: Also install the isolated experiments/eve-openrouter dependencies.
+    required: false
+    default: "false"
+
+runs:
+  using: composite
+  steps:
+    - uses: voidzero-dev/setup-vp@68f39c78aaf39be468cabd2afb09c162574c84af # v1.21.2
+      with:
+        node-version-file: .node-version
+        cache: true
+        run-install: false
+    - name: Install workspace dependencies
+      shell: bash
+      run: vp install --frozen-lockfile
+    - name: Install isolated experiment dependencies
+      if: inputs.experiment == 'true'
+      shell: bash
+      working-directory: experiments/eve-openrouter
+      run: vp install --frozen-lockfile

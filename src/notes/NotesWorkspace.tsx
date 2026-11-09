@@ -1,4 +1,4 @@
-import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -13,20 +13,19 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { noteContentSchema, type CreateNote } from "../../shared/notes";
-import type { Note } from "../../shared/notes";
+import { noteContentSchema, type CreateNote, type NoteSummary } from "../../shared/notes";
+import { SignInLink } from "@/auth/SignInLink";
 import { MarkdownPreview } from "./MarkdownPreview";
 import { NoteContentView } from "./NoteContentView";
 import { OrganizeWorkspace } from "./OrganizeWorkspace";
 import type { OrganizeClient } from "./organize-store";
-import type { NoteSnapshot, NotesStore } from "./notes-store";
+import { toSummary, type NoteSnapshot, type NotesStore } from "./notes-store";
 import {
   classifyFailure,
-  failureMessage,
   hasUnsavedChanges,
-  savingMessage,
   sameContent,
   emptyNoteDocument,
+  statusMessage,
   type RequestFailure,
 } from "./editor-state";
 
@@ -52,7 +51,7 @@ export function NotesWorkspace({
   example?: boolean;
   requestsEnabled?: boolean;
 }) {
-  const [notes, setNotes] = useState<Note[]>([]);
+  const [notes, setNotes] = useState<NoteSummary[]>([]);
   const [loadState, setLoadState] = useState<"loading" | "ready" | RequestFailure>("loading");
   const [loadAttempt, setLoadAttempt] = useState(0);
   const [draft, setDraft] = useState<Draft | null>(null);
@@ -84,11 +83,19 @@ export function NotesWorkspace({
   const deleteRefreshRef = useRef<HTMLButtonElement>(null);
   const deleteCancelRef = useRef<HTMLButtonElement>(null);
   const deleteButtonRef = useRef<HTMLButtonElement>(null);
-  const dirty = !editorValid || hasUnsavedChanges(draft, saved?.note ?? null);
-  const valid =
-    editorValid &&
-    draft !== null &&
-    noteContentSchema.safeParse({ title: draft.title, content: draft.content }).success;
+  const dirty = useMemo(
+    () => !editorValid || hasUnsavedChanges(draft, saved?.note ?? null),
+    [draft, saved, editorValid],
+  );
+  const valid = useMemo(() => {
+    if (!editorValid || draft === null) return false;
+    // A block document enters the draft only after blockNoteDocumentSchema accepted it: the
+    // server note, emptyNoteDocument, or the rich editor, which reports validity for every
+    // changed document and publishes only valid ones. Its reported validity is enough here.
+    if (typeof draft.content !== "string")
+      return noteContentSchema.shape.title.safeParse(draft.title).success;
+    return noteContentSchema.safeParse({ title: draft.title, content: draft.content }).success;
+  }, [draft, editorValid]);
   const busy =
     !requestsEnabled || saveState === "saving" || openingId !== null || refreshing || deleting;
   const loadFailureKind =
@@ -119,32 +126,45 @@ export function NotesWorkspace({
     setComparison(null);
   }, []);
 
-  const applySnapshot = useCallback((snapshot: NoteSnapshot) => {
-    setEditorKey((key) => key + 1);
-    setEditorMode("loading");
-    setEditorValid(true);
-    setDraft({
-      title: snapshot.note.title,
-      content: snapshot.note.content,
-      createdAt: snapshot.note.createdAt,
-    });
-    setNotes((current) =>
-      current.map((note) => (note.id === snapshot.note.id ? snapshot.note : note)),
-    );
-    setSaved(snapshot);
-    setPendingCreation(null);
-    setSaveState("idle");
-    setComparison(null);
-    setReadFailure(null);
-    setDeleteFailure(null);
-    setDeleteNotice(null);
-    setDeleteOpen(false);
-  }, []);
+  /** The request state every selection change clears. Paths that keep a part say so. */
+  const resetSelectionState = useCallback(
+    ({ creation = true, deletion = true }: { creation?: boolean; deletion?: boolean } = {}) => {
+      setSaveState("idle");
+      setReadFailure(null);
+      setComparison(null);
+      if (creation) setPendingCreation(null);
+      if (deletion) {
+        setDeleteFailure(null);
+        setDeleteNotice(null);
+        setDeleteOpen(false);
+      }
+    },
+    [],
+  );
+
+  const applySnapshot = useCallback(
+    (snapshot: NoteSnapshot) => {
+      setEditorKey((key) => key + 1);
+      setEditorMode("loading");
+      setEditorValid(true);
+      setDraft({
+        title: snapshot.note.title,
+        content: snapshot.note.content,
+        createdAt: snapshot.note.createdAt,
+      });
+      setNotes((current) =>
+        current.map((note) => (note.id === snapshot.note.id ? toSummary(snapshot.note) : note)),
+      );
+      setSaved(snapshot);
+      resetSelectionState();
+    },
+    [resetSelectionState],
+  );
 
   useEffect(() => {
     let active = true;
     void (async () => {
-      let list: Note[];
+      let list: NoteSummary[];
       try {
         list = await store.list();
       } catch (error) {
@@ -274,7 +294,7 @@ export function NotesWorkspace({
         savedId = result.note.id;
         setSaved(result);
         setNotes((current) => [
-          result.note,
+          toSummary(result.note),
           ...current.filter((note) => note.id !== result.note.id),
         ]);
         setPendingCreation(null);
@@ -286,7 +306,10 @@ export function NotesWorkspace({
           );
         }
       }
-      setNotes((current) => [result.note, ...current.filter((note) => note.id !== result.note.id)]);
+      setNotes((current) => [
+        toSummary(result.note),
+        ...current.filter((note) => note.id !== result.note.id),
+      ]);
       setSaved(result);
       // Advance the identity/ETag, but acknowledge only the submitted text, not newer edits.
       setDraft((current) => (current ? { ...current, createdAt: result.note.createdAt } : current));
@@ -342,13 +365,7 @@ export function NotesWorkspace({
       setEditorValid(true);
       setDraft({ title: "", content: emptyNoteDocument(), createdAt: new Date().toISOString() });
       setSaved(null);
-      setPendingCreation(null);
-      setSaveState("idle");
-      setReadFailure(null);
-      setComparison(null);
-      setDeleteFailure(null);
-      setDeleteNotice(null);
-      setDeleteOpen(false);
+      resetSelectionState();
     }
     requestAnimationFrame(() => titleRef.current?.focus());
   }
@@ -394,25 +411,17 @@ export function NotesWorkspace({
   function keepAsNew() {
     if (!draft) return;
     setSaved(null);
-    setPendingCreation(null);
-    setSaveState("idle");
-    setReadFailure(null);
-    setComparison(null);
-    setDeleteFailure(null);
-    setDeleteNotice(null);
-    setDeleteOpen(false);
+    resetSelectionState();
     setDraft({ ...draft, createdAt: new Date().toISOString() });
     requestAnimationFrame(() => titleRef.current?.focus());
   }
 
-  function removeSelection(remaining: Note[], removedId: string) {
+  function removeSelection(remaining: NoteSummary[], removedId: string) {
     setNotes(remaining);
     setDraft(null);
     setSaved(null);
-    setPendingCreation(null);
-    setSaveState("idle");
-    setReadFailure(null);
-    setComparison(null);
+    // deleteNote already cleared the delete fields; the empty state below sets its notice.
+    resetSelectionState({ deletion: false });
     const removedIndex = notes.findIndex((note) => note.id === removedId);
     const next = remaining[removedIndex] ?? remaining[removedIndex - 1] ?? null;
     if (next) return next.id;
@@ -423,12 +432,8 @@ export function NotesWorkspace({
   async function deleteNote() {
     if (!saved || busyRef.current || writeBlocked || deleteBlocked) return;
     const snapshot = saved;
-    setDeleteOpen(false);
-    setSaveState("idle");
-    setDeleteFailure(null);
-    setDeleteNotice(null);
-    setReadFailure(null);
-    setComparison(null);
+    // A pending creation cannot coexist with a saved note, so it is left untouched.
+    resetSelectionState({ creation: false });
     busyRef.current = true;
     setDeleting(true);
     let nextId: string | null = null;
@@ -458,43 +463,24 @@ export function NotesWorkspace({
     if (nextId) await openNote(nextId);
   }
 
-  const status =
-    loadState === "loading"
-      ? "Loading notes..."
-      : loadState !== "ready"
-        ? failureMessage(loadState, "list")
-        : openingId
-          ? "Opening note..."
-          : deleting
-            ? "Deleting note..."
-            : readFailure
-              ? readFailure.kind === "missing"
-                ? "This note is no longer available. Your current text is unchanged. Refresh the notes list or choose another note."
-                : failureMessage(readFailure.kind, "read")
-              : writesForbidden
-                ? failureMessage("forbidden", deleteFailure === "forbidden" ? "delete" : "save")
-                : deleteFailure
-                  ? failureMessage(deleteFailure, "delete")
-                  : saveState === "saving"
-                    ? draft && savingSnapshot
-                      ? savingMessage(draft, savingSnapshot)
-                      : "Saving..."
-                    : saveState !== "idle"
-                      ? saveState === "failed" && saved === null
-                        ? "Could not confirm creation. Your text is preserved. The note may already exist. Save again to recover the same creation without duplicating it."
-                        : failureMessage(saveState, "save")
-                      : (deleteNotice ??
-                        (dirty
-                          ? "Unsaved changes"
-                          : draft && saved === null
-                            ? "New note"
-                            : draft
-                              ? example
-                                ? "Saved for this preview session"
-                                : "Saved"
-                              : "Select a note or create a new one."));
+  const status = statusMessage({
+    loadState,
+    opening: openingId !== null,
+    deleting,
+    readFailure: readFailure?.kind ?? null,
+    writesForbidden,
+    deleteFailure,
+    saveState,
+    draft,
+    savingSnapshot,
+    hasSaved: saved !== null,
+    deleteNotice,
+    dirty,
+    example,
+  });
   const failed =
     !busy && ((recoveryKind !== null && recoveryKind !== "unavailable") || writesForbidden);
+  const unsavedNotice = readFailure && dirty ? "Unsaved changes" : null;
 
   return (
     <main className="notes-workspace space-y-5 p-4 sm:p-6">
@@ -509,12 +495,18 @@ export function NotesWorkspace({
         </Button>
         <div className="workspace-save-controls">
           <div className="workspace-save-status">
-            <p role={failed ? "alert" : "status"} className="text-sm">
-              {status}
-            </p>
-            {readFailure && dirty && (
+            {/* Both live regions stay mounted so a status-to-failure switch is announced. */}
+            <div>
               <p role="status" className="text-sm">
-                Unsaved changes
+                {failed ? unsavedNotice : status}
+              </p>
+              <p role="alert" className="text-sm">
+                {failed ? status : null}
+              </p>
+            </div>
+            {!failed && unsavedNotice && (
+              <p role="status" className="text-sm">
+                {unsavedNotice}
               </p>
             )}
             {deleteFailure === "failed" && saved && (
@@ -547,13 +539,7 @@ export function NotesWorkspace({
               </Button>
             )}
             {recoveryKind === "unauthenticated" && (
-              <a
-                ref={signInRef}
-                className="inline-flex min-h-11 items-center underline underline-offset-4"
-                href="/api/auth/login"
-              >
-                Sign in again
-              </a>
+              <SignInLink ref={signInRef}>Sign in again</SignInLink>
             )}
             {recoveryKind === "missing" && (
               <div className="flex flex-wrap gap-3">
@@ -631,20 +617,22 @@ export function NotesWorkspace({
                     : "No notes yet. Create a new note to get started."}
                 </p>
               ) : (
-                <div className="flex flex-wrap gap-2 lg:flex-col">
+                <ul className="flex flex-wrap gap-2 lg:flex-col">
                   {notes.map((note) => (
-                    <Button
-                      key={note.id}
-                      variant={saved?.note.id === note.id ? "secondary" : "outline"}
-                      aria-current={saved?.note.id === note.id ? "true" : undefined}
-                      disabled={busy || blocked}
-                      className="note-list-button"
-                      onClick={() => requestSelection({ kind: "read", id: note.id })}
-                    >
-                      {note.title || "Untitled note"}
-                    </Button>
+                    // A grid item stretches, so the button keeps its full column width.
+                    <li key={note.id} className="grid">
+                      <Button
+                        variant={saved?.note.id === note.id ? "secondary" : "outline"}
+                        aria-current={saved?.note.id === note.id ? "true" : undefined}
+                        disabled={busy || blocked}
+                        className="note-list-button"
+                        onClick={() => requestSelection({ kind: "read", id: note.id })}
+                      >
+                        {note.title || "Untitled note"}
+                      </Button>
+                    </li>
                   ))}
-                </div>
+                </ul>
               )}
             </nav>
             {draft && (
@@ -748,7 +736,7 @@ export function NotesWorkspace({
             onCheckNotes={refreshNotes}
             onSaved={(snapshot) =>
               setNotes((current) => [
-                snapshot.note,
+                toSummary(snapshot.note),
                 ...current.filter((note) => note.id !== snapshot.note.id),
               ])
             }

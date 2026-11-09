@@ -1,13 +1,15 @@
 import { Hono } from "hono";
 import { describe, expect, it, vi } from "vite-plus/test";
 import { requireAuth, requireCookieRequestOrigin, type AuthEnv } from "./auth.ts";
+import { sessionCookieName } from "./cookies.ts";
+import { noteTag } from "./db/notes.ts";
 import { createOrganizeRoutes, type OrganizeService } from "./organize-routes.ts";
 import type { OrganizeRunState } from "./organize-runs.ts";
 
 const noteId = "00000000-0000-4000-8000-000000000001";
 const runId = "00000000-0000-4000-8000-000000000002";
 const ownerId = "synthetic-owner";
-const sourceTag = JSON.stringify(`${noteId}:1`);
+const sourceTag = noteTag(noteId, 1);
 const endpoints = [
   ["POST", `/notes/${noteId}/organize`, "start"],
   ["GET", `/organize-runs/${runId}`, "read"],
@@ -327,7 +329,10 @@ describe("organizer HTTP boundary", () => {
       const backend = service();
       const response = await app(backend).request(`/api${path}`, {
         method,
-        headers: { Cookie: "atlas_session=synthetic", Origin: "https://attacker.example" },
+        headers: {
+          Cookie: `${sessionCookieName(true)}=synthetic`,
+          Origin: "https://attacker.example",
+        },
       });
       expect(response.status).toBe(403);
       for (const operation of Object.values(backend)) expect(operation).not.toHaveBeenCalled();

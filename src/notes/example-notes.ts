@@ -5,7 +5,7 @@ import {
   updateNoteSchema,
   type Note,
 } from "../../shared/notes";
-import { createNotesClient } from "./notes-store";
+import { createNotesClient, toSummary } from "./notes-store";
 
 const exampleNotes: Note[] = [
   {
@@ -62,12 +62,8 @@ export function createPreviewStore(scenario: string | null) {
         failLoad = false;
         return fail(500, "INTERNAL_ERROR");
       }
-      return Response.json({
-        notes: [...notes.values()].map((note) => ({
-          ...note,
-          content: "List record only. Open this note to edit it.",
-        })),
-      });
+      // List rows carry no content, as in production; opening a note reads it individually.
+      return Response.json({ notes: [...notes.values()].map(toSummary) });
     }
     if (method === "GET" && id !== null) {
       if (scenario === "missing-read") return fail(404, "NOT_FOUND");

@@ -5,10 +5,11 @@ import { noteOriginSchema } from "../../shared/organize.ts";
 import { canonicalJson, documentContentSchema } from "../../shared/document.ts";
 import {
   createNoteKeySchema,
-  createNoteSchema,
   noteIdSchema,
-  updateNoteSchema,
+  type CreateNote,
   type Note,
+  type NoteSummary,
+  type UpdateNote,
 } from "../../shared/notes.ts";
 import type { openDatabase } from "./connection.ts";
 import { noteCreateRequests, notes } from "./schema.ts";
@@ -16,6 +17,7 @@ import { requestNoteIndex } from "./note-index-intents.ts";
 
 type Database = ReturnType<typeof openDatabase>["db"];
 type Row = typeof notes.$inferSelect;
+type SummaryRow = Pick<Row, "id" | "title" | "origin" | "createdAt" | "updatedAt">;
 
 export type StoredNote = { note: Note; revision: number };
 export type NoteWriteResult =
@@ -26,30 +28,50 @@ export type NoteWriteResult =
 const revisionSchema = z.number().int().positive().max(2_147_483_647);
 const ownerSchema = z.string().min(1);
 
-export function storedNote(row: Row): StoredNote {
+/** Strong ETag for one note revision. Routes and tests use this, never a copied template. */
+export function noteTag(id: string, revision: number): string {
+  return JSON.stringify(`${id}:${revision}`);
+}
+
+function noteSummary(row: SummaryRow): NoteSummary {
   return {
-    note: {
-      id: row.id,
-      title: row.title,
-      content: documentContentSchema.parse(row.content),
-      ...(row.origin ? { origin: noteOriginSchema.parse(row.origin) } : {}),
-      createdAt: new Date(row.createdAt).toISOString(),
-      updatedAt: new Date(row.updatedAt).toISOString(),
-    },
+    id: row.id,
+    title: row.title,
+    ...(row.origin ? { origin: noteOriginSchema.parse(row.origin) } : {}),
+    createdAt: new Date(row.createdAt).toISOString(),
+    updatedAt: new Date(row.updatedAt).toISOString(),
+  };
+}
+
+/** Parses stored content because legacy JSONB rows predate the document schema. */
+export function storedNote(row: Row): StoredNote {
+  const { id, title, ...metadata } = noteSummary(row);
+  return {
+    note: { id, title, content: documentContentSchema.parse(row.content), ...metadata },
     revision: row.revision,
   };
 }
 
-/** ownerId must come from verified server identity, never from request JSON. */
+/**
+ * ownerId must come from verified server identity, never from request JSON.
+ * Note input arrives already parsed by the routes. Writes name each column,
+ * so stray keys never reach a row.
+ */
 export function createNoteStore(db: Database) {
   return {
-    async create(ownerId: string, input: unknown): Promise<StoredNote> {
+    /** Test support only; routes use createIdempotent. */
+    async create(ownerId: string, data: CreateNote): Promise<StoredNote> {
       const owner = ownerSchema.parse(ownerId);
-      const data = createNoteSchema.parse(input);
       return db.transaction(async (tx) => {
         const [row] = await tx
           .insert(notes)
-          .values({ ...data, ownerId: owner, updatedAt: data.createdAt })
+          .values({
+            ownerId: owner,
+            title: data.title,
+            content: data.content,
+            createdAt: data.createdAt,
+            updatedAt: data.createdAt,
+          })
           .returning();
         await requestNoteIndex(tx, row);
         return storedNote(row);
@@ -59,11 +81,10 @@ export function createNoteStore(db: Database) {
     async createIdempotent(
       ownerId: string,
       key: string,
-      input: unknown,
+      data: CreateNote,
     ): Promise<{ status: "saved"; value: StoredNote } | { status: "conflict" }> {
       const owner = ownerSchema.parse(ownerId);
       const creationKey = createNoteKeySchema.parse(key);
-      const data = createNoteSchema.parse(input);
       const payloadHash = createHash("sha256")
         .update(canonicalJson([data.title, data.content, data.createdAt]))
         .digest("hex");
@@ -78,7 +99,14 @@ export function createNoteStore(db: Database) {
           if (inserted) {
             const [row] = await tx
               .insert(notes)
-              .values({ ...data, id: noteId, ownerId: owner, updatedAt: data.createdAt })
+              .values({
+                id: noteId,
+                ownerId: owner,
+                title: data.title,
+                content: data.content,
+                createdAt: data.createdAt,
+                updatedAt: data.createdAt,
+              })
               .returning();
             await requestNoteIndex(tx, row);
             return { status: "saved", value: storedNote(row) };
@@ -105,13 +133,20 @@ export function createNoteStore(db: Database) {
       );
     },
 
-    async list(ownerId: string): Promise<Note[]> {
+    /** Metadata only: the list never reads or parses note content. */
+    async list(ownerId: string): Promise<NoteSummary[]> {
       const rows = await db
-        .select()
+        .select({
+          id: notes.id,
+          title: notes.title,
+          origin: notes.origin,
+          createdAt: notes.createdAt,
+          updatedAt: notes.updatedAt,
+        })
         .from(notes)
         .where(eq(notes.ownerId, ownerSchema.parse(ownerId)))
         .orderBy(desc(notes.updatedAt), notes.id);
-      return rows.map((row) => storedNote(row).note);
+      return rows.map((row) => noteSummary(row));
     },
 
     async read(ownerId: string, id: string): Promise<StoredNote | undefined> {
@@ -128,12 +163,11 @@ export function createNoteStore(db: Database) {
       ownerId: string,
       id: string,
       expectedRevision: number,
-      input: unknown,
+      data: UpdateNote,
     ): Promise<NoteWriteResult> {
       const owner = ownerSchema.parse(ownerId);
       const noteId = noteIdSchema.parse(id);
       const expected = revisionSchema.parse(expectedRevision);
-      const data = updateNoteSchema.parse(input);
       return db.transaction(async (tx) => {
         const scope = and(eq(notes.ownerId, owner), eq(notes.id, noteId));
         const [current] = await tx.select().from(notes).where(scope).for("update");
@@ -141,7 +175,12 @@ export function createNoteStore(db: Database) {
         if (current.revision !== expected) return { status: "conflict" };
         const [row] = await tx
           .update(notes)
-          .set({ ...data, updatedAt: sql`clock_timestamp()`, revision: sql`${notes.revision} + 1` })
+          .set({
+            title: data.title,
+            content: data.content,
+            updatedAt: sql`clock_timestamp()`,
+            revision: sql`${notes.revision} + 1`,
+          })
           .where(and(scope, eq(notes.revision, expected)))
           .returning();
         await requestNoteIndex(tx, row);

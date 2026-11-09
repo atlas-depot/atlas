@@ -1,11 +1,11 @@
-import { and, eq, gt, inArray, lte, sql } from "drizzle-orm";
+import { and, count, eq, gt, inArray, lte, sql } from "drizzle-orm";
 import { z } from "zod";
 import { noteIdSchema } from "../../shared/notes.ts";
 import { organizerContent } from "../../shared/document.ts";
+import type { OrganizeRunState as PublicOrganizeRunState } from "../../shared/organize.ts";
 import { generatedDraftSchema, organizeUsageSchema, type OrganizeUsage } from "../organize-note.ts";
-import type { OrganizeRunState } from "../organize-runs.ts";
 import type { openDatabase } from "./connection.ts";
-import { storedNote, type StoredNote } from "./notes.ts";
+import { noteTag, storedNote, type StoredNote } from "./notes.ts";
 import { createNoteDraftStore } from "./note-drafts.ts";
 import { noteDrafts, notes, organizeRuns } from "./schema.ts";
 
@@ -49,12 +49,25 @@ const stateSchema = z.union([
     lastProgressAt: z.number().int().nonnegative().safe().optional(),
     stalled: z.boolean().optional(),
   }),
-  z.strictObject({ status: z.enum(["not_found", "cancelled", "cleaning", "expired"]) }),
+  z.strictObject({ status: z.literal("not_found") }),
+  z.strictObject({ status: z.enum(["cancelled", "cleaning", "expired"]) }),
   z.strictObject({
     status: z.literal("failed"),
     reason: z.enum(["cleanup_failed", "read_failed", "generation_failed", "invalid_draft"]),
   }),
 ]);
+/** The one definition of a run's state. Services and the table column use this type. */
+export type OrganizeRunState = z.infer<typeof stateSchema>;
+
+type MutuallyAssignable<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) : false;
+type Expect<T extends true> = T;
+/**
+ * Compile-time drift check against the public projection in shared/organize.ts.
+ * Only not_found is private: routes answer it with 404 instead of a run body.
+ */
+export type OrganizeRunStateContract = Expect<
+  MutuallyAssignable<Exclude<OrganizeRunState, { status: "not_found" }>, PublicOrganizeRunState>
+>;
 const inputSchema = z.strictObject({ title: z.string(), content: z.string() }).nullable();
 const runtimeSchema = z
   .strictObject({ sessionId: z.string().min(1), deliveryId: z.string().min(1).nullable() })
@@ -94,9 +107,14 @@ function fromRow(row: Row): OrganizeRunRecord {
   };
 }
 
+/** Paid organize runs one account may hold at once, across all of its notes. */
+export const MAX_ACTIVE_RUNS_PER_OWNER = 3;
+
+export type OrganizeClaimFailure = "stale" | "unresolved" | "limit";
+
 export class OrganizeClaimError extends Error {
-  readonly reason: "stale" | "unresolved";
-  constructor(reason: "stale" | "unresolved") {
+  readonly reason: OrganizeClaimFailure;
+  constructor(reason: OrganizeClaimFailure) {
     super("Organizer precondition failed.");
     this.reason = reason;
   }
@@ -123,59 +141,74 @@ export function createOrganizeRunStore(db: Database) {
       const owner = ownerSchema.parse(ownerId);
       const id = noteIdSchema.parse(noteId);
       const target = runtimeUrlSchema.parse(runtimeUrl);
-      return db.transaction(async (tx) => {
-        // Serializes claim with note edits/deletion and captures one exact source revision.
-        const [note] = await tx
-          .select()
-          .from(notes)
-          .where(and(eq(notes.ownerId, owner), eq(notes.id, id)))
-          .for("update");
-        if (!note) return undefined;
-        if (
-          expectedTag !== undefined &&
-          expectedTag !== JSON.stringify(`${note.id}:${note.revision}`)
-        )
-          throw new OrganizeClaimError("stale");
-        const [draft] = await tx
-          .select({ id: noteDrafts.id })
-          .from(noteDrafts)
-          .where(
-            and(
-              eq(noteDrafts.ownerId, owner),
-              eq(noteDrafts.sourceNoteId, id),
-              gt(noteDrafts.expiresAt, sql`clock_timestamp()`),
-            ),
+      return db.transaction(
+        async (tx) => {
+          // Serializes claim with note edits/deletion and captures one exact source revision.
+          const [note] = await tx
+            .select()
+            .from(notes)
+            .where(and(eq(notes.ownerId, owner), eq(notes.id, id)))
+            .for("update");
+          if (!note) return undefined;
+          if (expectedTag !== undefined && expectedTag !== noteTag(note.id, note.revision))
+            throw new OrganizeClaimError("stale");
+          const [draft] = await tx
+            .select({ id: noteDrafts.id })
+            .from(noteDrafts)
+            .where(
+              and(
+                eq(noteDrafts.ownerId, owner),
+                eq(noteDrafts.sourceNoteId, id),
+                gt(noteDrafts.expiresAt, sql`clock_timestamp()`),
+              ),
+            );
+          if (draft) throw new OrganizeClaimError("unresolved");
+          const [existing] = await tx
+            .select()
+            .from(organizeRuns)
+            .where(
+              and(
+                eq(organizeRuns.ownerId, owner),
+                eq(organizeRuns.noteId, id),
+                eq(organizeRuns.active, true),
+              ),
+            );
+          if (existing) {
+            if (expectedTag !== undefined && existing.sourceRevision !== note.revision)
+              throw new OrganizeClaimError("unresolved");
+            return fromRow(existing);
+          }
+          // The note lock above only serializes claims for one note. This transaction-scoped
+          // lock serializes claims across one owner's notes, so the count cannot race an insert.
+          await tx.execute(
+            sql`SELECT pg_advisory_xact_lock(hashtextextended(${`organize:${owner}`}, 0))`,
           );
-        if (draft) throw new OrganizeClaimError("unresolved");
-        const [existing] = await tx
-          .select()
-          .from(organizeRuns)
-          .where(
-            and(
-              eq(organizeRuns.ownerId, owner),
-              eq(organizeRuns.noteId, id),
-              eq(organizeRuns.active, true),
-            ),
-          );
-        if (existing) {
-          if (expectedTag !== undefined && existing.sourceRevision !== note.revision)
-            throw new OrganizeClaimError("unresolved");
-          return fromRow(existing);
-        }
-        const [created] = await tx
-          .insert(organizeRuns)
-          .values({
-            ownerId: owner,
-            noteId: id,
-            sourceRevision: note.revision,
-            runtimeUrl: target,
-            input: { title: note.title, content: organizerContent(storedNote(note).note.content) },
-            state: { status: "running", phase: "starting" },
-            active: true,
-          })
-          .returning();
-        return fromRow(created);
-      });
+          const [active] = await tx
+            .select({ total: count() })
+            .from(organizeRuns)
+            .where(and(eq(organizeRuns.ownerId, owner), eq(organizeRuns.active, true)));
+          if (!active || active.total >= MAX_ACTIVE_RUNS_PER_OWNER)
+            throw new OrganizeClaimError("limit");
+          const [created] = await tx
+            .insert(organizeRuns)
+            .values({
+              ownerId: owner,
+              noteId: id,
+              sourceRevision: note.revision,
+              runtimeUrl: target,
+              input: {
+                title: note.title,
+                content: organizerContent(storedNote(note).note.content),
+              },
+              state: { status: "running", phase: "starting" },
+              active: true,
+            })
+            .returning();
+          return fromRow(created);
+        },
+        // Each statement must see claims committed before this one took the owner lock.
+        { isolationLevel: "read committed" },
+      );
     },
 
     async read(ownerId: string, runId: string): Promise<OrganizeRunRecord | undefined> {

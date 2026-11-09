@@ -4,9 +4,15 @@ import { createApp } from "./app.ts";
 import { createAuthRoutes } from "./auth-routes.ts";
 import { createRequestAuthenticator, type AuthenticateRequest } from "./auth.ts";
 import type { BrowserAuth } from "./browser-auth.ts";
-import { LOGIN_TRANSACTION_COOKIE_NAME, SESSION_COOKIE_NAME } from "./cookies.ts";
+import {
+  LOGIN_TRANSACTION_COOKIE_NAME,
+  SESSION_COOKIE_NAME,
+  sessionCookieName,
+} from "./cookies.ts";
 
 const appOrigin = "https://app.example.test";
+// HTTPS origin, so the session cookie carries the __Host- prefix.
+const SESSION_COOKIE = sessionCookieName(true);
 const alice: SessionUser = {
   id: "user_alice",
   email: "alice@example.test",
@@ -15,8 +21,8 @@ const alice: SessionUser = {
 };
 const transactionCookie = `${LOGIN_TRANSACTION_COOKIE_NAME}=txn; Path=/api/auth; HttpOnly; SameSite=Lax; Secure; Max-Age=600`;
 const clearTransactionCookie = `${LOGIN_TRANSACTION_COOKIE_NAME}=; Path=/api/auth; HttpOnly; SameSite=Lax; Secure; Max-Age=0`;
-const sessionCookie = `${SESSION_COOKIE_NAME}=session_fixture; Path=/; HttpOnly; SameSite=Lax; Secure`;
-const clearSessionCookie = `${SESSION_COOKIE_NAME}=; Path=/; HttpOnly; SameSite=Lax; Secure; Max-Age=0`;
+const sessionCookie = `${SESSION_COOKIE}=session_fixture; Path=/; HttpOnly; SameSite=Lax; Secure`;
+const clearSessionCookie = `${SESSION_COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Secure; Max-Age=0`;
 
 type FakeOptions = {
   user?: SessionUser | null;
@@ -202,7 +208,7 @@ describe("public authentication routes", () => {
 
   it("returns the browser session without tokens", async () => {
     const response = await createTestApp(fakeBrowserAuth()).request("/api/auth/session", {
-      headers: { Cookie: `${SESSION_COOKIE_NAME}=session_fixture` },
+      headers: { Cookie: `${SESSION_COOKIE}=session_fixture` },
     });
     expect(response.status).toBe(200);
     const body: unknown = await response.json();
@@ -227,7 +233,7 @@ describe("public authentication routes", () => {
         "/api/auth/session",
         {
           headers: {
-            Cookie: `${SESSION_COOKIE_NAME}=session_fixture`,
+            Cookie: `${SESSION_COOKIE}=session_fixture`,
             Authorization: authorization,
           },
         },
@@ -256,7 +262,7 @@ describe("public authentication routes", () => {
     }));
     const response = await createTestApp(fakeBrowserAuth({ logout })).request("/api/auth/logout", {
       method: "POST",
-      headers: { Origin: appOrigin, Cookie: `${SESSION_COOKIE_NAME}=session_fixture` },
+      headers: { Origin: appOrigin, Cookie: `${SESSION_COOKIE}=session_fixture` },
     });
     expect(response.status).toBe(303);
     expect(response.headers.get("Location")).toBe(
@@ -274,7 +280,7 @@ describe("public authentication routes", () => {
         sessionCookie: clearSessionCookie,
       }));
       const headers: Record<string, string> = {
-        Cookie: `${SESSION_COOKIE_NAME}=session_fixture`,
+        Cookie: `${SESSION_COOKIE}=session_fixture`,
       };
       if (origin) headers.Origin = origin;
       const response = await createTestApp(fakeBrowserAuth({ logout })).request(
@@ -300,7 +306,7 @@ describe("public authentication routes", () => {
           method: "POST",
           headers: {
             Origin: appOrigin,
-            Cookie: `${SESSION_COOKIE_NAME}=session_fixture`,
+            Cookie: `${SESSION_COOKIE}=session_fixture`,
             Authorization: authorization,
           },
         },
@@ -320,11 +326,13 @@ describe("protected API origin boundary", () => {
       const auth = fakeBrowserAuth({ authenticate: authenticateRequest });
       const app = createTestApp(auth, authenticateRequest);
       const unsafeRequests: Array<Record<string, string>> = [
-        { Cookie: `${SESSION_COOKIE_NAME}=session_fixture` },
+        { Cookie: `${SESSION_COOKIE}=session_fixture` },
         {
-          Cookie: `${SESSION_COOKIE_NAME}=session_fixture`,
+          Cookie: `${SESSION_COOKIE}=session_fixture`,
           Origin: "https://evil.example.test",
         },
+        // A leftover unprefixed cookie still counts as ambient identity.
+        { Cookie: `${SESSION_COOKIE_NAME}=session_fixture`, Origin: "https://evil.example.test" },
       ];
       for (const headers of unsafeRequests) {
         const response = await app.request(notesPath(method), { method, headers });
@@ -346,7 +354,7 @@ describe("protected API origin boundary", () => {
       const response = await app.request(notesPath(method), {
         method,
         headers: {
-          Cookie: `${SESSION_COOKIE_NAME}=session_fixture`,
+          Cookie: `${SESSION_COOKIE}=session_fixture`,
           Origin: appOrigin,
         },
       });
@@ -357,7 +365,7 @@ describe("protected API origin boundary", () => {
 
   it("does not require an origin for safe methods", async () => {
     const response = await createTestApp(fakeBrowserAuth()).request("/api/notes", {
-      headers: { Cookie: `${SESSION_COOKIE_NAME}=session_fixture` },
+      headers: { Cookie: `${SESSION_COOKIE}=session_fixture` },
     });
     expect(response.status).toBe(503);
   });
@@ -373,7 +381,7 @@ describe("protected API origin boundary", () => {
       const response = await app.request(notesPath(method), {
         method,
         headers: {
-          Cookie: `${SESSION_COOKIE_NAME}=session_fixture`,
+          Cookie: `${SESSION_COOKIE}=session_fixture`,
           Authorization: "Bearer fake",
         },
       });
@@ -396,7 +404,7 @@ describe("protected API origin boundary", () => {
         const response = await app.request(notesPath(method), {
           method,
           headers: {
-            Cookie: `${SESSION_COOKIE_NAME}=session_fixture`,
+            Cookie: `${SESSION_COOKIE}=session_fixture`,
             Authorization: authorization,
           },
         });
@@ -415,7 +423,7 @@ describe("protected API origin boundary", () => {
       fakeBrowserAuth({ authenticate: authenticateRequest }),
       authenticateRequest,
     ).request("/api/notes", {
-      headers: { Cookie: `${SESSION_COOKIE_NAME}=old` },
+      headers: { Cookie: `${SESSION_COOKIE}=old` },
     });
     expect(response.status).toBe(503);
     expect(response.headers.getSetCookie()).toEqual([sessionCookie]);

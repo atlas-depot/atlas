@@ -26,11 +26,13 @@ export const noteSchema = createNoteSchema.extend({
   /** Initially createdAt; the server sets this on successful edits, not for conflict detection. */
   updatedAt: z.iso.datetime(),
 });
-export const noteListSchema = z.strictObject({ notes: z.array(noteSchema) });
+/** List rows carry metadata only; clients open a note individually for its content and ETag. */
+export const noteSummarySchema = noteSchema.omit({ content: true });
+export const noteListSchema = z.strictObject({ notes: z.array(noteSummarySchema) });
 
 /**
  * REST contract under /api/notes:
- * POST: CreateNote -> 201 Note; GET: -> 200 { notes: Note[] }.
+ * POST: CreateNote -> 201 Note; GET: -> 200 { notes: NoteSummary[] } (no content).
  * GET /:id: -> 200 Note; PUT /:id: UpdateNote -> 200 Note; DELETE /:id: -> 204.
  * Individual Note responses carry ETag; PUT replaces both editable fields.
  * POST requires a UUID Idempotency-Key. Matching, unchanged replays return the same 201/ETag.
@@ -41,5 +43,6 @@ export const noteListSchema = z.strictObject({ notes: z.array(noteSchema) });
  * Ownership comes only from the verified user. Clients never supply owner IDs.
  */
 export type Note = z.infer<typeof noteSchema>;
+export type NoteSummary = z.infer<typeof noteSummarySchema>;
 export type CreateNote = z.infer<typeof createNoteSchema>;
 export type UpdateNote = z.infer<typeof updateNoteSchema>;

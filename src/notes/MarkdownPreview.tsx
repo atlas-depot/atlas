@@ -1,13 +1,12 @@
-import Markdown from "react-markdown";
-import remarkGfm from "remark-gfm";
+import { lazy, Suspense } from "react";
 
-/** Keep the renderer's safe URL defaults. Never enable raw HTML parsing here. */
+// react-markdown and remark-gfm load in their own chunk, only once a preview is shown.
+const MarkdownRenderer = lazy(() => import("./MarkdownRenderer"));
+
 export function MarkdownPreview({ content }: { content: string }) {
   return (
-    <section className="markdown-preview" aria-label="Markdown preview">
-      <Markdown skipHtml remarkPlugins={[remarkGfm]} disallowedElements={["img"]}>
-        {content}
-      </Markdown>
-    </section>
+    <Suspense fallback={null}>
+      <MarkdownRenderer content={content} />
+    </Suspense>
   );
 }

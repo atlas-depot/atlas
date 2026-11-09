@@ -113,3 +113,48 @@ export function failureMessage(
             : "Save failed. Your changes are still here. Try again.";
   }
 }
+
+/** The workspace state the header status line reads. Plain values, so precedence is testable. */
+export type StatusView = {
+  loadState: "loading" | "ready" | RequestFailure;
+  opening: boolean;
+  deleting: boolean;
+  readFailure: RequestFailure | null;
+  writesForbidden: boolean;
+  deleteFailure: RequestFailure | null;
+  saveState: "idle" | "saving" | RequestFailure;
+  draft: EditableContent | null;
+  savingSnapshot: EditableContent | null;
+  hasSaved: boolean;
+  deleteNotice: string | null;
+  dirty: boolean;
+  example: boolean;
+};
+
+/** The header message. Earlier checks win: loading, requests, failures, then edits. */
+export function statusMessage(view: StatusView): string {
+  if (view.loadState === "loading") return "Loading notes...";
+  if (view.loadState !== "ready") return failureMessage(view.loadState, "list");
+  if (view.opening) return "Opening note...";
+  if (view.deleting) return "Deleting note...";
+  if (view.readFailure)
+    return view.readFailure === "missing"
+      ? "This note is no longer available. Your current text is unchanged. Refresh the notes list or choose another note."
+      : failureMessage(view.readFailure, "read");
+  if (view.writesForbidden)
+    return failureMessage("forbidden", view.deleteFailure === "forbidden" ? "delete" : "save");
+  if (view.deleteFailure) return failureMessage(view.deleteFailure, "delete");
+  if (view.saveState === "saving")
+    return view.draft && view.savingSnapshot
+      ? savingMessage(view.draft, view.savingSnapshot)
+      : "Saving...";
+  if (view.saveState !== "idle")
+    return view.saveState === "failed" && !view.hasSaved
+      ? "Could not confirm creation. Your text is preserved. The note may already exist. Save again to recover the same creation without duplicating it."
+      : failureMessage(view.saveState, "save");
+  if (view.deleteNotice !== null) return view.deleteNotice;
+  if (view.dirty) return "Unsaved changes";
+  if (view.draft && !view.hasSaved) return "New note";
+  if (view.draft) return view.example ? "Saved for this preview session" : "Saved";
+  return "Select a note or create a new one.";
+}

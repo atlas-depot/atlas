@@ -7,6 +7,11 @@ import { afterAll, beforeAll, expect, it } from "vite-plus/test";
 import { openDatabase, readTestDatabaseUrl } from "./connection.ts";
 import { createNoteStore } from "./notes.ts";
 import { noteCreateRequests } from "./schema.ts";
+import type { Note, NoteSummary } from "../../shared/notes.ts";
+
+function summaryOf({ id, title, createdAt, updatedAt, origin }: Note): NoteSummary {
+  return { id, title, createdAt, updatedAt, origin };
+}
 
 const databaseName = `atlas_idempotency_${randomUUID().replaceAll("-", "")}`;
 let admin: Pool;
@@ -62,7 +67,7 @@ it("replays a lost response across connections without changing identity, timest
     title: draft.title,
   });
   expect(replay).toEqual(first);
-  expect(await store.list("owner-replay")).toEqual([first.value.note]);
+  expect(await store.list("owner-replay")).toEqual([summaryOf(first.value.note)]);
   const [receipt] = await connection.db
     .select()
     .from(noteCreateRequests)
@@ -97,7 +102,7 @@ it("lets only one of two concurrent payloads claim a creation key", async () => 
   expect(results.map((result) => result.status).sort()).toEqual(["conflict", "saved"]);
   const winner = results.find((result) => result.status === "saved");
   if (!winner || winner.status !== "saved") throw new Error("Expected one winner");
-  expect(await store.list("owner-competing")).toEqual([winner.value.note]);
+  expect(await store.list("owner-competing")).toEqual([summaryOf(winner.value.note)]);
 });
 
 it("rejects changes to each field without modifying the original creation", async () => {
@@ -127,8 +132,8 @@ it("scopes keys to verified owners and does not return another account's note", 
   if (first.status !== "saved" || second.status !== "saved")
     throw new Error("Expected saved notes");
   expect(first.value.note.id).not.toBe(second.value.note.id);
-  expect(await store.list("owner-a")).toEqual([first.value.note]);
-  expect(await store.list("owner-b")).toEqual([second.value.note]);
+  expect(await store.list("owner-a")).toEqual([summaryOf(first.value.note)]);
+  expect(await store.list("owner-b")).toEqual([summaryOf(second.value.note)]);
   expect(await store.read("owner-a", second.value.note.id)).toBeUndefined();
 });
 
@@ -183,13 +188,10 @@ it("rolls back the claimed key when insertion fails, allowing the unchanged requ
   expect(await store.list("owner-rollback")).toHaveLength(1);
 });
 
-it("validates owner, key and strict payload before reserving a creation", async () => {
+it("validates owner and key before reserving a creation", async () => {
   const key = randomUUID();
   await expect(store.createIdempotent("", key, draft)).rejects.toThrow();
   await expect(store.createIdempotent("owner-invalid", "bad-key", draft)).rejects.toThrow();
-  await expect(
-    store.createIdempotent("owner-invalid", key, { ...draft, ownerId: "injected" }),
-  ).rejects.toThrow();
   expect(await store.list("owner-invalid")).toEqual([]);
   expect(
     await connection.db

@@ -6,6 +6,8 @@ import {
   hasUnsavedChanges,
   sameContent,
   savingMessage,
+  statusMessage,
+  type StatusView,
 } from "./editor-state";
 import { NotesRequestError } from "./notes-store";
 
@@ -116,4 +118,86 @@ it("describes delete failures without implying the note was removed", () => {
 
 it("keeps creation replay conflicts separate from editable-note revision conflicts", () => {
   expect(failureMessage("creation-conflict", "save")).toContain("saving a duplicate is blocked");
+});
+
+describe("header status precedence", () => {
+  const draft = { title: "Note", content: "Current" };
+  const idle: StatusView = {
+    loadState: "ready",
+    opening: false,
+    deleting: false,
+    readFailure: null,
+    writesForbidden: false,
+    deleteFailure: null,
+    saveState: "idle",
+    draft: null,
+    savingSnapshot: null,
+    hasSaved: false,
+    deleteNotice: null,
+    dirty: false,
+    example: false,
+  };
+  it.each<[string, Partial<StatusView>, string]>([
+    ["loading over everything", { loadState: "loading", opening: true }, "Loading notes..."],
+    [
+      "a list failure over opening",
+      { loadState: "failed", opening: true },
+      "Could not load notes. Try again.",
+    ],
+    ["opening over deleting", { opening: true, deleting: true }, "Opening note..."],
+    ["deleting over a read failure", { deleting: true, readFailure: "failed" }, "Deleting note..."],
+    [
+      "a missing read over forbidden writes",
+      { readFailure: "missing", writesForbidden: true },
+      "This note is no longer available. Your current text is unchanged. Refresh the notes list or choose another note.",
+    ],
+    ["another read failure", { readFailure: "failed" }, failureMessage("failed", "read")],
+    [
+      "forbidden writes over a delete failure, worded for the delete",
+      { writesForbidden: true, deleteFailure: "forbidden" },
+      failureMessage("forbidden", "delete"),
+    ],
+    [
+      "forbidden writes after a save",
+      { writesForbidden: true, saveState: "forbidden" },
+      failureMessage("forbidden", "save"),
+    ],
+    [
+      "a delete failure over saving",
+      { deleteFailure: "conflict", saveState: "saving" },
+      failureMessage("conflict", "delete"),
+    ],
+    [
+      "saving with newer edits",
+      { saveState: "saving", draft, savingSnapshot: { title: "Note", content: "Earlier" } },
+      "Saving earlier edits. Newer changes are unsaved.",
+    ],
+    ["saving without a snapshot", { saveState: "saving", draft }, "Saving..."],
+    [
+      "an unconfirmed creation over a delete notice",
+      { saveState: "failed", deleteNotice: "Note deleted. No notes left." },
+      "Could not confirm creation. Your text is preserved. The note may already exist. Save again to recover the same creation without duplicating it.",
+    ],
+    [
+      "a failed update of a saved note",
+      { saveState: "failed", hasSaved: true },
+      "Save failed. Your changes are still here. Try again.",
+    ],
+    [
+      "a delete notice over unsaved changes",
+      { deleteNotice: "Note deleted. No notes left.", dirty: true },
+      "Note deleted. No notes left.",
+    ],
+    ["unsaved changes over a new note", { dirty: true, draft }, "Unsaved changes"],
+    ["a new note", { draft }, "New note"],
+    ["a saved note", { draft, hasSaved: true }, "Saved"],
+    [
+      "a saved preview note",
+      { draft, hasSaved: true, example: true },
+      "Saved for this preview session",
+    ],
+    ["no selection", {}, "Select a note or create a new one."],
+  ])("shows %s", (_name, overrides, expected) => {
+    expect(statusMessage({ ...idle, ...overrides })).toBe(expected);
+  });
 });

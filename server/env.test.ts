@@ -77,6 +77,7 @@ it("maps a complete organizer configuration alongside browser authentication", (
       appOrigin: "https://app.example.test",
       apiKey: "sk_test_fixture",
       cookiePassword: "c".repeat(32),
+      sessionMaxAgeSeconds: 2_592_000,
     },
     databaseUrl: organizerSettings.DATABASE_URL,
     organizer: {
@@ -179,11 +180,25 @@ it("accepts the complete browser sign-in configuration", () => {
       appOrigin: "https://app.example.test",
       apiKey: "sk_test_fixture",
       cookiePassword: "c".repeat(32),
+      sessionMaxAgeSeconds: 2_592_000,
     },
   });
   expect(readServerEnv({ ...browserSettings, APP_ORIGIN: "http://localhost:5173" })).toMatchObject({
     browserAuth: { appOrigin: "http://localhost:5173" },
   });
+});
+
+it("bounds the session cookie lifetime to one minute through WorkOS's 400 day maximum", () => {
+  expect(readServerEnv({ ...browserSettings, SESSION_MAX_AGE_SECONDS: "604800" })).toMatchObject({
+    browserAuth: { sessionMaxAgeSeconds: 604_800 },
+  });
+  for (const value of ["0", "59", "34560001", "7d", "-1"]) {
+    expect(() => readServerEnv({ ...browserSettings, SESSION_MAX_AGE_SECONDS: value })).toThrow(
+      /^Set APP_ORIGIN, WORKOS_API_KEY, WORKOS_CLIENT_ID, WORKOS_COOKIE_PASSWORD and WORKOS_ISSUER to valid WorkOS browser sign-in values\.$/,
+    );
+  }
+  // A lifetime alone does not turn browser sign-in on.
+  expect(() => readServerEnv({ SESSION_MAX_AGE_SECONDS: "604800" })).toThrow(/^Set APP_ORIGIN/);
 });
 
 it.each([

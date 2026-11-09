@@ -23,6 +23,7 @@ export const apiErrorSchema = z.strictObject({
       "SERVICE_UNAVAILABLE",
       "PRECONDITION_REQUIRED",
       "PRECONDITION_FAILED",
+      "RATE_LIMITED",
       "NOT_IMPLEMENTED",
       "INTERNAL_ERROR",
     ]),

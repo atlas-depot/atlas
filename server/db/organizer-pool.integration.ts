@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { createServer, type Server } from "node:http";
 import { setTimeout as delay } from "node:timers/promises";
+import { eq } from "drizzle-orm";
 import { Pool } from "pg";
 import { afterAll, afterEach, beforeAll, expect, it } from "vite-plus/test";
 import { createOrganizerBackend } from "../../agents/organizer/backend.ts";
@@ -74,9 +75,11 @@ async function listen(server: Server) {
 }
 
 it("keeps note CRUD available with two held runtime calls and three queued organizer requests", async () => {
-  const owner = randomUUID();
+  // Five owners: the organizer caps active runs per owner at MAX_ACTIVE_RUNS_PER_OWNER.
+  const owners = Array.from({ length: 5 }, () => randomUUID());
+  const owner = owners[4];
   const store = createNoteStore(noteConnection.db);
-  const prepared = await Promise.all(Array.from({ length: 5 }, () => store.create(owner, input)));
+  const prepared = await Promise.all(owners.map((id) => store.create(id, input)));
   const entered = new Set<string>();
   const bothEntered = deferred();
   const release = deferred();
@@ -115,11 +118,13 @@ it("keeps note CRUD available with two held runtime calls and three queued organ
       resultRetentionMs: 900_000,
     });
     starts.push(
-      backend.start(owner, prepared[0].note.id),
-      backend.start(owner, prepared[1].note.id),
+      backend.start(owners[0], prepared[0].note.id),
+      backend.start(owners[1], prepared[1].note.id),
     );
     await bounded(bothEntered.promise);
-    starts.push(...prepared.slice(2).map((note) => backend!.start(owner, note.note.id)));
+    starts.push(
+      ...prepared.slice(2).map((note, index) => backend!.start(owners[index + 2], note.note.id)),
+    );
     const note = prepared[4];
     const updated = await bounded(
       store.update(owner, note.note.id, note.revision, {
@@ -130,7 +135,7 @@ it("keeps note CRUD available with two held runtime calls and three queued organ
     expect(updated.status).toBe("saved");
     const saved = await bounded(store.read(owner, note.note.id));
     expect(saved?.note.content).toBe("The note API still serves writes.");
-    expect((await bounded(store.list(owner))).length).toBe(5);
+    expect((await bounded(store.list(owner))).length).toBe(1);
     expect(released).toBe(false);
     expect(entered.size).toBe(2);
     released = true;
@@ -156,16 +161,18 @@ it("bounds a cancellation lock wait and allows retry after the in-flight transpo
   const entered = deferred();
   const release = deferred();
   let retired = 0;
+  // The row lock is held across allocate and submit on purpose, to serialize short transport
+  // calls. Polling reads inspect outside the lock, so a blocked submit is the held-lock case.
   const runtime: DurableOrganizer = {
     async allocate({ operationId }) {
       return { sessionId: operationId, deliveryId: null };
     },
     async submit({ sessionId, operationId }) {
+      entered.resolve();
+      await release.promise;
       return { sessionId, deliveryId: operationId };
     },
     async inspect() {
-      entered.resolve();
-      await release.promise;
       return { status: "running", phase: "writing" };
     },
     async retire() {
@@ -179,26 +186,31 @@ it("bounds a cancellation lock wait and allows retry after the in-flight transpo
     runtimeFor: () => runtime,
     resultRetentionMs: 900_000,
   });
-  let reading: Promise<unknown> | undefined;
+  let starting: Promise<unknown> | undefined;
   try {
-    const result = await backend.start(owner, note.note.id);
-    assert.ok("runId" in result);
-    reading = backend.read(owner, result.runId);
+    starting = backend.start(owner, note.note.id);
     await bounded(entered.promise);
-    await expect(bounded(backend.cancel(owner, result.runId))).rejects.toMatchObject({
+    const [row] = await organizerConnection.db
+      .select({ id: organizeRuns.id })
+      .from(organizeRuns)
+      .where(eq(organizeRuns.ownerId, owner));
+    assert.ok(row);
+    await expect(bounded(backend.cancel(owner, row.id))).rejects.toMatchObject({
       cause: { code: "55P03" },
     });
     expect(retired).toBe(0);
     release.resolve();
-    await reading;
-    expect(await backend.cancel(owner, result.runId)).toEqual({ status: "cancelled" });
+    const result = await starting;
+    assert.ok(result && typeof result === "object" && "runId" in result);
+    expect(result.runId).toBe(row.id);
+    expect(await backend.cancel(owner, row.id)).toEqual({ status: "cancelled" });
     expect(retired).toBe(1);
-    const record = await store.read(owner, result.runId);
+    const record = await store.read(owner, row.id);
     expect(record?.active).toBe(false);
     expect(record?.runtime).toBeNull();
   } finally {
     release.resolve();
-    await reading;
+    await starting?.catch(() => undefined);
     await organizerConnection.close();
   }
 });

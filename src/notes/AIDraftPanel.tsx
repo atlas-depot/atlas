@@ -14,7 +14,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import type { NoteDraft } from "../../shared/drafts";
 import { noteContentSchema, type UpdateNote } from "../../shared/notes";
-import { sameContent } from "./editor-state";
+import { classifyFailure, sameContent } from "./editor-state";
 import { NotesRequestError, type NoteSnapshot } from "./notes-store";
 import type { OrganizeClient } from "./organize-store";
 import { MarkdownPreview } from "./MarkdownPreview";
@@ -22,6 +22,18 @@ import { MarkdownPreview } from "./MarkdownPreview";
 const Editor = lazy(() =>
   import("./BlockNoteEditor").then((module) => ({ default: module.BlockNoteEditor })),
 );
+
+/** Rich editors keep invalid visible input unpublished, so both checks are needed. */
+function submittable(editorValid: boolean, value: UpdateNote) {
+  return editorValid && noteContentSchema.safeParse(value).success;
+}
+
+/** Drafts have one conflict state: a 409 replay and a 412 stale revision both changed elsewhere. */
+function draftFailure(cause: unknown): "conflict" | "missing" | "failed" {
+  const kind = classifyFailure(cause);
+  if (kind === "creation-conflict" || kind === "conflict") return "conflict";
+  return kind === "missing" ? "missing" : "failed";
+}
 
 export function AIDraftPanel({
   initial,
@@ -57,27 +69,24 @@ export function AIDraftPanel({
   const [editorKey, setEditorKey] = useState(0);
   const current = useRef(content);
   const latest = useRef(remote);
-  const permission = useRef(enabled);
-  const validity = useRef(valid);
+  const enabledRef = useRef(enabled);
   const editorValidity = useRef(true);
   const alive = useRef(true);
   const flight = useRef<Promise<NoteDraft | undefined> | null>(null);
   const actionLock = useRef(false);
   const pendingSave = useRef<{ id: string; input: UpdateNote; etag: string } | null>(null);
   useEffect(() => {
-    permission.current = enabled;
+    enabledRef.current = enabled;
   }, [enabled]);
   const reportEditorValidity = useCallback((editorValid: boolean) => {
     // Rich editors retain invalid visible input without publishing onChange.
     // Update this guard before React renders or any pending refresh resolves.
     editorValidity.current = editorValid;
-    validity.current = editorValid && noteContentSchema.safeParse(current.current).success;
-    setValid(validity.current);
+    setValid(submittable(editorValid, current.current));
   }, []);
   function edit(value: UpdateNote) {
     current.current = value;
-    validity.current = editorValidity.current && noteContentSchema.safeParse(value).success;
-    setValid(validity.current);
+    setValid(submittable(editorValidity.current, value));
     setContent(value);
   }
   const dirty = !valid || !sameContent(content, remote);
@@ -95,14 +104,15 @@ export function AIDraftPanel({
 
   const persist = useCallback((): Promise<NoteDraft | undefined> => {
     if (flight.current) return flight.current;
-    if (!permission.current || !validity.current) return Promise.resolve(undefined);
+    if (!enabledRef.current || !submittable(editorValidity.current, current.current))
+      return Promise.resolve(undefined);
     if (sameContent(current.current, latest.current)) return Promise.resolve(latest.current);
     setSaving(true);
     const run = async () => {
       try {
         while (
-          permission.current &&
-          validity.current &&
+          enabledRef.current &&
+          submittable(editorValidity.current, current.current) &&
           !sameContent(current.current, latest.current)
         ) {
           const submitted = current.current;
@@ -124,14 +134,7 @@ export function AIDraftPanel({
         if (alive.current) setError(null);
         return latest.current;
       } catch (cause) {
-        if (alive.current)
-          setError(
-            cause instanceof NotesRequestError && [409, 412].includes(cause.status)
-              ? "conflict"
-              : cause instanceof NotesRequestError && cause.status === 404
-                ? "missing"
-                : "failed",
-          );
+        if (alive.current) setError(draftFailure(cause));
         return undefined;
       } finally {
         flight.current = null;
@@ -177,7 +180,10 @@ export function AIDraftPanel({
             return;
           // Refresh source deletion/staleness without silently replacing local edits.
           if (value.etag === latest.current.etag) accept(value);
-          else if (validity.current && sameContent(current.current, latest.current)) {
+          else if (
+            submittable(editorValidity.current, current.current) &&
+            sameContent(current.current, latest.current)
+          ) {
             current.current = { title: value.title, content: value.content };
             setContent(current.current);
             accept(value);
@@ -214,7 +220,13 @@ export function AIDraftPanel({
       if (kind === "save") {
         if (!pendingSave.current) {
           const value = await persist();
-          if (!value || !validity.current || !alive.current || !permission.current) return;
+          if (
+            !value ||
+            !submittable(editorValidity.current, current.current) ||
+            !alive.current ||
+            !enabledRef.current
+          )
+            return;
           pendingSave.current = { id: value.id, input: current.current, etag: value.etag };
           setSavePending(true);
         }
@@ -259,14 +271,7 @@ export function AIDraftPanel({
         pendingSave.current = null;
         if (alive.current) setSavePending(false);
       }
-      if (alive.current)
-        setError(
-          cause instanceof NotesRequestError && [409, 412].includes(cause.status)
-            ? "conflict"
-            : cause instanceof NotesRequestError && cause.status === 404
-              ? "missing"
-              : "failed",
-        );
+      if (alive.current) setError(draftFailure(cause));
     } finally {
       actionLock.current = false;
       if (alive.current) setAction(null);

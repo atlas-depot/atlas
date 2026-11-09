@@ -7,6 +7,7 @@ import { organizeRunResponseSchema, organizeStartResponseSchema } from "../share
 import { OrganizeClaimError } from "./db/organize-runs.ts";
 import { createDraftRoutes } from "./draft-routes.ts";
 import type { AuthEnv } from "./auth.ts";
+import { reportStorageFailure } from "./http-errors.ts";
 import type { createDurableOrganizeRuns } from "./organize-runs.ts";
 
 export type OrganizeService = Pick<
@@ -47,19 +48,29 @@ export function createOrganizeRoutes(service?: OrganizeService, onSaved?: NoteSa
       });
       return c.json(response, 202);
     } catch (error) {
-      if (error instanceof OrganizeClaimError)
-        return error.reason === "stale"
-          ? c.json(
-              apiError(
-                "PRECONDITION_FAILED",
-                "The source note changed. Save or reload before organizing.",
-              ),
-              412,
-            )
-          : c.json(
-              apiError("CONFLICT", "Finish the existing draft or run before organizing again."),
-              409,
-            );
+      if (error instanceof OrganizeClaimError) {
+        if (error.reason === "stale")
+          return c.json(
+            apiError(
+              "PRECONDITION_FAILED",
+              "The source note changed. Save or reload before organizing.",
+            ),
+            412,
+          );
+        if (error.reason === "limit")
+          return c.json(
+            apiError(
+              "RATE_LIMITED",
+              "Too many organize runs are in progress. Finish or cancel one, then try again.",
+            ),
+            429,
+          );
+        return c.json(
+          apiError("CONFLICT", "Finish the existing draft or run before organizing again."),
+          409,
+        );
+      }
+      reportStorageFailure(c, error);
       return c.json(unavailable(), 503);
     }
   });
@@ -89,7 +100,8 @@ export function createOrganizeRoutes(service?: OrganizeService, onSaved?: NoteSa
           response.status === "cleaning" ||
           (response.status === "failed" && response.reason === "cleanup_failed");
         return c.json(response, action !== "read" && pending ? 202 : 200);
-      } catch {
+      } catch (error) {
+        reportStorageFailure(c, error);
         return c.json(unavailable(), 503);
       }
     });

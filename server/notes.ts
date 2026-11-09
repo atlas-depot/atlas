@@ -8,14 +8,15 @@ import {
   noteIdSchema,
   updateNoteSchema,
   type CreateNote,
-  type Note,
+  type NoteSummary,
   type UpdateNote,
 } from "../shared/notes.ts";
 import type { AuthEnv } from "./auth.ts";
-import type { NoteWriteResult, StoredNote } from "./db/notes.ts";
+import { noteTag, type NoteWriteResult, type StoredNote } from "./db/notes.ts";
+import { reportStorageFailure } from "./http-errors.ts";
 
 export interface NoteService {
-  list(ownerId: string): Promise<Note[]>;
+  list(ownerId: string): Promise<NoteSummary[]>;
   read(ownerId: string, id: string): Promise<StoredNote | undefined>;
   createIdempotent(
     ownerId: string,
@@ -41,7 +42,7 @@ const unavailable = () =>
 const invalid = () => apiError("VALIDATION_ERROR", "Invalid note request.");
 const stale = () =>
   apiError("PRECONDITION_FAILED", "The note has changed. Reload before retrying.");
-const etag = (value: StoredNote) => JSON.stringify(`${value.note.id}:${value.revision}`);
+const etag = (value: StoredNote) => noteTag(value.note.id, value.revision);
 
 /** Mounted behind requireAuth and the app's cookie-origin protection. */
 export function createNoteRoutes(store?: NoteService, onSaved?: NoteSaved) {
@@ -51,7 +52,8 @@ export function createNoteRoutes(store?: NoteService, onSaved?: NoteSaved) {
     if (!store) return c.json(unavailable(), 503);
     try {
       return c.json({ notes: await store.list(c.get("user").userId) });
-    } catch {
+    } catch (error) {
+      reportStorageFailure(c, error);
       return c.json(unavailable(), 503);
     }
   });
@@ -72,7 +74,8 @@ export function createNoteRoutes(store?: NoteService, onSaved?: NoteSaved) {
       }
       wakeNoteIndex(onSaved, result.value.note.id);
       return c.json(result.value.note, 201, { ETag: etag(result.value) });
-    } catch {
+    } catch (error) {
+      reportStorageFailure(c, error);
       return c.json(unavailable(), 503);
     }
   });
@@ -85,7 +88,8 @@ export function createNoteRoutes(store?: NoteService, onSaved?: NoteSaved) {
       const value = await store.read(c.get("user").userId, id.data);
       if (!value) return c.json(notFound(), 404);
       return c.json(value.note, 200, { ETag: etag(value) });
-    } catch {
+    } catch (error) {
+      reportStorageFailure(c, error);
       return c.json(unavailable(), 503);
     }
   });
@@ -122,7 +126,8 @@ export function createNoteRoutes(store?: NoteService, onSaved?: NoteSaved) {
         return c.json(result.value.note, 200, { ETag: etag(result.value) });
       }
       return c.body(null, 204);
-    } catch {
+    } catch (error) {
+      reportStorageFailure(c, error);
       return c.json(unavailable(), 503);
     }
   });

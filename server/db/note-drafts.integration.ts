@@ -8,7 +8,7 @@ import { createApp } from "../app.ts";
 import { createDurableOrganizeRuns, type DurableOrganizer } from "../organize-runs.ts";
 import { openDatabase, readTestDatabaseUrl } from "./connection.ts";
 import { applyMigrations } from "./migrations.ts";
-import { createNoteStore } from "./notes.ts";
+import { createNoteStore, noteTag } from "./notes.ts";
 import { createNoteDraftStore } from "./note-drafts.ts";
 import { createOrganizeRunStore } from "./organize-runs.ts";
 import { draftSaveRequests, noteDrafts, notes, organizeRuns } from "./schema.ts";
@@ -61,7 +61,7 @@ async function fixture() {
   const foreign = randomUUID();
   const sourceStore = createNoteStore(connection.db);
   const original = await sourceStore.create(owner, input);
-  const tag = JSON.stringify(`${original.note.id}:${original.revision}`);
+  const tag = noteTag(original.note.id, original.revision);
   const clock = Date.now();
   let cleanupUnavailable = false;
   let retired = 0;

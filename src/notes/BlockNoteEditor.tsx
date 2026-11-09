@@ -7,6 +7,7 @@ import { noteSchema as schema } from "./editor-schema";
 import { noteSyntaxHighlighting } from "./code-theme";
 import { createCodePasteHandler } from "./code-detection";
 import { AtlasEditorControls, atlasShadcnComponents } from "./editor-controls";
+import { BlockNoteEditor as CoreEditor } from "@blocknote/core";
 import { useCreateBlockNote } from "@blocknote/react";
 import { BlockNoteView } from "@blocknote/shadcn";
 import { Label } from "@/components/ui/label";
@@ -26,6 +27,12 @@ const links = {
     return noteLinkSchema.safeParse(href).success;
   },
 };
+
+// Legacy Markdown conversion needs only the schema, never a view. One editor, created on
+// first use and never mounted, serves every note instead of one full editor per mount.
+const createMarkdownParser = () => CoreEditor.create({ schema, links });
+let markdownParser: ReturnType<typeof createMarkdownParser> | undefined;
+const getMarkdownParser = () => (markdownParser ??= createMarkdownParser());
 
 type EditorMode = "loading" | "rich" | "source";
 type EditorProps = {
@@ -50,10 +57,10 @@ export function BlockNoteEditor(props: EditorProps) {
 
 function MarkdownNoteEditor(props: EditorProps & { source: string }) {
   const contentId = useId();
-  const parser = useCreateBlockNote({ schema, links });
   const [source, setSource] = useState(props.source);
   const [converted] = useState(() => {
     try {
+      const parser = getMarkdownParser();
       const blocks = parser.tryParseMarkdownToBlocks(props.source);
       const roundtrip = parser.blocksToMarkdownLossy(blocks);
       // User-authored legacy notes retain exact spelling. Generated drafts may

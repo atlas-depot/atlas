@@ -1,4 +1,4 @@
-import hljs from "highlight.js/lib/common";
+import type { HLJSApi } from "highlight.js";
 import { blockToNode } from "@blocknote/core";
 import { closeHistory } from "@tiptap/pm/history";
 import { bundledLanguagesInfo } from "shiki/langs";
@@ -9,6 +9,23 @@ const explicitChoices = new WeakMap<object, Set<string>>();
 const maximumDetectionLength = 20_000;
 const codeLanguageSchema = noteTextSchema.max(128);
 
+// highlight.js is only needed on paste, so it loads in its own chunk once an editor exists.
+let highlighter: HLJSApi | undefined;
+let loading: Promise<void> | undefined;
+
+/** Starts loading the detector once; a failed load is retried on the next call. */
+export function loadCodeDetection(): Promise<void> {
+  loading ??= import("highlight.js/lib/common").then(
+    (module) => {
+      highlighter = module.default;
+    },
+    () => {
+      loading = undefined;
+    },
+  );
+  return loading;
+}
+
 /** Choosing Plain text is just as deliberate as choosing Python. */
 export function markCodeLanguageExplicit(editor: object, blockId: string): void {
   let choices = explicitChoices.get(editor);
@@ -18,8 +35,10 @@ export function markCodeLanguageExplicit(editor: object, blockId: string): void 
 
 /** A local heuristic, not a claim that every displayed language is detectable. */
 export function detectCodeLanguage(source: string): string | undefined {
+  // Until the detector has loaded, pastes keep their plain text behavior.
+  if (!highlighter) return;
   if (source.length > maximumDetectionLength || source.trim().length < 12) return;
-  const result = hljs.highlightAuto(source);
+  const result = highlighter.highlightAuto(source);
   // Short or weak matches are safer as plain text. Relevance is a grammar score,
   // not a probability. The user can always correct a plausible but wrong guess.
   if (!result.language || result.relevance < 3) return;
@@ -91,6 +110,7 @@ export function inferUnlabelledCodeFences(markdown: string): string | undefined 
 
 /** Paste and language metadata share one native undo transaction. */
 export function createCodePasteHandler(initialDocument: readonly InitialBlock[]) {
+  void loadCodeDetection();
   const savedCodeIds = new Set<string>();
   const visit = (blocks: readonly InitialBlock[]) => {
     for (const block of blocks) {

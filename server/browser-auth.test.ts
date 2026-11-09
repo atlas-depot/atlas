@@ -3,12 +3,14 @@ import { once } from "node:events";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { WorkOS } from "@workos-inc/node";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vite-plus/test";
-import { createBrowserAuth, type BrowserAuth } from "./browser-auth.ts";
-import { LOGIN_TRANSACTION_COOKIE_NAME, SESSION_COOKIE_NAME, readCookie } from "./cookies.ts";
+import { createBrowserAuth, type BrowserAuth, type BrowserAuthOptions } from "./browser-auth.ts";
+import { LOGIN_TRANSACTION_COOKIE_NAME, readCookie, sessionCookieName } from "./cookies.ts";
 
 const issuer = "https://auth.example.test/";
 const clientId = "client_fixture";
 const appOrigin = "https://app.example.test";
+// HTTPS origin, so the session cookie carries the __Host- prefix.
+const SESSION_COOKIE = sessionCookieName(true);
 const cookiePassword = "atlas-test-cookie-password-at-least-32";
 const key = generateKeyPairSync("rsa", { modulusLength: 2048 });
 const jwk = {
@@ -154,7 +156,11 @@ beforeEach(() => {
   provider.requests = [];
 });
 
-function createAuth(overrides: { transactionTtlSeconds?: number } = {}): BrowserAuth {
+function createAuth(
+  overrides: Partial<
+    Pick<BrowserAuthOptions, "transactionTtlSeconds" | "sessionMaxAgeSeconds">
+  > = {},
+): BrowserAuth {
   const workos = new WorkOS({
     clientId,
     issuer,
@@ -192,10 +198,10 @@ async function complete(
 }
 
 function sessionRequest(sessionCookie: string): Request {
-  const value = readCookie(sessionCookie, SESSION_COOKIE_NAME);
+  const value = readCookie(sessionCookie, SESSION_COOKIE);
   if (!value) throw new Error("Missing session cookie");
   return new Request(`${appOrigin}/api/auth/session`, {
-    headers: { Cookie: `${SESSION_COOKIE_NAME}=${value}` },
+    headers: { Cookie: `${SESSION_COOKIE}=${value}` },
   });
 }
 
@@ -232,8 +238,9 @@ describe("WorkOS browser auth with a synthetic provider", () => {
       firstName: "Alice",
       lastName: "Example",
     });
-    expect(result.sessionCookie).toContain(`${SESSION_COOKIE_NAME}=`);
-    expect(result.sessionCookie).toContain("Path=/");
+    // The browser only keeps a __Host- cookie that is Secure with Path=/ and no Domain.
+    expect(result.sessionCookie).toMatch(/^__Host-atlas_session=[^;]+; Path=\/; /);
+    expect(result.sessionCookie).not.toContain("Domain=");
     expect(result.sessionCookie).toContain("HttpOnly");
     expect(result.sessionCookie).toContain("SameSite=Lax");
     expect(result.sessionCookie).toContain("Secure");
@@ -308,6 +315,25 @@ describe("WorkOS browser auth with a synthetic provider", () => {
     expect(provider.requests).toHaveLength(1);
   });
 
+  it("applies the configured session lifetime to login and refreshed cookies only", async () => {
+    const plain = createAuth();
+    const unbounded = await complete(plain, await startLogin(plain));
+    if (!unbounded.ok) throw new Error("Synthetic login failed");
+    expect(unbounded.sessionCookie).not.toContain("Max-Age=");
+
+    provider.codeExpired = true;
+    const auth = createAuth({ sessionMaxAgeSeconds: 604_800 });
+    const login = await complete(auth, await startLogin(auth));
+    if (!login.ok) throw new Error("Synthetic login failed");
+    expect(login.sessionCookie).toMatch(/^__Host-atlas_session=[^;]+; Path=\/; Max-Age=604800; /);
+    // The transaction cookie keeps its own ten-minute lifetime; sign-out still clears with Max-Age=0.
+    expect(login.clearTransactionCookie).toContain("Max-Age=0");
+
+    const headers = new Headers();
+    await auth.readSession(sessionRequest(login.sessionCookie), headers);
+    expect(responseSetCookies(headers)[0]).toContain("Max-Age=604800");
+  });
+
   it("refreshes an expired browser session and returns a new sealed cookie", async () => {
     provider.codeExpired = true;
     const auth = createAuth();
@@ -320,7 +346,7 @@ describe("WorkOS browser auth with a synthetic provider", () => {
     );
     const setCookies = responseSetCookies(headers);
     expect(setCookies).toHaveLength(1);
-    expect(setCookies[0]).toContain(`${SESSION_COOKIE_NAME}=`);
+    expect(setCookies[0]).toContain(`${SESSION_COOKIE}=`);
     expect(setCookies[0]).not.toBe(login.sessionCookie);
     expect(provider.requests.at(-1)).toMatchObject({ grant_type: "refresh_token" });
 
@@ -362,7 +388,7 @@ describe("WorkOS browser auth with a synthetic provider", () => {
   it("clears an unreadable session cookie", async () => {
     const headers = new Headers();
     const request = new Request(`${appOrigin}/api/auth/session`, {
-      headers: { Cookie: `${SESSION_COOKIE_NAME}=not-a-sealed-session` },
+      headers: { Cookie: `${SESSION_COOKIE}=not-a-sealed-session` },
     });
     expect(await createAuth().readSession(request, headers)).toBeNull();
     expect(responseSetCookies(headers)[0]).toContain("Max-Age=0");
@@ -372,13 +398,13 @@ describe("WorkOS browser auth with a synthetic provider", () => {
     const auth = createAuth();
     const login = await complete(auth, await startLogin(auth));
     if (!login.ok) throw new Error("Synthetic login failed");
-    const sessionValue = readCookie(login.sessionCookie, SESSION_COOKIE_NAME);
+    const sessionValue = readCookie(login.sessionCookie, SESSION_COOKIE);
     if (!sessionValue) throw new Error("Missing session value");
 
     const result = await auth.logout(
       new Request(`${appOrigin}/api/auth/logout`, {
         method: "POST",
-        headers: { Cookie: `${SESSION_COOKIE_NAME}=${sessionValue}` },
+        headers: { Cookie: `${SESSION_COOKIE}=${sessionValue}` },
       }),
     );
     const url = new URL(result.redirectTo);
@@ -393,13 +419,13 @@ describe("WorkOS browser auth with a synthetic provider", () => {
     const auth = createAuth();
     const login = await complete(auth, await startLogin(auth));
     if (!login.ok) throw new Error("Synthetic login failed");
-    const sessionValue = readCookie(login.sessionCookie, SESSION_COOKIE_NAME);
+    const sessionValue = readCookie(login.sessionCookie, SESSION_COOKIE);
     if (!sessionValue) throw new Error("Missing session value");
 
     const result = await auth.logout(
       new Request(`${appOrigin}/api/auth/logout`, {
         method: "POST",
-        headers: { Cookie: `${SESSION_COOKIE_NAME}=${sessionValue}` },
+        headers: { Cookie: `${SESSION_COOKIE}=${sessionValue}` },
       }),
     );
     expect(result.redirectTo).toContain("/user_management/sessions/logout");

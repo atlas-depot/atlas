@@ -10,11 +10,10 @@ From the repository root:
 node --version
 pnpm --version
 pnpm install --frozen-lockfile
-pnpm --dir experiments/eve-openrouter install --frozen-lockfile
 pnpm dev
 ```
 
-The isolated experiment has its own workspace and lockfile. Its dependency install is required before repository-wide lint/type checks and the optional pre-push hook, because those checks inspect its TypeScript. Installing it does not make model calls. If Corepack is available, `corepack pnpm <command>` can use the pinned pnpm without changing global shims.
+One root install covers the web app, the API and the private organizer, because `pnpm-workspace.yaml` lists the root and `agents/organizer`. The isolated experiment in `experiments/eve-openrouter` has its own workspace and lockfile. Root lint ignores `experiments/**`, so `pnpm check` does not need it. Install it with `pnpm --dir experiments/eve-openrouter install --frozen-lockfile` only to run its own tests, including through the optional pre-push hook. Installing it does not make model calls. If Corepack is available, `corepack pnpm <command>` can use the pinned pnpm without changing global shims.
 
 Use `pnpm install` only when intentionally changing dependencies and commit the resulting lockfile. Subsequent installs use `--frozen-lockfile`. Vite+ owns the toolchain; retain its matching Vite alias and Vitest overrides in `pnpm-workspace.yaml`.
 
@@ -31,6 +30,8 @@ Use `pnpm install` only when intentionally changing dependencies and commit the 
 | `pnpm coverage` | Tests with V8 coverage |
 | `pnpm test:e2e` | Playwright against the built frontend with intercepted HTTP |
 | `pnpm test:e2e:db` | Built production editor with real API and isolated PostgreSQL |
+| `pnpm test:db` | Database tests against isolated local PostgreSQL |
+| `pnpm db:migrate` | Apply committed migrations to `DATABASE_URL` |
 | `pnpm build` | Frontend bundle in `dist/`, not an API build or deployment |
 | `pnpm preview --host 127.0.0.1 --port 4177 --strictPort` | Serve the built frontend locally |
 
@@ -55,11 +56,13 @@ For browser sign-in, also set `APP_ORIGIN`, `WORKOS_API_KEY` and `WORKOS_COOKIE_
 
 Use the **environment** client ID returned by `npx workos@latest whoami --json` (`environment.clientId`) as `WORKOS_CLIENT_ID`. The client ID shown under Applications is an application-level ID and can differ; in a live staging check the application ID produced `invalid_client` at the hosted AuthKit page. For the default hosted AuthKit domain, `WORKOS_ISSUER` is `https://api.workos.com/user_management/`, not the `*.authkit.app` OAuth issuer. Verify it against the access token `iss` claim when the environment or auth domain changes.
 
-The public browser routes are `GET /api/auth/login`, `GET /api/auth/callback`, `GET /api/auth/session` and `POST /api/auth/logout`. Login uses hosted AuthKit with PKCE and a short-lived sealed transaction cookie. The callback validates state and expiry, exchanges the code, and stores only the WorkOS sealed session in the `atlas_session` cookie (`HttpOnly`, `SameSite=Lax`, `Secure` on HTTPS). The session route returns `{ user: { id, email, firstName, lastName } }`; names remain `null` when WorkOS has none. Logout clears the local cookie and redirects through WorkOS's session logout flow when the session can be authenticated. If the session is invalid or WorkOS is unreachable, logout still clears the local cookie and redirects to `APP_ORIGIN`. Expired browser sessions refresh once; terminal failures clear the cookie and return `401`, while retryable provider failures return `500` and preserve it.
+The public browser routes are `GET /api/auth/login`, `GET /api/auth/callback`, `GET /api/auth/session` and `POST /api/auth/logout`. Login uses hosted AuthKit with PKCE and a short-lived sealed transaction cookie. The callback validates state and expiry, exchanges the code, and stores only the WorkOS sealed session in an `HttpOnly`, `SameSite=Lax` session cookie. When `APP_ORIGIN` uses HTTPS the cookie is `__Host-atlas_session` with `Secure` and `Path=/`; on loopback HTTP it is `atlas_session`. The session route returns `{ user: { id, email, firstName, lastName } }`; names remain `null` when WorkOS has none. Logout clears the local cookie and redirects through WorkOS's session logout flow when the session can be authenticated. If the session is invalid or WorkOS is unreachable, logout still clears the local cookie and redirects to `APP_ORIGIN`. Expired browser sessions refresh once; terminal failures clear the cookie and return `401`, while retryable provider failures return `500` and preserve it.
 
 Cookie-authenticated unsafe requests, including logout, require an exact `Origin` match with `APP_ORIGIN`; a missing or mismatched origin returns `403`. Bearer requests are exempt because they do not use ambient cookie identity, and an `Authorization` header never falls back to the cookie. Do not add credentialed cross-origin CORS for this same-origin application.
 
-Deterministic tests use a synthetic provider and never call WorkOS. A separate live development-provider smoke must record Google and email/password sign-in, signup/email verification as configured, cancelled login, the provider recovery path, session refresh, logout and account switching. Do not record keys, cookies or passwords. All five teammates accepted their WorkOS dashboard accounts in Staging on 2026-10-29; no paid seat requirement appeared.
+Deterministic tests use a synthetic provider and never call WorkOS. A separate live development-provider smoke must record Google and email/password sign-in, signup/email verification as configured, cancelled login, the provider recovery path, session refresh, logout and account switching. Do not record keys, cookies or passwords. Recorded Staging results are in the [evidence log](process/evidence-log.md#2026-10-28-workos-staging-smoke).
+
+When a notes, draft or Organize route turns a storage error into `503`, it writes one JSON line to stderr with event `storage_failure`, the method, the route template and the driver error's name, code and message (at most 200 characters). It never logs request bodies, headers, cookies or note content.
 
 For concurrent worktrees, set different `API_PORT` values and frontend ports, for example `pnpm dev --host 127.0.0.1 --port 5177 --strictPort`. Stop both processes with Ctrl-C. Production routing is separate configuration.
 
@@ -67,13 +70,11 @@ For concurrent worktrees, set different `API_PORT` values and frontend ports, fo
 
 The Drizzle PostgreSQL schema lives in `server/db/schema.ts`. Generate a migration after changing it with `pnpm db:generate --name=describe-change`. Generation needs no database credentials and does not apply SQL. Commit the generated SQL, snapshot and journal under `drizzle/` together with the schema. Review the SQL before applying it; never rewrite an applied migration.
 
-Notes store a verified WorkOS owner ID, JSONB content, timestamps and a positive internal revision counter. Content is either an existing Markdown string or `{ format: "blocknote", schemaVersion: 1, blocks: [...] }`. `shared/document.ts` validates supported blocks, unique IDs, links and document bounds. Media/upload blocks are not enabled. `shared/notes.ts` owns the surrounding note contract. Create/update reject lone UTF-16 surrogates and NUL in title/content with `400`. Creation timestamps require year 0001 or later. Owner/revision enforcement lives in the note operations; the authenticated `/api/notes` routes use these operations directly.
+Notes store a verified WorkOS owner ID, JSONB content, timestamps and a positive internal revision counter. Content is either an existing Markdown string or `{ format: "blocknote", schemaVersion: 1, blocks: [...] }`. `shared/document.ts` validates supported blocks, unique IDs, links and document bounds. Media/upload blocks are not enabled. `shared/notes.ts` owns the surrounding note contract. Owner/revision enforcement lives in the note operations; the authenticated `/api/notes` routes use these operations directly.
 
 The JSONB migration wraps existing text with `to_jsonb`, preserving the original Markdown exactly. Reads do not parse or rewrite it. Rich editing uses BlockNote with Base UI; a legacy note whose Markdown round trip changes the source retains its source editor and safe preview. Merely opening a note never converts its stored content. Deploy the API and frontend together with this migration: older frontend bundles cannot read block documents, and the older API expects a text column. Do not roll back by converting JSON documents to Markdown without reviewing possible data loss.
 
-`POST /api/notes` requires a UUID `Idempotency-Key`, normalized to lowercase and scoped to the verified account. Reuse the original key and exact submitted payload after an uncertain response. Creation atomically stores the note and a key/payload-hash/note-ID record. Matching replays return the same `201` body and strong ETag while the note is unchanged. A different payload, later edit or deletion returns `409 CONFLICT` without creating a second note. The receipt contains no note text and has no automatic expiry: retain it until account deletion, including after note deletion. A future account-erasure operation must remove these receipts alongside that account's notes.
-
-Individual create/read/update responses carry a strong opaque ETag. `PUT` and `DELETE` require the saved `If-Match`: missing is `428`, malformed is `400`, stale is `412`. Absent and inaccessible notes return the same `404`; invalid JSON/UUID is `400`, and storage failures are sanitized `503`. PUT replaces title and content; creation time is immutable. Uploads are limited to 1 MiB and five seconds; DELETE accepts no body. Clients must treat ETags as opaque, and revision is never included in the public note shape.
+The HTTP note contract, including creation idempotency, ETags and status codes, is in the [API contract](api.md#notes). Creation receipts hold the key, a payload hash and the note ID, but no note text. They have no automatic expiry and stay after note deletion. A future account-erasure operation must remove them with that account's notes.
 
 Set server-only `DATABASE_URL` in your ignored `.env` to your isolated development PostgreSQL database, then run `pnpm db:migrate`. This applies pending committed migrations and closes its connection pool on success or failure. Re-running it leaves already recorded migrations alone; it does not reset data. Migration failures exit nonzero without printing driver errors or connection details. The API starts without a database setting when Organize is disabled; note requests then return `503`. A configured invalid database URL fails startup. Migrations are never applied on API startup.
 
@@ -124,11 +125,7 @@ Note creation, edits, AI draft Save and development seed insertion persist an in
 
 Claims fence duplicate runs before provider work. Recovery inspects known runs at their recorded runtime URL, never treating an unknown status as terminal. Unbound starts have a two-minute allocation grace before recovery. Only content-free identities and outcomes cross Workflow step boundaries. A crash after a provider response can still repeat a billed call, but cannot publish duplicate or stale entries. Profile changes require deliberate reindexing, not automatic model substitution. Local tests use isolated PostgreSQL/pgvector and synthetic provider responses, not live user notes or provider acceptance.
 
-### Live Neon development verification
-
-On 2026-11-01, code at `4181a9b` was verified on `atlas-dev` / `dev-efe`, Neon PostgreSQL 18 in AWS Frankfurt, using Node 24.22.0. The direct connection used verified TLS. With `NODE_ENV=development`, the actual setup command applied the committed migration and inserted two synthetic notes; a second run inserted zero. Pooled CRUD verified owner isolation, concurrent updates with one winner, stale update/delete rejection, and committed creation/edit recovery in fresh Node processes after the writers exited. Only the generated smoke note was deleted; the two synthetic seed notes remain. Staging was not modified. This verifies storage and process restart, not WorkOS, HTTP/UI integration or a Neon compute restart.
-
-The Atlas organization is on Free. Its five development branches (`dev-efe`, `dev-talha`, `dev-onat`, `dev-iklim`, `dev-ali`) have distinct endpoints separate from `staging`; all six computes are fixed at 0.25 CU. The [current Free allowance](https://neon.com/blog/neon-free-plan-1-gb-per-project) is 10 branches, 100 CU-hours per project/month and 1 GB storage per project. The compute allowance is shared across this project's branches. Four active project members were verified; Ali's invitation is still pending, so #46's five-member access condition remains open. Current members are organization admins: branch data is separate, but per-branch console access isolation is not enforced.
+Live Neon development verification and the branch inventory from 2026-11-01 are in the [evidence log](process/evidence-log.md#2026-11-01-neon-development-verification).
 
 ### Organizer run persistence
 
@@ -136,29 +133,11 @@ The `organize_runs` migration adds owner-bound transient run records alongside n
 
 `pnpm test:db` also exercises run recovery, concurrency, source revision/deletion races and cleanup using separate pools and Node processes. Runtime transport is mocked in database tests. See the [organizer](../agents/organizer/README.md) for the eve/Vercel build, private service and explicitly enabled maintenance settings. Organize HTTP routes use the existing authentication middleware; note CRUD uses the same authenticated API boundary. Database tests inject synthetic authentication and mock runtime transport, so they do not establish live WorkOS or model behavior.
 
-### Organize HTTP contract
+### Organizer configuration
 
-Configure `DATABASE_URL`, `ORGANIZER_RUNTIME_URL` (an immutable private deployment URL) and `ORGANIZER_SERVICE_TOKEN` on the Hono API. Install the isolated organizer dependencies as well as root dependencies. Partial settings fail startup; with no organizer settings, authenticated Organize requests return `503`. The token and optional `ORGANIZER_DEPLOYMENT_PROTECTION_SECRET` stay server-only. `ORGANIZER_RESULT_RETENTION_MS` defaults to 900000 for undelivered results, independently of the 48-hour content-free accounting retention.
+Configure `DATABASE_URL`, `ORGANIZER_RUNTIME_URL` (an immutable private deployment URL) and `ORGANIZER_SERVICE_TOKEN` on the Hono API. The root install already includes the organizer workspace package. Partial settings fail startup; with no organizer settings, authenticated Organize requests return `503`. The token and optional `ORGANIZER_DEPLOYMENT_PROTECTION_SECRET` stay server-only. `ORGANIZER_RESULT_RETENTION_MS` defaults to 900000 for undelivered results, independently of the 48-hour content-free accounting retention.
 
-All routes use the existing WorkOS Bearer/session boundary and cookie-origin checks. IDs must be UUIDs. Start requires the saved source ETag in `If-Match`, checked while locking that source revision. Shared response schemas live in `shared/organize.ts` and `shared/drafts.ts`.
-
-| Request | Response |
-| --- | --- |
-| `POST /api/notes/:id/organize` | `202 { runId, status: "accepted" }`, or `cleanup_pending` for existing work awaiting retirement |
-| `GET /api/organize-runs/:id` | `200 { runId, ...state }`, including progress or a separate Markdown draft, sources and source revision/staleness |
-| `POST /api/organize-runs/:id/cancel` | `200` terminal state, or `202` while cleanup is pending |
-| `POST /api/organize-runs/:id/handoff` | `200` temporary draft and ETag; retries return the same draft without extending its lifetime |
-| `GET /api/organize-work` | Owner-scoped active run handles and unexpired drafts for reconnect/reload |
-| `GET /api/note-drafts/:id` | `200` draft and ETag, including stale/deleted source flags |
-| `PUT /api/note-drafts/:id`, `{ title, content }` plus `If-Match` | `200` full draft and ETag, with expiry unchanged |
-| `DELETE /api/note-drafts/:id`, empty body plus `If-Match` | `204` after discarding the temporary draft |
-| `POST /api/note-drafts/:id/save`, `{ title, content }` plus `If-Match` | `201` separate permanent note and ETag |
-
-The browser hands off a completed result before editing it. Handoff records the temporary copy and cleanup intent in one transaction; cleanup failure cannot erase the copy and maintenance retries retirement. A source can have only one unresolved draft. Another Organize returns `409` until Save or Discard resolves it. A changed source is flagged stale; source deletion after handoff does not prevent saving the draft separately.
-
-Save derives provenance from the server-owned draft, not client fields. A draft-ID/payload-hash/note-ID receipt makes concurrent and uncertain-response retries return one unchanged note. Reuse the exact Save payload after a lost response. Changed/deleted saved notes or a changed retry payload return `409`; stale temporary edits return `412`. Content-free receipts survive draft/source/note deletion until account erasure, like note creation receipts. Permanent note responses expose optional `origin` with source ID/revision and research sources. Note writes cannot set or replace origin.
-
-A lost start response can safely retry the same owned source revision or recover through `organize-work`. `cleanup_pending` must be polled instead of launching another run. The older `acknowledge` endpoint retires a completed result that has not been handed off, without saving it. Running results must be polled or cancelled; acknowledgement returns `409` while they are running. The editor uses handoff. Inaccessible and missing resources return the same `404`; transient backend failures return sanitized `503`. No raw eve handles, runtime URLs, credentials or accounting records enter these responses.
+Routes, status codes and draft rules are in the [API contract](api.md#organize).
 
 ## Tests and coverage
 
@@ -168,35 +147,11 @@ Coverage includes those source directories and excludes tests, declarations, con
 
 Test session injection does not prove WorkOS sign-in or database isolation. Keep mocked provider checks separate from live verification, and run paid model tests only with an explicit budget. See [atlas-test](../.agents/skills/atlas-test/SKILL.md) for boundary selection and regression checks.
 
-### Live development-provider smoke
-
-Run against the WorkOS Staging environment with the environment client ID on 2026-10-28:
-
-- Google sign-in and email/password signup with email verification both completed; each callback set `atlas_session` and `/api/auth/session` returned the matching profile without tokens.
-- `document.cookie` did not expose `atlas_session`, confirming the `HttpOnly` boundary in the browser.
-- Logout followed the WorkOS logout flow, returned to the application origin, and `/api/auth/session` then returned `401`.
-- After the five-minute access token expired, a session request returned `200` with a new `Set-Cookie`, exercising refresh and resealing.
-- Account switching replaced the Google session with the email/password session.
-- All five teammates accepted the WorkOS dashboard invite and show as active in Staging; no paid seat requirement appeared.
-- A wrong password was rejected on the hosted AuthKit page with an invalid-credentials message; no session was created.
-- A valid `error=access_denied` callback returned `401` and cleared the transaction. A wrong-state callback returned `403` without clearing it, and the following valid cancellation was processed.
-- The hosted reset-password flow accepted the request and the reset email arrived; the link was not used to change the password.
-- CSRF rejection and Bearer-versus-cookie precedence remain covered by deterministic tests because a browser cannot set the `Origin` header or a forged Bearer token for a live check.
-
-The live check used the Staging environment, which allows `http://localhost` redirects. Production is a separate environment, requires billing activation and HTTPS redirects, and must use its own client ID, API key and cookie password. Do not copy Staging credentials into Production or vice versa.
-
-Staging configuration recorded on 2026-10-28:
-
-- Redirect URI: `http://localhost:5173/api/auth/callback`
-- Initiate login URI: `http://localhost:5173/api/auth/login`
-- Sign-out URI: `http://localhost:5173/`
-- Methods: Google with WorkOS demo credentials and Email + Password. Passkeys, Magic Auth and Enterprise SSO are disabled.
-- Sessions: five-minute access tokens, two-day inactivity timeout, 365-day maximum session length. CORS remains empty because WorkOS is called server-side.
-- The environment client ID is in the local `.env` only; the repository contains placeholders.
+Live WorkOS Staging smoke results and the Staging configuration from 2026-10-28 are in the [evidence log](process/evidence-log.md#2026-10-28-workos-staging-smoke).
 
 ### Browser regression
 
-Install Chromium once with `pnpm exec playwright install chromium`. Playwright builds both the demo and normal production frontend. The demo is served on `127.0.0.1:4177`; the production build is stored under `.cache/production-build` and served on `127.0.0.1:4178`. Neither reuses an existing server. Occupied ports fail the run. CI retains before/after screenshots and failure traces. For visible UI changes, also verify mobile width, desktop and keyboard behavior.
+Locally, install Chromium once with `pnpm exec playwright install chromium`. CI does not download a browser: the browser and database jobs set `PLAYWRIGHT_CHANNEL=chrome` and use the Google Chrome preinstalled on the Ubuntu runner. Playwright builds both the demo and normal production frontend. The demo is served on `127.0.0.1:4177`; the production build is stored under `.cache/production-build` and served on `127.0.0.1:4178`. Neither reuses an existing server. Occupied ports fail the run. The intercepted suite runs fully parallel. In CI it uses three workers, retries a failed test once and fails the run when a test passes only on retry. Run browser suites sequentially within a worktree because they build bundles and bind local ports. CI retains before/after screenshots and failure traces. For visible UI changes, also verify mobile width, desktop and keyboard behavior.
 
 ### Notes editor development preview
 
@@ -206,7 +161,7 @@ The reusable BlockNote surface keeps persistence in its host screen. Code blocks
 
 Run `pnpm dev` for synthetic HTTP responses stored only in tab memory. Saves are explicit (Save or Ctrl/Cmd+S); reload resets the examples. The screen labels this limitation. `?notesExample=empty`, `load-failure`, `read-failure`, `save-failure`, `slow-save`, `conflict`, `unavailable`, `unauthenticated`, `expired-save`, `forbidden-save`, `missing-read`, `missing-save`, `delete-failure` and `delete-conflict` provide development/test states. The older source-link example remains at `?example=briefing` only to preserve its existing regression while replacing the main product surface.
 
-A normal production build excludes the fixtures and uses the same editor with the same-origin HTTP client. `NotesStore` in `src/notes/notes-store.ts` matches #45/#56: `list()`, `read(id)`, `create(CreateNote, key)`, `update(id, UpdateNote, etag)` and `delete(id, etag)`. Opening always reads the individual-note endpoint; list content is never treated as an editable snapshot. The client validates JSON with shared Zod schemas, retains the exact response ETag on read/create/update and sends it as If-Match on PUT and DELETE. New notes have no invented client-side server ID. Delete requires an explicit confirmation naming the note; a dirty draft adds a warning that local changes will also be discarded. A successful 204 removes only that list entry and selects the next note, the previous note, or the last-note empty state. A 404 removes the stale entry but keeps the draft, with Refresh and Keep as new note as the available recovery. A 412 keeps the note, preserves the draft, disables deletion, and requires Compare latest and adoption before a new confirmation. An unconfirmed delete keeps the draft, does not claim the note still exists, and disables deletion and saving until list reconciliation succeeds. A refresh that omits the saved note switches to the missing-note recovery while keeping the draft. The production shell checks `GET /api/auth/session` before mounting the editor, shows the sign-in route on 401, and revalidates when the window regains focus. A changed user ID or a terminal session 401 detected by the shell replaces the workspace, so private cached notes, pending reads and any unsaved draft from the previous account are discarded. User-initiated sign out posts to `/api/auth/logout` as a full navigation and keeps the existing dirty beforeunload guard; the demo shell remains independent of authentication.
+A normal production build excludes the fixtures and uses the same editor with the same-origin HTTP client. `NotesStore` in `src/notes/notes-store.ts` matches #45/#56: `list()`, `read(id)`, `create(CreateNote, key)`, `update(id, UpdateNote, etag)` and `delete(id, etag)`. The list response has no note content, so opening always reads the individual-note endpoint for content and ETag. The client validates JSON with shared Zod schemas, retains the exact response ETag on read/create/update and sends it as If-Match on PUT and DELETE. New notes have no invented client-side server ID. Delete requires an explicit confirmation naming the note; a dirty draft adds a warning that local changes will also be discarded. A successful 204 removes only that list entry and selects the next note, the previous note, or the last-note empty state. A 404 removes the stale entry but keeps the draft, with Refresh and Keep as new note as the available recovery. A 412 keeps the note, preserves the draft, disables deletion, and requires Compare latest and adoption before a new confirmation. An unconfirmed delete keeps the draft, does not claim the note still exists, and disables deletion and saving until list reconciliation succeeds. A refresh that omits the saved note switches to the missing-note recovery while keeping the draft. The production shell checks `GET /api/auth/session` before mounting the editor, shows the sign-in route on 401, and revalidates when the window regains focus. A changed user ID or a terminal session 401 detected by the shell replaces the workspace, so private cached notes, pending reads and any unsaved draft from the previous account are discarded. User-initiated sign out posts to `/api/auth/logout` as a full navigation and keeps the existing dirty beforeunload guard; the demo shell remains independent of authentication.
 
 Create requires a UUID `Idempotency-Key` scoped to the authenticated account. The client retains one key and the exact submitted snapshot through an uncertain outcome. A manual retry recovers the original POST before saving newer local edits with PUT and the returned ETag. Edits typed during either request stay unsaved. Acknowledging creation retains its identity even if the subsequent PUT fails, so another Save cannot create a duplicate. Explicitly discarding a draft or replacing the account clears its pending creation state. This state lives in the mounted editor, not offline storage; leaving the page warns before discarding an uncertain creation.
 
@@ -226,14 +181,14 @@ Playwright explicitly enables `VITE_NOTES_DEMO=true` for its own build. The fixt
 
 For the real persistence boundary, run `TEST_DATABASE_URL=postgresql://USER@127.0.0.1:55468/postgres pnpm test:e2e:db`. This separate suite requires a loopback database, builds the normal production UI, serves it with the actual Hono routes on `127.0.0.1:4185`, and drops its randomly named database after the run. Only authentication is synthetic. Five scenarios cover mobile/keyboard CRUD and reload, competing edits, a lost committed POST response with newer local edits, account isolation, and structured block/table persistence with API reordering. CI runs this suite in the database job and uploads `playwright-api-evidence`; it does not verify WorkOS or hosted Neon access.
 
-If the managed Chromium download is unavailable, set `PLAYWRIGHT_CHANNEL=msedge` or `chrome` to test an already-installed browser, then run `pnpm test:e2e`. Leave the variable unset for the default Playwright Chromium and CI. The browser channel is a local verification choice, not a change to the supported product browsers.
+If the managed Chromium download is unavailable locally, set `PLAYWRIGHT_CHANNEL=msedge` or `chrome` to test an already-installed browser, then run `pnpm test:e2e`. Leave the variable unset locally for the default Playwright Chromium; CI sets it to `chrome`. The browser channel is a verification choice, not a change to the supported product browsers.
 
 
 ### Optional pre-push hook
 
 Enable the repository hook with `git config --local core.hooksPath .githooks`. This replaces any existing hook path in the clone; integrate it manually if another hook manager is in use. Disable it with `git config --local --unset core.hooksPath`.
 
-The hook runs `pnpm check`, isolated experiment tests, ClickUp sync tests and `pnpm build`. It does not install dependencies or run coverage/browser tests. Both dependency installs above must already exist.
+The hook runs `pnpm check`, the isolated experiment tests, the full `pnpm test` suite and `pnpm build`. It does not install dependencies or run coverage, database or browser tests. It needs both the root install and the experiment install.
 
 ## Code conventions
 
@@ -262,32 +217,14 @@ Vercel environment variables are the selected hosting approach. Project linkage,
 
 ## CI and deployment status
 
-CI runs on pull requests and pushes to `main`. Required `verify` aggregates format, lint/typecheck, build and database regression. The database job provisions an ephemeral PostgreSQL 17 service with pgvector 0.8.7, waits for readiness and runs `test:db` and `test:e2e:db` through a dynamically assigned loopback port. Tests create clean databases and replay versioned migrations before exercising note operations and setup/seed. The service uses synthetic CI-only credentials; no Neon, staging or production secrets are supplied. Its ten-minute timeout bounds the job, and GitHub disposes of the service after the job. This workflow configuration requires a real Actions run before reporting remote success.
+CI runs on pull requests and pushes to `main`. Required `verify` aggregates all six jobs: format, lint and typecheck, build, database regression, coverage and browser regression. The database job provisions an ephemeral PostgreSQL 17 service with pgvector 0.8.7, waits for readiness and runs `test:db` and `test:e2e:db` through a dynamically assigned loopback port. Tests create clean databases and replay versioned migrations before exercising note operations and setup/seed. The service uses synthetic CI-only credentials; no Neon, staging or production secrets are supplied. Its ten-minute timeout bounds the job, and GitHub disposes of the service after the job. This workflow configuration requires a real Actions run before reporting remote success.
 
-Coverage runs the full root suite separately and publishes its summary; the intercepted browser regression job is also separate. Neither belongs to the `verify` aggregate; real API/browser regressions run within its database job. The lint job installs the isolated experiment and runs its mocked budget-guard tests without credentials. CI uses `.node-version`.
+Coverage runs the full root suite and publishes its summary, with no percentage threshold. The browser job runs the intercepted Playwright suite; real API browser regressions run in the database job. Coverage and browser jobs also have ten-minute timeouts. The lint job installs the isolated experiment and runs its mocked budget-guard tests without credentials. CI uses `.node-version`.
 
 Feature previews and `main` production remain the deployment direction. Git branches and passing CI do not configure Vercel linkage, routing or credentials. After an authorized deployment, verify the revision and affected live flow. Application rollback does not roll back the database. Follow [contributing](contributing.md) for PR evidence and merge authority.
 
 ## Notes increment acceptance
 
-[#54](https://github.com/atlas-depot/atlas/issues/54) tracks acceptance of the connected notes and AI-draft flow. [Ali's preparation evidence](https://github.com/atlas-depot/atlas/issues/54#issuecomment-6597588207) covers `95e6bc0`; it is historical local evidence, not acceptance of later revisions or a staging deployment. Keep run results, revision, deployment URL and remaining gaps in the issue or implementing PR rather than committing another run log.
-
-Use the pinned clean-setup and check commands above. `pnpm test:e2e:db` additionally exercises reconnect, temporary edits, derivative save, source deletion and account-scoped discard through the real browser, Hono and isolated PostgreSQL with synthetic identity/provider seams. It needs a loopback `TEST_DATABASE_URL`, not WorkOS or model credentials. Run browser suites sequentially within a worktree because they build bundles and bind local ports.
-
-Final acceptance needs the integrated #53 candidate and an authorized staging deployment. Verify its deployed revision before exercising this matrix with synthetic notes and two test accounts:
-
-| Boundary | Required observation |
-| --- | --- |
-| WorkOS | Google and email/password sign-in, cancelled or failed login, recovery, refresh, terminal expiry, logout and account switching behave as documented above. Record each method separately. |
-| Notes | Create, read, edit, explicit Save and Ctrl/Cmd+S, delete and reload preserve the intended content. Another account cannot read or modify it. |
-| Recovery | A failed save keeps local edits. A competing write produces a conflict without overwriting either version. Reloading or discarding local work is explicit. |
-| Organize | Save & organize processes the saved revision. Repeated clicks do not duplicate a run. Loading, reconnect, failure/retry and an editable result are observable; the source remains unchanged. |
-| Draft lifecycle | Edited temporary content survives reload for the agreed 24-hour lifetime. Discard removes it. Save creates one separate permanent note with its source ID/revision and sources; a repeated Save cannot duplicate it. |
-| Source changes | A newer source marks the result stale. A source deleted after result handoff is identified, while Save can preserve the draft separately. Resolve an existing draft before starting another. |
-| Rendering and input | Check the integrated editor at desktop and narrow mobile width, keyboard operation, literal HTML/code, safe links and no unintended remote image requests. Confirm structured content and block IDs survive save/reload. |
-
-The draft rows describe the accepted #53 target, not a claim that the current deployment implements it. Exercise expiry using the deterministic clock-controlled tests rather than shortening a shared staging retention setting.
-
-Live AI acceptance is a separate, explicitly authorized run with synthetic input and an agreed cap. Record model/provider, input facts, returned sources, whether the original changed, and content-free usage/cost. A mocked provider cannot establish factual preservation or research quality. Do not put credentials, session cookies or private note content into evidence. Keep #54 open while an integrated or live-provider row is unverified; do not infer a missing provider environment from absent local `.env` files.
+[#54](https://github.com/atlas-depot/atlas/issues/54) tracks acceptance of the connected notes and AI-draft flow. The acceptance matrix from 2026-11-05 is in the [evidence log](process/evidence-log.md#2026-11-05-notes-increment-acceptance-54).
 
 References: [Vite+ local CLI](https://viteplus.dev/guide/local-cli), [Vite environment variables](https://vite.dev/guide/env-and-mode), [Vercel Git integration](https://vercel.com/docs/git), [Vercel env CLI](https://vercel.com/docs/cli/env).
