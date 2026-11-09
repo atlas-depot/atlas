@@ -15,11 +15,14 @@ const research = createResearch({
   webSearch: provider.tools.webSearch({}),
 });
 
+/** Each call is a paid web search. A focused question fits well under this bound. */
+export const researchInputSchema = z.object({ question: z.string().trim().min(1).max(500) });
+
 export default defineTool({
   description:
     "Research a public question on the web. Returns an answer with source records. " +
     "Use only when outside information helps the note. Ask a focused question, not the entire private note.",
-  inputSchema: z.object({ question: z.string().trim().min(1) }),
+  inputSchema: researchInputSchema,
   label: { start: () => "Researching sources" },
   // Research returns one opaque response, so a stalled tool needs its own runtime deadline.
   execute: ({ question }, ctx) =>

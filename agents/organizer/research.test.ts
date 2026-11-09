@@ -162,3 +162,28 @@ await test("a provider ignoring cancellation cannot return a successful late res
     message: "Research cancelled.",
   });
 });
+
+await test("an overlong research question is rejected before any provider request", async () => {
+  // The tool module reads organizer configuration on import. These values are synthetic.
+  Object.assign(process.env, {
+    OPENROUTER_API_KEY: "synthetic-key",
+    ORGANIZER_MODEL: "openai/gpt-4.1-mini",
+    ORGANIZER_CONTEXT_TOKENS: "128000",
+    ORGANIZER_IDLE_TIMEOUT_MS: "60000",
+    ORGANIZER_SERVICE_TOKEN: "synthetic-service-token-at-least-32-characters",
+  });
+  const realFetch = globalThis.fetch;
+  let calls = 0;
+  globalThis.fetch = async () => {
+    calls += 1;
+    throw new Error("No provider call expected.");
+  };
+  try {
+    const { researchInputSchema } = await import("./agent/tools/research.ts");
+    assert.equal(researchInputSchema.safeParse({ question: "x".repeat(501) }).success, false);
+    assert.equal(researchInputSchema.safeParse({ question: ` ${"x".repeat(500)} ` }).success, true);
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+  assert.equal(calls, 0);
+});

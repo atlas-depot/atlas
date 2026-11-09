@@ -190,18 +190,12 @@ it("coalesces concurrent starts across API pools and reconnects to the same draf
 });
 
 it("reads five simultaneous runs without exhausting its five-connection pool", async () => {
-  const f = await fixture();
-  const backend = f.manager();
-  const created = await Promise.all(
-    Array.from({ length: 5 }, () => f.noteStore.create(f.owner, noteInput)),
-  );
-  const runs = await Promise.all(created.map((note) => backend.start(f.owner, note.note.id)));
-  f.complete();
+  // Five owners share one pool, because one owner may not hold five active runs.
+  const owners = await Promise.all(Array.from({ length: 5 }, () => fixture()));
+  const runs = await Promise.all(owners.map((f) => f.start()));
+  for (const f of owners) f.complete();
   const results = await Promise.all(
-    runs.map((run) => {
-      if (!("runId" in run)) throw new Error("Expected owned run");
-      return backend.read(f.owner, run.runId);
-    }),
+    owners.map((f, index) => f.manager().read(f.owner, runs[index])),
   );
   expect(results.map((result) => result.status)).toEqual(Array(5).fill("draft"));
 });
@@ -382,6 +376,25 @@ it.each(["edit", "delete"] as const)(
     }
   },
 );
+
+it("inspects without holding the run lock and discards an answer that a cancel overtook", async () => {
+  const f = await fixture();
+  const runId = await f.start();
+  f.complete();
+  let cancelled: unknown;
+  f.duringInspection(async () => {
+    // A reader that held the row lock across inspect() would block this cancel forever.
+    cancelled = await f.manager(otherConnection.db).cancel(f.owner, runId);
+  });
+  expect(await f.manager().read(f.owner, runId)).toEqual({ status: "cancelled" });
+  expect(cancelled).toEqual({ status: "cancelled" });
+  expect(f.retired).toEqual(new Set([`session-${runId}`]));
+  expect(await f.store.read(f.owner, runId)).toMatchObject({
+    active: false,
+    state: { status: "cancelled" },
+    runtime: null,
+  });
+});
 
 it("recovers a lost acceptance with the same payload and pinned deployment after restart", async () => {
   const f = await fixture();

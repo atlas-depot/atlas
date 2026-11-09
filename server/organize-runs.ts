@@ -1,6 +1,7 @@
 import type {
   createOrganizeRunStore,
   OrganizeRunRecord,
+  OrganizeRunState,
   RunTerminalState,
 } from "./db/organize-runs.ts";
 import {
@@ -9,26 +10,11 @@ import {
   type GeneratedDraft,
   type OrganizeUsage,
 } from "./organize-note.ts";
+import type { StoredNote } from "./db/notes.ts";
+
+export type { OrganizeRunState } from "./db/organize-runs.ts";
 
 export const ORGANIZE_METADATA_RETENTION_MS = 48 * 60 * 60 * 1_000;
-export type OrganizeRunState =
-  | {
-      status: "draft";
-      draft: GeneratedDraft;
-      source: { noteId: string; revision: number; stale: boolean };
-    }
-  | {
-      status: "running";
-      phase: "starting" | "researching" | "writing";
-      phaseStartedAt?: number;
-      lastProgressAt?: number;
-      stalled?: boolean;
-    }
-  | { status: "not_found" | "cancelled" | "cleaning" | "expired" }
-  | {
-      status: "failed";
-      reason: "cleanup_failed" | "read_failed" | "generation_failed" | "invalid_draft";
-    };
 
 type RuntimeReference = NonNullable<OrganizeRunRecord["runtime"]>;
 export type DurableOrganizer = {
@@ -53,6 +39,8 @@ export type DurableOrganizer = {
   >;
   retire(reference: RuntimeReference): Promise<{ status: "ended" | "expired" }>;
 };
+type DeliveredReference = RuntimeReference & { deliveryId: string };
+type Inspection = Awaited<ReturnType<DurableOrganizer["inspect"]>>;
 
 type RunStore = ReturnType<typeof createOrganizeRunStore>;
 
@@ -212,85 +200,113 @@ export function createDurableOrganizeRuns({
     );
   };
 
+  // Decides what the database alone can decide under the row lock. Given an inspection,
+  // applies that runtime observation; without one, returns the reference to inspect.
+  const settle = async (
+    record: OrganizeRunRecord,
+    save: (next: OrganizeRunRecord) => Promise<void>,
+    readSource: () => Promise<StoredNote | undefined>,
+    result?: Inspection,
+  ): Promise<{ record: OrganizeRunRecord; inspect?: DeliveredReference }> => {
+    if (!record.active || record.cleanupTarget) return { record };
+    const current = await readSource();
+    let target: RunTerminalState | undefined;
+    if (!current) target = { status: "not_found" };
+    else if (record.expiresAt !== null && record.expiresAt <= now()) target = { status: "expired" };
+    else if (record.state.status === "draft") {
+      const refreshed = {
+        ...record,
+        state: {
+          ...record.state,
+          source: { ...record.state.source, stale: current.revision !== record.sourceRevision },
+        },
+      };
+      await save(refreshed);
+      return { record: refreshed };
+    } else if (!result) {
+      if (!record.runtime?.deliveryId)
+        throw new Error("Organizer runtime identity is unavailable.");
+      return { record, inspect: { ...record.runtime, deliveryId: record.runtime.deliveryId } };
+    } else if (result.status === "draft") {
+      const draft = generatedDraftSchema.safeParse(result.draft);
+      if (!draft.success) target = { status: "failed", reason: "invalid_draft" };
+      else {
+        const expiresAt = (result.completedAt ?? now()) + resultRetentionMs;
+        if (expiresAt <= now()) target = { status: "expired" };
+        else {
+          const next: OrganizeRunRecord = {
+            ...record,
+            state: {
+              status: "draft",
+              draft: draft.data,
+              source: {
+                noteId: record.noteId,
+                revision: record.sourceRevision,
+                stale: current.revision !== record.sourceRevision,
+              },
+            },
+            expiresAt,
+          };
+          await save(next);
+          return { record: next };
+        }
+      }
+    } else if (result.status === "running") {
+      const { usage: _usage, ...state } = result;
+      const next = { ...record, state };
+      await save(next);
+      return { record: next };
+    } else if (result.status === "failed") {
+      target =
+        result.reason === "expired"
+          ? { status: "expired" }
+          : { status: "failed", reason: result.reason };
+    } else {
+      // Copy only the status: a cancelled answer can carry usage, which is not terminal state.
+      target = { status: result.status };
+    }
+    if (!target) throw new Error("Organizer observation did not resolve a state.");
+    const next: OrganizeRunRecord = {
+      ...record,
+      state: { status: "cleaning" },
+      cleanupTarget: target,
+      input: null,
+      expiresAt: null,
+    };
+    await save(next);
+    return { record: next };
+  };
+
+  // An unlocked inspection may only update the exact stored state it was taken from.
+  const sameObservation = (basis: OrganizeRunRecord, stored: OrganizeRunRecord) =>
+    stored.runtime?.sessionId === basis.runtime?.sessionId &&
+    stored.runtime?.deliveryId === basis.runtime?.deliveryId &&
+    JSON.stringify(stored.state) === JSON.stringify(basis.state) &&
+    JSON.stringify(stored.usage) === JSON.stringify(basis.usage);
+
   const read = async (ownerId: string, runId: string): Promise<OrganizeRunState> => {
     const found = await store.read(ownerId, runId);
     if (!found?.active) return view(found);
     if (found.cleanupTarget) return finishCleanup(ownerId, runId);
-    await ensureStarted(ownerId, runId);
-    // Persist completion/cleanup intent in one transaction, end the session in a later one.
+    // Runtime identity never changes once delivered, so this unlocked read is authoritative.
+    if (!found.runtime?.deliveryId) await ensureStarted(ownerId, runId);
+    const prepared = await store.withRun(ownerId, runId, (record, save, readSource) =>
+      settle(record, save, readSource),
+    );
+    if (!prepared?.inspect) {
+      const settled = prepared?.record;
+      return settled?.cleanupTarget ? finishCleanup(ownerId, runId) : view(settled);
+    }
+    const basis = prepared.record;
+    // The runtime can take the whole request timeout to answer. Hold no row lock or pooled
+    // connection meanwhile, then persist the answer in a second short transaction.
+    const result = await runtimeFor(basis.runtimeUrl).inspect(prepared.inspect);
     const observed = await store.withRun(ownerId, runId, async (record, save, readSource) => {
       if (!record.active || record.cleanupTarget) return record;
-      let current = await readSource();
-      let target: RunTerminalState | undefined;
-      if (!current) target = { status: "not_found" };
-      else if (record.expiresAt !== null && record.expiresAt <= now())
-        target = { status: "expired" };
-      else if (record.state.status === "draft") {
-        const refreshed = {
-          ...record,
-          state: {
-            ...record.state,
-            source: { ...record.state.source, stale: current.revision !== record.sourceRevision },
-          },
-        };
-        await save(refreshed);
-        return refreshed;
-      } else {
-        if (!record.runtime?.deliveryId)
-          throw new Error("Organizer runtime identity is unavailable.");
-        const result = await runtimeFor(record.runtimeUrl).inspect({
-          ...record.runtime,
-          deliveryId: record.runtime.deliveryId,
-        });
-        if (result.usage) record = { ...record, usage: organizeUsageSchema.parse(result.usage) };
-        current = await readSource();
-        if (!current) target = { status: "not_found" };
-        else if (result.status === "draft") {
-          const draft = generatedDraftSchema.safeParse(result.draft);
-          if (!draft.success) target = { status: "failed", reason: "invalid_draft" };
-          else {
-            const expiresAt = (result.completedAt ?? now()) + resultRetentionMs;
-            if (expiresAt <= now()) target = { status: "expired" };
-            else {
-              const next: OrganizeRunRecord = {
-                ...record,
-                state: {
-                  status: "draft",
-                  draft: draft.data,
-                  source: {
-                    noteId: record.noteId,
-                    revision: record.sourceRevision,
-                    stale: current.revision !== record.sourceRevision,
-                  },
-                },
-                expiresAt,
-              };
-              await save(next);
-              return next;
-            }
-          }
-        } else if (result.status === "running") {
-          const { usage: _usage, ...state } = result;
-          const next = { ...record, state };
-          await save(next);
-          return next;
-        } else if (result.status === "failed") {
-          target =
-            result.reason === "expired"
-              ? { status: "expired" }
-              : { status: "failed", reason: result.reason };
-        } else target = result;
-      }
-      if (!target) throw new Error("Organizer observation did not resolve a state.");
-      const next: OrganizeRunRecord = {
-        ...record,
-        state: { status: "cleaning" },
-        cleanupTarget: target,
-        input: null,
-        expiresAt: null,
-      };
-      await save(next);
-      return next;
+      // Another request changed the run meanwhile: discard this answer, keep the stored state.
+      if (!sameObservation(basis, record)) return (await settle(record, save, readSource)).record;
+      const usage = result.usage ? organizeUsageSchema.parse(result.usage) : record.usage;
+      return (await settle({ ...record, usage }, save, readSource, result)).record;
     });
     return observed?.cleanupTarget ? finishCleanup(ownerId, runId) : view(observed);
   };

@@ -7,7 +7,7 @@ import { afterAll, afterEach, beforeAll, expect, it, vi } from "vite-plus/test";
 import { reconcileOrganizerRuns } from "../../agents/organizer/maintenance.ts";
 import { createApp } from "../app.ts";
 import { createRequestAuthenticator } from "../auth.ts";
-import { readCookie, SESSION_COOKIE_NAME } from "../cookies.ts";
+import { readCookie, sessionCookieName } from "../cookies.ts";
 import {
   createDurableOrganizeRuns,
   ORGANIZE_METADATA_RETENTION_MS,
@@ -15,14 +15,17 @@ import {
 } from "../organize-runs.ts";
 import { openDatabase, readTestDatabaseUrl } from "./connection.ts";
 import { applyMigrations } from "./migrations.ts";
-import { createNoteStore } from "./notes.ts";
-import { createOrganizeRunStore } from "./organize-runs.ts";
+import { organizeStartResponseSchema } from "../../shared/organize.ts";
+import { createNoteStore, noteTag } from "./notes.ts";
+import { createOrganizeRunStore, MAX_ACTIVE_RUNS_PER_OWNER } from "./organize-runs.ts";
 import { notes, organizeRuns } from "./schema.ts";
 
 // Real HTTP, migrations and PostgreSQL. Identity verification and eve are synthetic;
 // these tests do not claim WorkOS login or live model/provider verification.
 const databaseName = `atlas_http_${randomUUID().replaceAll("-", "")}`;
 const appOrigin = "https://atlas.example";
+// The HTTPS origin above gives the browser session cookie its __Host- name.
+const SESSION_COOKIE = sessionCookieName(true);
 const runtimeUrl = "https://private-organizer.example";
 const source = { title: "Private source", content: "Keep 42.", createdAt: "2026-11-01T00:00:00Z" };
 const draft = { markdown: "# Organized\n\nKeep 42.", sources: [] };
@@ -105,7 +108,7 @@ async function fixture() {
       return null;
     },
     async (request) =>
-      readCookie(request.headers.get("Cookie"), SESSION_COOKIE_NAME) === "synthetic-owner"
+      readCookie(request.headers.get("Cookie"), SESSION_COOKIE) === "synthetic-owner"
         ? { userId: owner }
         : null,
   );
@@ -132,7 +135,7 @@ async function fixture() {
     const request = async (path: string, init: RequestInit = {}) => {
       const headers = new Headers(init.headers);
       if (path.endsWith("/organize") && !headers.has("If-Match"))
-        headers.set("If-Match", JSON.stringify(`${note.note.id}:${note.revision}`));
+        headers.set("If-Match", noteTag(note.note.id, note.revision));
       if (!headers.has("Authorization")) headers.set("Authorization", "Bearer synthetic-owner");
       const response = await fetch(`${origin}/api${path}`, {
         ...init,
@@ -185,7 +188,7 @@ it("enforces authentication, cookie origin and bodyless UUID routes before dispa
     const response = await fetch(`${f.http.origin}/api${path}`, {
       method: "POST",
       headers: {
-        Cookie: `${SESSION_COOKIE_NAME}=synthetic-owner`,
+        Cookie: `${SESSION_COOKIE}=synthetic-owner`,
         ...(origin ? { Origin: origin } : {}),
       },
     });
@@ -198,7 +201,7 @@ it("enforces authentication, cookie origin and bodyless UUID routes before dispa
         method: "POST",
         headers: {
           Authorization: "Bearer invalid",
-          Cookie: `${SESSION_COOKIE_NAME}=synthetic-owner`,
+          Cookie: `${SESSION_COOKIE}=synthetic-owner`,
         },
       })
     ).status,
@@ -213,9 +216,9 @@ it("enforces authentication, cookie origin and bodyless UUID routes before dispa
   const accepted = await fetch(`${f.http.origin}/api${path}`, {
     method: "POST",
     headers: {
-      Cookie: `${SESSION_COOKIE_NAME}=synthetic-owner`,
+      Cookie: `${SESSION_COOKIE}=synthetic-owner`,
       Origin: appOrigin,
-      "If-Match": JSON.stringify(`${f.note.note.id}:1`),
+      "If-Match": noteTag(f.note.note.id, 1),
     },
   });
   expect(accepted.status).toBe(202);
@@ -276,6 +279,46 @@ it("coalesces simultaneous HTTP starts and reconnects through a new app and data
     body: { runId, status: "accepted" },
   });
   expect(f.runtime.submit).toHaveBeenCalledOnce();
+});
+
+it("caps one owner's active runs across notes under concurrent starts and frees a slot on cancel", async () => {
+  const f = await fixture();
+  const owned = [
+    f.note,
+    ...(await Promise.all(
+      Array.from({ length: MAX_ACTIVE_RUNS_PER_OWNER }, () => f.noteStore.create(f.owner, source)),
+    )),
+  ];
+  const organize = (note: (typeof owned)[number]) =>
+    f.http.request(`/notes/${note.note.id}/organize`, {
+      method: "POST",
+      headers: { "If-Match": noteTag(note.note.id, note.revision) },
+    });
+  // Claims for different notes do not share a row lock; the owner lock must admit exactly the cap.
+  const results = await Promise.all(owned.map(organize));
+  expect(results.map((result) => result.status).toSorted((a, b) => a - b)).toEqual([
+    ...Array<number>(MAX_ACTIVE_RUNS_PER_OWNER).fill(202),
+    429,
+  ]);
+  const limited = results.findIndex((result) => result.status === 429);
+  expect(results[limited].body).toEqual({
+    error: { code: "RATE_LIMITED", message: expect.any(String) },
+  });
+  expect(f.runtime.allocate).toHaveBeenCalledTimes(MAX_ACTIVE_RUNS_PER_OWNER);
+  const accepted = results.findIndex((result) => result.status === 202);
+  const { runId } = organizeStartResponseSchema.parse(results[accepted].body);
+  // At the cap, an owner can still reconnect to a run it already has.
+  expect(await organize(owned[accepted])).toEqual({
+    status: 202,
+    body: { runId, status: "accepted" },
+  });
+  expect((await f.http.request(`/organize-runs/${runId}/cancel`, { method: "POST" })).status).toBe(
+    200,
+  );
+  expect(await organize(owned[limited])).toEqual({
+    status: 202,
+    body: { runId: expect.any(String), status: "accepted" },
+  });
 });
 
 it("returns stale drafts without overwriting notes and erases delivered content while retaining 48h accounting", async () => {
@@ -378,7 +421,7 @@ it("recovers a committed start after the HTTP client disconnects before receivin
     method: "POST",
     headers: {
       Authorization: "Bearer synthetic-owner",
-      "If-Match": JSON.stringify(`${f.note.note.id}:1`),
+      "If-Match": noteTag(f.note.note.id, 1),
     },
     signal: abort.signal,
   }).then(
