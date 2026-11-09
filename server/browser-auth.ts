@@ -18,6 +18,8 @@ export type BrowserAuthOptions = Readonly<{
   appOrigin: string;
   cookiePassword: string;
   transactionTtlSeconds?: number;
+  /** Max-Age for the session cookie. Omitted, the cookie lasts until the browser drops it. */
+  sessionMaxAgeSeconds?: number;
   now?: () => number;
 }>;
 
@@ -97,7 +99,12 @@ export function createBrowserAuth(workos: WorkOS, options: BrowserAuthOptions): 
   const loginCookieSettings: CookieSettings = { path: "/api/auth", secure };
 
   function sessionCookie(sealedSession: string): string {
-    return serializeCookie(sessionCookieKey, sealedSession, sessionCookieSettings);
+    return serializeCookie(
+      sessionCookieKey,
+      sealedSession,
+      sessionCookieSettings,
+      options.sessionMaxAgeSeconds,
+    );
   }
 
   function clearSessionCookie(): string {

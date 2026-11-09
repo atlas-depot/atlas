@@ -3,7 +3,7 @@ import { once } from "node:events";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { WorkOS } from "@workos-inc/node";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vite-plus/test";
-import { createBrowserAuth, type BrowserAuth } from "./browser-auth.ts";
+import { createBrowserAuth, type BrowserAuth, type BrowserAuthOptions } from "./browser-auth.ts";
 import { LOGIN_TRANSACTION_COOKIE_NAME, readCookie, sessionCookieName } from "./cookies.ts";
 
 const issuer = "https://auth.example.test/";
@@ -156,7 +156,11 @@ beforeEach(() => {
   provider.requests = [];
 });
 
-function createAuth(overrides: { transactionTtlSeconds?: number } = {}): BrowserAuth {
+function createAuth(
+  overrides: Partial<
+    Pick<BrowserAuthOptions, "transactionTtlSeconds" | "sessionMaxAgeSeconds">
+  > = {},
+): BrowserAuth {
   const workos = new WorkOS({
     clientId,
     issuer,
@@ -309,6 +313,25 @@ describe("WorkOS browser auth with a synthetic provider", () => {
     const result = await complete(auth, await startLogin(auth));
     expect(result).toMatchObject({ ok: false, error: "invalid_code" });
     expect(provider.requests).toHaveLength(1);
+  });
+
+  it("applies the configured session lifetime to login and refreshed cookies only", async () => {
+    const plain = createAuth();
+    const unbounded = await complete(plain, await startLogin(plain));
+    if (!unbounded.ok) throw new Error("Synthetic login failed");
+    expect(unbounded.sessionCookie).not.toContain("Max-Age=");
+
+    provider.codeExpired = true;
+    const auth = createAuth({ sessionMaxAgeSeconds: 604_800 });
+    const login = await complete(auth, await startLogin(auth));
+    if (!login.ok) throw new Error("Synthetic login failed");
+    expect(login.sessionCookie).toMatch(/^__Host-atlas_session=[^;]+; Path=\/; Max-Age=604800; /);
+    // The transaction cookie keeps its own ten-minute lifetime; sign-out still clears with Max-Age=0.
+    expect(login.clearTransactionCookie).toContain("Max-Age=0");
+
+    const headers = new Headers();
+    await auth.readSession(sessionRequest(login.sessionCookie), headers);
+    expect(responseSetCookies(headers)[0]).toContain("Max-Age=604800");
   });
 
   it("refreshes an expired browser session and returns a new sealed cookie", async () => {
