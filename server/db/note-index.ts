@@ -3,6 +3,7 @@ import { z } from "zod";
 import { EMBEDDING_FINGERPRINT, embeddingVectorSchema } from "../../shared/embedding.ts";
 import { notePassageProjectionSchema } from "../../shared/passages.ts";
 import { noteIdSchema } from "../../shared/notes.ts";
+import { indexClaimSchema, type IndexClaim } from "../../shared/index-jobs.ts";
 import type { openDatabase } from "./connection.ts";
 import { noteIndexes, noteIndexIntents, notePassages, notes } from "./schema.ts";
 
@@ -41,9 +42,18 @@ export function createNoteIndexStore(db: Database) {
     async publish(
       ownerId: string,
       input: unknown,
+      job: { claim: IndexClaim; runId: string },
     ): Promise<"published" | "already_ready" | "stale" | "unavailable"> {
       const owner = z.string().min(1).parse(ownerId);
       const data = publicationSchema.parse(input);
+      const claim = indexClaimSchema.parse(job.claim);
+      const runId = z.string().min(1).max(500).parse(job.runId);
+      if (
+        data.noteId !== claim.noteId ||
+        data.revision !== claim.revision ||
+        data.fingerprint !== claim.fingerprint
+      )
+        return "stale";
       return db.transaction(async (tx) => {
         // Source writers take this same lock before invalidating or removing derived content.
         const [note] = await tx
@@ -64,7 +74,14 @@ export function createNoteIndexStore(db: Database) {
           .select()
           .from(noteIndexIntents)
           .where(eq(noteIndexIntents.noteId, note.id));
-        if (intent?.revision !== data.revision) return "stale";
+        if (
+          intent?.revision !== data.revision ||
+          intent.fingerprint !== claim.fingerprint ||
+          intent.claimToken !== claim.token ||
+          intent.runId !== runId ||
+          intent.runtimeUrl !== claim.runtimeUrl
+        )
+          return "stale";
         await tx.delete(noteIndexes).where(eq(noteIndexes.noteId, note.id));
         await tx
           .insert(noteIndexes)

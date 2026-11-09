@@ -19,6 +19,7 @@ import type { RunTerminalState } from "./organize-runs.ts";
 import type { NoteOrigin } from "../../shared/organize.ts";
 import type { NoteContent } from "../../shared/document.ts";
 import type { NotePassageSource } from "../../shared/passages.ts";
+import type { IndexFailureCode } from "../../shared/index-jobs.ts";
 import { EMBEDDING_DIMENSIONS } from "../../shared/embedding.ts";
 
 export const notes = pgTable(
@@ -51,11 +52,30 @@ export const noteIndexIntents = pgTable(
       .primaryKey()
       .references(() => notes.id, { onDelete: "cascade" }),
     revision: integer("revision").notNull(),
+    fingerprint: text("fingerprint").notNull(),
+    lastCheckedAt: timestamp("last_checked_at", { withTimezone: true, mode: "string" })
+      .notNull()
+      .defaultNow(),
+    claimToken: uuid("claim_token"),
+    runId: text("run_id"),
+    runtimeUrl: text("runtime_url"),
+    claimedAt: timestamp("claimed_at", { withTimezone: true, mode: "string" }),
+    retryAt: timestamp("retry_at", { withTimezone: true, mode: "string" }).defaultNow(),
+    failureCode: text("failure_code").$type<IndexFailureCode>(),
+    attempts: integer("attempts").notNull().default(0),
     requestedAt: timestamp("requested_at", { withTimezone: true, mode: "string" })
       .notNull()
       .defaultNow(),
   },
-  (table) => [check("note_index_intents_revision_positive", sql`${table.revision} > 0`)],
+  (table) => [
+    check("note_index_intents_revision_positive", sql`${table.revision} > 0`),
+    check("note_index_intents_attempts_nonnegative", sql`${table.attempts} >= 0`),
+    check(
+      "note_index_intents_claim_complete",
+      sql`(${table.claimToken} IS NULL AND ${table.runId} IS NULL AND ${table.runtimeUrl} IS NULL AND ${table.claimedAt} IS NULL) OR (${table.claimToken} IS NOT NULL AND ${table.runtimeUrl} IS NOT NULL AND ${table.claimedAt} IS NOT NULL)`,
+    ),
+    index("note_index_intents_checked_idx").on(table.lastCheckedAt, table.noteId),
+  ],
 );
 
 /** Only the current publication is retained; an empty publication has no passage rows. */

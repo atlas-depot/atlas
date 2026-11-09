@@ -72,6 +72,11 @@ beforeAll(async () => {
       ),
     ),
   );
+  await connection.db.execute(
+    sql.raw(
+      await readFile(new URL("../../drizzle/0008_note-index-jobs.sql", import.meta.url), "utf8"),
+    ),
+  );
   store = createNoteStore(connection.db);
   reopened = openDatabase(url.href);
 });

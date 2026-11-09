@@ -1,4 +1,5 @@
 import { eq, sql } from "drizzle-orm";
+import { EMBEDDING_FINGERPRINT } from "../../shared/embedding.ts";
 import type { openDatabase } from "./connection.ts";
 import { noteIndexes, noteIndexIntents, type notes } from "./schema.ts";
 
@@ -14,9 +15,21 @@ export async function requestNoteIndex(
   await tx.delete(noteIndexes).where(eq(noteIndexes.noteId, note.id));
   await tx
     .insert(noteIndexIntents)
-    .values({ noteId: note.id, revision: note.revision })
+    .values({ noteId: note.id, revision: note.revision, fingerprint: EMBEDDING_FINGERPRINT })
     .onConflictDoUpdate({
       target: noteIndexIntents.noteId,
-      set: { revision: note.revision, requestedAt: sql`clock_timestamp()` },
+      set: {
+        revision: note.revision,
+        fingerprint: EMBEDDING_FINGERPRINT,
+        requestedAt: sql`clock_timestamp()`,
+        lastCheckedAt: sql`clock_timestamp()`,
+        retryAt: sql`clock_timestamp()`,
+        claimToken: null,
+        runId: null,
+        runtimeUrl: null,
+        claimedAt: null,
+        failureCode: null,
+        attempts: 0,
+      },
     });
 }

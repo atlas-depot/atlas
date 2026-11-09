@@ -6,6 +6,7 @@ import { EMBEDDING_DIMENSIONS, EMBEDDING_FINGERPRINT } from "../../shared/embedd
 import { projectNotePassages } from "../passages.ts";
 import { openDatabase, readTestDatabaseUrl } from "./connection.ts";
 import { applyMigrations } from "./migrations.ts";
+import { createNoteIndexJobs } from "./note-index-jobs.ts";
 import { createNoteIndexStore } from "./note-index.ts";
 import { createNoteStore } from "./notes.ts";
 import { noteIndexes, noteIndexIntents, notePassages } from "./schema.ts";
@@ -52,7 +53,12 @@ async function fixture(content = "First fact.\n\nSecond fact.") {
     version: JSON.stringify(`${note.note.id}:${note.revision}`),
     content,
   });
+  const claim = await createNoteIndexJobs(connection.db).claim(note.note.id, "https://index.test");
+  if (!claim) throw new Error("Fixture claim failed");
+  const runId = randomUUID();
+  await createNoteIndexJobs(connection.db).bind(claim, runId);
   return {
+    job: { claim, runId },
     owner,
     note,
     publication: {
@@ -69,15 +75,15 @@ it("publishes all current passages once and scopes reads to the live owner and p
   const f = await fixture();
   const store = createNoteIndexStore(connection.db);
   const results = await Promise.all([
-    store.publish(f.owner, f.publication),
-    createNoteIndexStore(other.db).publish(f.owner, f.publication),
+    store.publish(f.owner, f.publication, f.job),
+    createNoteIndexStore(other.db).publish(f.owner, f.publication, f.job),
   ]);
   expect(results.sort()).toEqual(["already_ready", "published"]);
   const current = await store.readCurrent(f.owner, f.note.note.id);
   expect(current?.passages.map(({ text }) => text)).toEqual(["First fact.", "Second fact."]);
   expect(current?.passages.every(({ embedding }) => embedding.length === 1536)).toBe(true);
   expect(await store.readCurrent("foreign-owner", f.note.note.id)).toBeUndefined();
-  expect(await store.publish("foreign-owner", f.publication)).toBe("unavailable");
+  expect(await store.publish("foreign-owner", f.publication, f.job)).toBe("unavailable");
   expect(
     await connection.db
       .select()
@@ -94,7 +100,7 @@ it("publishes all current passages once and scopes reads to the live owner and p
 it("represents a supported empty note as ready with zero passages", async () => {
   const f = await fixture("");
   const store = createNoteIndexStore(connection.db);
-  expect(await store.publish(f.owner, f.publication)).toBe("published");
+  expect(await store.publish(f.owner, f.publication, f.job)).toBe("published");
   expect(await store.readCurrent(f.owner, f.note.note.id)).toEqual({
     revision: 1,
     fingerprint: EMBEDDING_FINGERPRINT,
@@ -105,7 +111,7 @@ it("represents a supported empty note as ready with zero passages", async () => 
 it("physically removes old derived content on edit and rejects a late completion", async () => {
   const f = await fixture();
   const store = createNoteIndexStore(connection.db);
-  expect(await store.publish(f.owner, f.publication)).toBe("published");
+  expect(await store.publish(f.owner, f.publication, f.job)).toBe("published");
   expect(
     (
       await createNoteStore(other.db).update(f.owner, f.note.note.id, 1, {
@@ -114,7 +120,7 @@ it("physically removes old derived content on edit and rejects a late completion
       })
     ).status,
   ).toBe("saved");
-  expect(await store.publish(f.owner, f.publication)).toBe("stale");
+  expect(await store.publish(f.owner, f.publication, f.job)).toBe("stale");
   expect(await store.readCurrent(f.owner, f.note.note.id)).toBeUndefined();
   expect(
     await connection.db.select().from(notePassages).where(eq(notePassages.noteId, f.note.note.id)),
@@ -132,11 +138,11 @@ it("physically removes old derived content on edit and rejects a late completion
 it("cannot recreate deleted content and cascades both publication and passages", async () => {
   const f = await fixture();
   const store = createNoteIndexStore(connection.db);
-  expect(await store.publish(f.owner, f.publication)).toBe("published");
+  expect(await store.publish(f.owner, f.publication, f.job)).toBe("published");
   expect(await createNoteStore(other.db).delete(f.owner, f.note.note.id, 1)).toEqual({
     status: "deleted",
   });
-  expect(await store.publish(f.owner, f.publication)).toBe("unavailable");
+  expect(await store.publish(f.owner, f.publication, f.job)).toBe("unavailable");
   expect(await store.readCurrent(f.owner, f.note.note.id)).toBeUndefined();
   expect(
     await connection.db.select().from(notePassages).where(eq(notePassages.noteId, f.note.note.id)),
@@ -157,39 +163,47 @@ it("rejects invalid vectors, incomplete projections and mismatched source/config
     [1e-30, ...vector().slice(1)],
   ]) {
     await expect(
-      store.publish(f.owner, { ...f.publication, embeddings: [bad, vector()] }),
+      store.publish(f.owner, { ...f.publication, embeddings: [bad, vector()] }, f.job),
     ).rejects.toThrow();
   }
   await expect(
-    store.publish(f.owner, { ...f.publication, fingerprint: "different-model" }),
+    store.publish(f.owner, { ...f.publication, fingerprint: "different-model" }, f.job),
   ).rejects.toThrow();
   await expect(
-    store.publish(f.owner, { ...f.publication, embeddings: [vector()] }),
+    store.publish(f.owner, { ...f.publication, embeddings: [vector()] }, f.job),
   ).rejects.toThrow();
   await expect(
-    store.publish(f.owner, {
-      ...f.publication,
-      projection: {
-        ...f.publication.projection,
-        status: "partial",
-        issues: [{ code: "passage_limit" }],
+    store.publish(
+      f.owner,
+      {
+        ...f.publication,
+        projection: {
+          ...f.publication.projection,
+          status: "partial",
+          issues: [{ code: "passage_limit" }],
+        },
       },
-    }),
+      f.job,
+    ),
   ).rejects.toThrow();
   await expect(
-    store.publish(f.owner, {
-      ...f.publication,
-      projection: {
-        status: "complete",
-        passages: [
-          {
-            text: "foreign",
-            source: { ...f.publication.projection.passages[0].source, version: "old-version" },
-          },
-        ],
+    store.publish(
+      f.owner,
+      {
+        ...f.publication,
+        projection: {
+          status: "complete",
+          passages: [
+            {
+              text: "foreign",
+              source: { ...f.publication.projection.passages[0].source, version: "old-version" },
+            },
+          ],
+        },
+        embeddings: [vector()],
       },
-      embeddings: [vector()],
-    }),
+      f.job,
+    ),
   ).rejects.toThrow();
   expect(await store.readCurrent(f.owner, f.note.note.id)).toBeUndefined();
   expect(
@@ -207,7 +221,7 @@ it("rolls back metadata and preserves intent when a passage insert fails", async
   );
   try {
     await expect(
-      createNoteIndexStore(connection.db).publish(f.owner, f.publication),
+      createNoteIndexStore(connection.db).publish(f.owner, f.publication, f.job),
     ).rejects.toThrow();
     expect(
       await createNoteIndexStore(other.db).readCurrent(f.owner, f.note.note.id),
@@ -224,7 +238,7 @@ it("rolls back metadata and preserves intent when a passage insert fails", async
   } finally {
     await connection.db.execute(sql`ALTER TABLE note_passages DROP CONSTRAINT synthetic_failure`);
   }
-  expect(await createNoteIndexStore(connection.db).publish(f.owner, f.publication)).toBe(
+  expect(await createNoteIndexStore(connection.db).publish(f.owner, f.publication, f.job)).toBe(
     "published",
   );
 });
@@ -233,7 +247,7 @@ it("serializes a racing edit and publication without retaining old vectors", asy
   const f = await fixture();
   const store = createNoteIndexStore(connection.db);
   const [published, edited] = await Promise.all([
-    store.publish(f.owner, f.publication),
+    store.publish(f.owner, f.publication, f.job),
     createNoteStore(other.db).update(f.owner, f.note.note.id, 1, {
       title: "Edited",
       content: "Updated source",

@@ -1,3 +1,4 @@
+import { EMBEDDING_FINGERPRINT } from "../../shared/embedding.ts";
 import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { eq, sql } from "drizzle-orm";
@@ -67,6 +68,11 @@ beforeAll(async () => {
       ),
     ),
   );
+  await connection.db.execute(
+    sql.raw(
+      await readFile(new URL("../../drizzle/0008_note-index-jobs.sql", import.meta.url), "utf8"),
+    ),
+  );
 });
 
 afterAll(async () => {
@@ -82,7 +88,14 @@ afterAll(async () => {
 });
 
 const intents = (id: string) =>
-  other.db.select().from(noteIndexIntents).where(eq(noteIndexIntents.noteId, id));
+  other.db
+    .select({
+      noteId: noteIndexIntents.noteId,
+      revision: noteIndexIntents.revision,
+      requestedAt: noteIndexIntents.requestedAt,
+    })
+    .from(noteIndexIntents)
+    .where(eq(noteIndexIntents.noteId, id));
 
 async function temporaryDraft(owner: string) {
   const source = await createNoteStore(connection.db).create(owner, input);
@@ -107,6 +120,20 @@ it("backfills an existing note at its current revision without changing its cont
   expect(await intents(legacyId)).toEqual([
     { noteId: legacyId, revision: 7, requestedAt: expect.any(String) },
   ]);
+  const [backfilled] = await connection.db
+    .select()
+    .from(noteIndexIntents)
+    .where(eq(noteIndexIntents.noteId, legacyId));
+  expect(backfilled).toMatchObject({
+    fingerprint: EMBEDDING_FINGERPRINT,
+    claimToken: null,
+    runId: null,
+    runtimeUrl: null,
+    claimedAt: null,
+    failureCode: null,
+    attempts: 0,
+    retryAt: expect.any(String),
+  });
   expect(await createNoteStore(other.db).read("legacy-owner", legacyId)).toEqual({
     note: { ...input, id: legacyId, updatedAt: input.createdAt },
     revision: 7,
