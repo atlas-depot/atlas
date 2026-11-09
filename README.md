@@ -6,7 +6,7 @@ Atlas has an authenticated React/TypeScript notes workspace and a Hono API that 
 
 ## Start development
 
-Use Node `24.22.0` and pnpm `11.23.0`:
+Use Node `26.13.0` and pnpm `11.23.0`:
 
 ```sh
 pnpm install --frozen-lockfile
