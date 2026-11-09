@@ -2,35 +2,26 @@ import { apiErrorSchema, ifMatchSchema } from "../../shared/http";
 import { noteDraftSchema, organizeWorkSchema, type NoteDraft } from "../../shared/drafts";
 import { organizeRunResponseSchema, organizeStartResponseSchema } from "../../shared/organize";
 import { noteContentSchema, noteIdSchema, noteSchema, type UpdateNote } from "../../shared/notes";
+import { boundedFetch } from "../lib/http";
 import { NotesRequestError, type NoteSnapshot } from "./notes-store";
 
 /** Same-origin private API. No draft content is persisted in browser storage. */
 export function createOrganizeClient(request: typeof fetch = globalThis.fetch) {
   async function response(path: string, init: RequestInit = {}) {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 30_000);
-    try {
-      const result = await request(`/api${path}`, {
-        ...init,
-        credentials: "same-origin",
-        signal: controller.signal,
-      });
-      const bytes = await result.arrayBuffer();
-      const copy = new Response(bytes.byteLength ? bytes : null, {
-        status: result.status,
-        headers: result.headers,
-      });
-      if (!copy.ok) {
-        const error = apiErrorSchema.safeParse(await copy.json().catch(() => null));
-        throw new NotesRequestError(
-          copy.status,
-          error.success ? error.data.error.code : "INVALID_RESPONSE",
-        );
-      }
-      return copy;
-    } finally {
-      clearTimeout(timer);
+    const result = await boundedFetch(
+      `/api${path}`,
+      { ...init, credentials: "same-origin" },
+      30_000,
+      request,
+    );
+    if (!result.ok) {
+      const error = apiErrorSchema.safeParse(await result.json().catch(() => null));
+      throw new NotesRequestError(
+        result.status,
+        error.success ? error.data.error.code : "INVALID_RESPONSE",
+      );
     }
+    return result;
   }
   async function draft(result: Response): Promise<NoteDraft> {
     const value = noteDraftSchema.parse(await result.json());

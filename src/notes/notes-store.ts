@@ -8,21 +8,29 @@ import {
   updateNoteSchema,
   type CreateNote,
   type Note,
+  type NoteSummary,
   type UpdateNote,
 } from "../../shared/notes";
+import { boundedFetch } from "../lib/http";
 
 export interface NoteSnapshot {
   note: Note;
   etag: string;
 }
 
-/** Matches #45/#56. Open list records individually to obtain their authoritative content and ETag. */
+/** Matches #45/#56. List rows carry no content; open each note for its content and ETag. */
 export interface NotesStore {
-  list(): Promise<Note[]>;
+  list(): Promise<NoteSummary[]>;
   read(id: string): Promise<NoteSnapshot>;
   create(input: CreateNote, key: string): Promise<NoteSnapshot>;
   update(id: string, input: UpdateNote, etag: string): Promise<NoteSnapshot>;
   delete(id: string, etag: string): Promise<void>;
+}
+
+/** The list row for a note the client already holds in full. */
+export function toSummary(note: Note): NoteSummary {
+  const { content: _content, ...summary } = note;
+  return summary;
 }
 
 export class NotesRequestError extends Error {
@@ -41,38 +49,13 @@ export function createNotesClient(
   request: typeof fetch = globalThis.fetch,
   timeoutMs = 30_000,
 ): NotesStore {
-  async function boundedRequest(path: string, init: RequestInit) {
-    const controller = new AbortController();
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    const timeout = new Promise<never>((_, reject) => {
-      timer = setTimeout(() => {
-        controller.abort();
-        reject(new Error("The notes request timed out."));
-      }, timeoutMs);
-    });
-    try {
-      return await Promise.race([
-        (async () => {
-          const result = await request(path, { ...init, signal: controller.signal });
-          // Bound body delivery as well as headers. Late responses cannot update the screen.
-          const body = await result.arrayBuffer();
-          return new Response(body.byteLength ? body : null, {
-            status: result.status,
-            statusText: result.statusText,
-            headers: result.headers,
-          });
-        })(),
-        timeout,
-      ]);
-    } finally {
-      clearTimeout(timer);
-    }
-  }
   async function response(path: string, init: RequestInit = {}, expectedStatus = 200) {
-    const result = await boundedRequest(`/api/notes${path}`, {
-      ...init,
-      credentials: "same-origin",
-    });
+    const result = await boundedFetch(
+      `/api/notes${path}`,
+      { ...init, credentials: "same-origin" },
+      timeoutMs,
+      request,
+    );
     if (!result.ok) {
       const error = apiErrorSchema.safeParse(await result.json().catch(() => null));
       throw new NotesRequestError(

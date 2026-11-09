@@ -3,7 +3,8 @@ import { Button } from "@/components/ui/button";
 import type { NoteDraft } from "../../shared/drafts";
 import type { OrganizeRunResponse } from "../../shared/organize";
 import { type OrganizeClient } from "./organize-store";
-import { NotesRequestError, type NoteSnapshot } from "./notes-store";
+import type { NoteSnapshot } from "./notes-store";
+import { classifyFailure } from "./editor-state";
 import { AIDraftPanel } from "./AIDraftPanel";
 import "./organize-workspace.css";
 
@@ -102,11 +103,13 @@ export function OrganizeWorkspace({
       }
     } catch (cause) {
       if (!alive.current) return;
-      if (cause instanceof NotesRequestError && cause.status === 412)
+      // 412: the saved note revision is stale. 409: an AI draft for this note already exists.
+      const kind = classifyFailure(cause);
+      if (kind === "conflict")
         setFailure(
           "The saved note changed before Organize started. Reload or compare the latest note, then try again.",
         );
-      else if (cause instanceof NotesRequestError && cause.status === 409) {
+      else if (kind === "creation-conflict") {
         await recover();
         setFailure("Save or discard the existing AI draft before organizing this note again.");
       } else {
@@ -266,7 +269,7 @@ function RunPanel({
       } catch (cause) {
         try {
           if (!active || (await recoveredDraft())) return;
-          if (cause instanceof NotesRequestError && cause.status === 404) {
+          if (classifyFailure(cause) === "missing") {
             // Only retire a missing handle after checking for a delivered draft.
             // A failed recovery read must remain reconnectable instead.
             if (active) {
@@ -301,6 +304,28 @@ function RunPanel({
       setCancelling(false);
     }
   }
+  const progress = failedRead
+    ? "Connection interrupted. Reconnect to the same work."
+    : !state
+      ? "Reconnecting..."
+      : state.status === "running"
+        ? state.phase === "researching"
+          ? "Researching sources..."
+          : state.phase === "writing"
+            ? "Writing your draft..."
+            : "Starting..."
+        : state.status === "cleaning"
+          ? "Finishing cleanup..."
+          : state.status === "draft"
+            ? "Saving your temporary draft..."
+            : state.status === "cancelled"
+              ? "Generation cancelled."
+              : state.status === "expired"
+                ? "This generation expired or is no longer available."
+                : state.status === "failed" && state.reason === "cleanup_failed"
+                  ? "Cleanup is pending. Your original is unchanged."
+                  : "Generation failed. Your original is unchanged.";
+  const failing = failedRead || state?.status === "failed";
   const terminal =
     state?.status === "cancelled" ||
     state?.status === "expired" ||
@@ -308,29 +333,11 @@ function RunPanel({
   return (
     <section aria-label="Organize progress" className="organize-progress space-y-3">
       <h2 className="font-medium">Organizing your note</h2>
-      <p role={failedRead || state?.status === "failed" ? "alert" : "status"}>
-        {failedRead
-          ? "Connection interrupted. Reconnect to the same work."
-          : !state
-            ? "Reconnecting..."
-            : state.status === "running"
-              ? state.phase === "researching"
-                ? "Researching sources..."
-                : state.phase === "writing"
-                  ? "Writing your draft..."
-                  : "Starting..."
-              : state.status === "cleaning"
-                ? "Finishing cleanup..."
-                : state.status === "draft"
-                  ? "Saving your temporary draft..."
-                  : state.status === "cancelled"
-                    ? "Generation cancelled."
-                    : state.status === "expired"
-                      ? "This generation expired or is no longer available."
-                      : state.status === "failed" && state.reason === "cleanup_failed"
-                        ? "Cleanup is pending. Your original is unchanged."
-                        : "Generation failed. Your original is unchanged."}
-      </p>
+      {/* Both live regions stay mounted so a progress-to-failure switch is announced. */}
+      <div>
+        <p role="status">{failing ? null : progress}</p>
+        <p role="alert">{failing ? progress : null}</p>
+      </div>
       {state?.status === "running" && state.stalled && (
         <p>No recent progress. You can keep waiting or cancel.</p>
       )}

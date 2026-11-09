@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vite-plus/test";
-import { createNotesClient, NotesRequestError } from "./notes-store";
+import { createNotesClient, NotesRequestError, toSummary } from "./notes-store";
 
 const createKey = "a1000000-0000-4000-8000-000000000001";
 const id = "f0a10b01-4b98-4d4a-aabb-000000000001";
@@ -10,6 +10,7 @@ const note = {
   createdAt: "2026-10-28T09:00:00.000Z",
   updatedAt: "2026-10-28T09:00:00.000Z",
 };
+const summary = toSummary(note);
 const result = (etag: string, status = 200) =>
   Response.json(note, { status, headers: { ETag: etag } });
 
@@ -17,10 +18,10 @@ describe("notes REST client", () => {
   it("lists then opens an individual note and retains its exact strong ETag", async () => {
     const request = vi
       .fn<typeof fetch>()
-      .mockResolvedValueOnce(Response.json({ notes: [note] }))
+      .mockResolvedValueOnce(Response.json({ notes: [summary] }))
       .mockResolvedValueOnce(result('"opaque-17"'));
     const client = createNotesClient(request);
-    expect(await client.list()).toEqual([note]);
+    expect(await client.list()).toEqual([summary]);
     expect(await client.read(id)).toEqual({ note, etag: '"opaque-17"' });
     expect(request.mock.calls.map(([url]) => url)).toEqual(["/api/notes", `/api/notes/${id}`]);
     expect(request.mock.calls[1][1]).toMatchObject({
@@ -214,7 +215,7 @@ it("does not automatically retry a create whose response is lost after the write
       committed.push({ ...note });
       return Promise.reject(new TypeError("Synthetic response lost after commit"));
     }
-    return Promise.resolve(Response.json({ notes: committed }));
+    return Promise.resolve(Response.json({ notes: committed.map(toSummary) }));
   });
   const client = createNotesClient(request);
   await expect(
@@ -225,7 +226,7 @@ it("does not automatically retry a create whose response is lost after the write
   ).rejects.toThrow();
   expect(committed).toHaveLength(1);
   expect(request.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(1);
-  expect(await client.list()).toEqual([note]);
+  expect(await client.list()).toEqual([summary]);
 });
 
 it("rejects an invalid creation key before dispatch and retains typed replay conflicts", async () => {

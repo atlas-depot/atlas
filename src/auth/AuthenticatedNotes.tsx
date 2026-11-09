@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { NotesWorkspace } from "@/notes/NotesWorkspace";
 import type { NotesStore } from "@/notes/notes-store";
 import { createSessionClient } from "./session";
+import { SignInLink } from "./SignInLink";
 import { createOrganizeClient, type OrganizeClient } from "@/notes/organize-store";
 
 const sessionClient = createSessionClient();
@@ -147,12 +148,7 @@ export function AuthenticatedNotes({ store }: { store: NotesStore }) {
       <main className="notes-workspace space-y-5 p-4 sm:p-6">
         <h1 className="text-2xl font-semibold">Atlas notes</h1>
         <p>Sign in to view and edit your notes.</p>
-        <a
-          className="inline-flex min-h-11 items-center underline underline-offset-4"
-          href="/api/auth/login"
-        >
-          Sign in
-        </a>
+        <SignInLink>Sign in</SignInLink>
       </main>
     );
   }
@@ -171,12 +167,7 @@ export function AuthenticatedNotes({ store }: { store: NotesStore }) {
           >
             Retry
           </Button>
-          <a
-            className="inline-flex min-h-11 items-center underline underline-offset-4"
-            href="/api/auth/login"
-          >
-            Sign in
-          </a>
+          <SignInLink>Sign in</SignInLink>
         </div>
       </main>
     );
@@ -196,11 +187,19 @@ export function AuthenticatedNotes({ store }: { store: NotesStore }) {
       </header>
       {sessionCheck !== "verified" && (
         <div className="space-y-3 px-4 pt-4 sm:px-6">
-          <p role={sessionCheck === "failed" ? "alert" : "status"}>
-            {sessionCheck === "checking"
-              ? "Checking your session. Note requests are paused."
-              : "Could not confirm your session. Your draft is preserved; note requests are paused."}
-          </p>
+          {/* Both live regions stay mounted while paused, so checking-to-failed is announced. */}
+          <div>
+            <p role="status">
+              {sessionCheck === "checking"
+                ? "Checking your session. Note requests are paused."
+                : null}
+            </p>
+            <p role="alert">
+              {sessionCheck === "failed"
+                ? "Could not confirm your session. Your draft is preserved; note requests are paused."
+                : null}
+            </p>
+          </div>
           {sessionCheck === "failed" && (
             <Button onClick={() => setAttempt((value) => value + 1)}>Retry session check</Button>
           )}

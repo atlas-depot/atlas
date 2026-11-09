@@ -9,6 +9,8 @@ const runId = "00000000-0000-4000-8000-000000000002";
 const draftId = "00000000-0000-4000-8000-000000000003";
 const savedId = "00000000-0000-4000-8000-000000000004";
 const date = "2026-11-05T12:00:00.000Z";
+/** GET /api/notes rows carry no content; per-note routes return the full note. */
+const listRow = ({ content: _content, ...row }: Note) => row;
 
 /** Intercepted HTTP state machine; real API/storage coverage lives in notes-organize-api. */
 async function fixture(page: Page) {
@@ -55,7 +57,7 @@ async function fixture(page: Page) {
     }),
   );
   await page.route("**/api/notes", (route) =>
-    route.fulfill({ json: { notes: [source, ...(saved ? [saved] : [])] } }),
+    route.fulfill({ json: { notes: [source, ...(saved ? [saved] : [])].map(listRow) } }),
   );
   await page.route(`**/api/notes/${sourceId}`, (route) => {
     if (route.request().method() === "PUT") {
@@ -835,7 +837,7 @@ for (const changed of ["edited", "deleted"] as const) {
             ...(changed === "edited" && originalSaved
               ? [{ ...originalSaved, title: "Changed elsewhere" }]
               : []),
-          ],
+          ].map(listRow),
         },
       });
     });
