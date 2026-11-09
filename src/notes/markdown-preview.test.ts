@@ -1,12 +1,12 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vite-plus/test";
-import { MarkdownPreview } from "./MarkdownPreview";
+import MarkdownRenderer from "./MarkdownRenderer";
 
 describe("safe Markdown preview", () => {
   it("renders supported Markdown as semantic elements, preserving literal code", () => {
     const html = renderToStaticMarkup(
-      createElement(MarkdownPreview, {
+      createElement(MarkdownRenderer, {
         content:
           "# Heading\n\nA **strong** and *emphasized* paragraph.\n\n- First\n- Second\n\n> Quote\n\n| Key | Value |\n| --- | --- |\n| A | B |\n\n[Project](https://example.com)\n\n```html\n<script>literal()</script>\n```",
       }),
@@ -29,7 +29,7 @@ describe("safe Markdown preview", () => {
 
   it("drops raw HTML and remote images and neutralizes unsafe link protocols", () => {
     const html = renderToStaticMarkup(
-      createElement(MarkdownPreview, {
+      createElement(MarkdownRenderer, {
         content:
           '<script>window.hacked = true</script>\n\n<img src=x onerror="alert(1)">\n\n<iframe src="https://example.com"></iframe>\n\n[bad](javascript:alert%281%29)\n\n[data](data:text/html,boom)\n\n![tracking](https://example.com/pixel.png)\n\n[safe](https://example.com)',
       }),
