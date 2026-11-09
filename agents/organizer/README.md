@@ -64,7 +64,7 @@ can call the provider.
 
 ## Build and verification
 
-Use `pnpm --dir agents/organizer build` for the standalone eve service. A Vercel project rooted at `agents/organizer` must include workspace files outside that directory and install the root workspace. Use Node 24, normal `eve build`, the private service token and provider settings. Hosted builds supply Vercel OIDC for eve's default sandbox preparation. A local build with `--skip-sandbox-prewarm` only checks generated structure; it is not proof of a deployable artifact. No sandbox tool is exposed to this agent.
+Use `pnpm --dir agents/organizer build` for the standalone eve service. A Vercel project rooted at `agents/organizer` must include workspace files outside that directory and install the root workspace. Use Node 26, normal `eve build`, the private service token and provider settings. Hosted builds supply Vercel OIDC for eve's default sandbox preparation. A local build with `--skip-sandbox-prewarm` only checks generated structure; it is not proof of a deployable artifact. No sandbox tool is exposed to this agent.
 
 Set the database and maintenance settings only for the intended environment. `VERCEL_URL` supplies the schedule's immutable current deployment URL when `ORGANIZER_RUNTIME_URL` is omitted. Hono must use the same immutable URL. Deployment Protection, if enabled, also needs supported server-to-server access before the service can be reached. A cron definition in build output is not proof that the hosted scheduler ran.
 

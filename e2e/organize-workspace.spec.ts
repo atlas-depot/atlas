@@ -473,9 +473,13 @@ test("session revalidation pauses draft autosave and account switching clears pr
 }) => {
   const state = await fixture(page);
   state.resumeDraft();
+  await page.clock.install({ time: new Date(date) });
   await page.goto("/");
   await expect(draftEditor(page)).toBeVisible();
-  await page.clock.install();
+  // Settle the initial Markdown import, then freeze the edit-to-focus interval.
+  await page.clock.pauseAt(new Date("2026-11-05T12:01:00.000Z"));
+  await expect.poll(() => typeof state.draft?.content).toBe("object");
+  await expect(panel(page).getByRole("status")).toHaveText("Draft saved");
   let finishSession: (() => void) | undefined;
   const sessionReady = new Promise<void>((resolve) => {
     finishSession = resolve;

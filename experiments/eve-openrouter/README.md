@@ -10,7 +10,7 @@ a model key or live invocation.
 
 ## Run locally
 
-Use Node 24.22.0 and pnpm 11.23.0. From this directory:
+Use Node 26.13.0 and pnpm 11.23.0. From this directory:
 
 ```sh
 pnpm install --frozen-lockfile
@@ -49,7 +49,7 @@ for a request that already reached the provider.
 
 ## Boundaries
 
-- `eve@0.91.0` (the same version as `agents/organizer`), `ai@7.0.152`, and
+- `eve@0.91.0` (the same version as `agents/organizer`), `ai@7.0.163`, and
   `@openrouter/ai-sdk-provider@3.1.0` are pinned.
 - The provider model object routes through OpenRouter. A plain model ID string
   in eve would instead select Vercel AI Gateway.

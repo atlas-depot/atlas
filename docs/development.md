@@ -1,6 +1,6 @@
 # Development setup
 
-Use Node `24.22.0` and pnpm `11.23.0`, pinned in `.node-version` and `package.json`. Select the runtime with your existing version manager. Routine setup and tests need no provider credentials or paid accounts.
+Use Node `26.13.0` and pnpm `11.23.0`, pinned in `.node-version` and `package.json`. Select the runtime with your existing version manager. Routine setup and tests need no provider credentials or paid accounts.
 
 ## Tooling
 
