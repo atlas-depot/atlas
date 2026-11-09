@@ -12,6 +12,7 @@ import {
 } from "../../shared/notes.ts";
 import type { openDatabase } from "./connection.ts";
 import { noteCreateRequests, notes } from "./schema.ts";
+import { requestNoteIndex } from "./note-index-intents.ts";
 
 type Database = ReturnType<typeof openDatabase>["db"];
 type Row = typeof notes.$inferSelect;
@@ -45,11 +46,14 @@ export function createNoteStore(db: Database) {
     async create(ownerId: string, input: unknown): Promise<StoredNote> {
       const owner = ownerSchema.parse(ownerId);
       const data = createNoteSchema.parse(input);
-      const [row] = await db
-        .insert(notes)
-        .values({ ...data, ownerId: owner, updatedAt: data.createdAt })
-        .returning();
-      return storedNote(row);
+      return db.transaction(async (tx) => {
+        const [row] = await tx
+          .insert(notes)
+          .values({ ...data, ownerId: owner, updatedAt: data.createdAt })
+          .returning();
+        await requestNoteIndex(tx, row);
+        return storedNote(row);
+      });
     },
 
     async createIdempotent(
@@ -76,6 +80,7 @@ export function createNoteStore(db: Database) {
               .insert(notes)
               .values({ ...data, id: noteId, ownerId: owner, updatedAt: data.createdAt })
               .returning();
+            await requestNoteIndex(tx, row);
             return { status: "saved", value: storedNote(row) };
           }
 
@@ -139,6 +144,7 @@ export function createNoteStore(db: Database) {
           .set({ ...data, updatedAt: sql`clock_timestamp()`, revision: sql`${notes.revision} + 1` })
           .where(and(scope, eq(notes.revision, expected)))
           .returning();
+        await requestNoteIndex(tx, row);
         return { status: "saved", value: storedNote(row) };
       });
     },

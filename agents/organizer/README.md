@@ -40,6 +40,25 @@ Outer/research output limits are 16,384/8,192 tokens. Truncation or invalid outp
 
 Session titles are fixed and content tracing is disabled. Ending requests zero Workflow retention. A verified ended/expired session is not proof of immediate physical deletion, deletion from database backups, or deletion by model/search providers. Vercel documents physical copies can remain up to 36 days. Verify hosted access and retention before sending real private notes.
 
+## Note indexing
+
+Apply `0006_note-index` using the [write-paused cutover](../../docs/development.md#note-index-migration-cutover). Old note writers must be stopped and drained before its one-time backfill.
+
+The same private runtime executes note indexing for #67. `POST /internal/note-index/start`
+accepts only a note ID and requires the existing service Basic credential. It claims the
+current database intent and starts one Workflow. The single step reads, projects, embeds
+and publishes the note. Workflow arguments and results contain identifiers and an outcome,
+never note text or vectors. `GET /internal/note-index/runs/:runId` returns only run status.
+
+The existing maintenance schedule also reconciles index work when
+`ORGANIZER_MAINTENANCE_ENABLED=true`. Runs retain their immutable runtime URL. Unknown
+runtime status leaves a claim untouched. Confirmed terminal runs release their claim,
+and transient failures retry with full jitter from 30 seconds up to 15 minutes.
+Unsupported projections remain failed until the note changes. No public retry endpoint
+or retry button is required. Keep old deployments and their service credentials available
+until their work finishes. An expired allocation token fences a late Workflow before it
+can call the provider.
+
 ## Build and verification
 
 Use `pnpm --dir agents/organizer build` for the standalone eve service. A Vercel project rooted at `agents/organizer` must include workspace files outside that directory and install the root workspace. Use Node 24, normal `eve build`, the private service token and provider settings. Hosted builds supply Vercel OIDC for eve's default sandbox preparation. A local build with `--skip-sandbox-prewarm` only checks generated structure; it is not proof of a deployable artifact. No sandbox tool is exposed to this agent.

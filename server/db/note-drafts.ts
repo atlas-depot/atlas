@@ -6,6 +6,7 @@ import { noteContentSchema, noteIdSchema } from "../../shared/notes.ts";
 import { generatedDraftSchema } from "../../shared/organize.ts";
 import type { openDatabase } from "./connection.ts";
 import { storedNote, type StoredNote } from "./notes.ts";
+import { requestNoteIndex } from "./note-index-intents.ts";
 import { draftSaveRequests, noteDrafts, notes, organizeRuns } from "./schema.ts";
 
 type Database = ReturnType<typeof openDatabase>["db"];
@@ -235,6 +236,7 @@ export function createNoteDraftStore(db: Database) {
               updatedAt: sql`clock_timestamp()`,
             })
             .returning();
+          await requestNoteIndex(tx, note);
           await tx
             .insert(draftSaveRequests)
             .values({ ownerId: owner, draftId: id, payloadHash: hash, noteId });

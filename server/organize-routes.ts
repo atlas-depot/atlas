@@ -1,3 +1,4 @@
+import type { NoteSaved } from "./note-index-routes.ts";
 import { hasEmptyBody } from "./request-body.ts";
 import { Hono } from "hono";
 import { z } from "zod";
@@ -19,9 +20,9 @@ const notFound = () => apiError("NOT_FOUND", "Resource not found.");
 const unavailable = () => apiError("SERVICE_UNAVAILABLE", "Organizer is temporarily unavailable.");
 
 /** Mounted behind requireAuth and the app's cookie-origin protection. */
-export function createOrganizeRoutes(service?: OrganizeService) {
+export function createOrganizeRoutes(service?: OrganizeService, onSaved?: NoteSaved) {
   const routes = new Hono<AuthEnv>();
-  routes.route("/", createDraftRoutes(service));
+  routes.route("/", createDraftRoutes(service, onSaved));
 
   routes.post("/notes/:id/organize", async (c) => {
     const id = idSchema.safeParse(c.req.param("id"));
