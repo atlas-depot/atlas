@@ -103,13 +103,15 @@ Use an isolated local PostgreSQL server with pgvector installed and a test role 
 
 Drizzle Kit uses esbuild's packaged platform executable. `allowBuilds.esbuild: false` disables its dependency install scripts; migration generation must continue to work after a frozen install.
 
-### Search index preparation
+### Note indexing
 
-Note creation, edits, AI draft Save and development seed insertion persist an indexing intent in the same transaction. The intent contains only note identity and revision. Successful idempotent replays do not enqueue work again. Source edits immediately delete old derived passages; source deletion cascades to both index and intent.
+Note creation, edits, AI draft Save and development seed insertion persist an indexing intent in the same transaction. Successful API writes wake the existing private organizer runtime without waiting for embeddings. Wake failures do not fail Save. The enabled maintenance schedule recovers committed work after a process exit or dispatch outage. Source edits immediately delete old derived passages and reset the intent. Source deletion cascades to both index and intent.
 
-`shared/embedding.ts` owns the selected Qwen3 8B / 1536-dimensional encoding profile, including the #66 projection version and evaluated query instruction. Publication accepts only complete or empty projections, checks live ownership and revision under the note lock, and commits all passages plus intent acknowledgement atomically. The provider adapter validates model identity, response ordering and float32-compatible vectors before publication.
+`shared/embedding.ts` owns the selected Qwen3 8B / 1536-dimensional encoding profile, including the #66 projection version and evaluated query instruction. Publication checks live ownership, revision, profile and the bound claim/run under the note lock, then commits every passage and intent acknowledgement atomically. Incomplete projections are rejected. The adapter validates model identity, response ordering and finite float32 vectors before publication. Retrieval must use this same profile and enforce current ownership/revision.
 
-These are preparation boundaries for #67. Automated dispatch, Workflow recovery, visible failure/retry state and retrieval integration are not wired yet. Applying the migration alone does not make notes searchable. Local storage tests use real PostgreSQL/pgvector; provider adapter tests use synthetic HTTP responses without live model calls.
+`GET /api/notes/:id/index` returns the authenticated owner's current version and `pending`, `processing`, `ready` (with passage count) or `failed` (sanitized code and nullable `retryAt`). There is no public retry endpoint. Transient failures retry automatically with exponential full jitter capped at 15 minutes. Unsupported content remains failed until an edit. The existing `ORGANIZER_MAINTENANCE_ENABLED=true` schedule processes a bounded, fairly rotated batch each minute. Both API and runtime need the reviewed migrations, database access and existing private service configuration. Applying migrations alone does not run indexing.
+
+Claims fence duplicate runs before provider work. Recovery inspects known runs at their recorded runtime URL, never treating an unknown status as terminal. Unbound starts have a two-minute allocation grace before recovery. Only content-free identities and outcomes cross Workflow step boundaries. A crash after a provider response can still repeat a billed call, but cannot publish duplicate or stale entries. Profile changes require deliberate reindexing, not automatic model substitution. Local tests use isolated PostgreSQL/pgvector and synthetic provider responses, not live user notes or provider acceptance.
 
 ### Live Neon development verification
 

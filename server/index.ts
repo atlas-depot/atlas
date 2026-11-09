@@ -1,3 +1,4 @@
+import { createNoteIndexJobs } from "./db/note-index-jobs.ts";
 import { serve } from "@hono/node-server";
 import { WorkOS } from "@workos-inc/node";
 import { createApp } from "./app.ts";
@@ -41,12 +42,21 @@ async function main() {
       )
     : undefined;
   const database = configuration.databaseUrl ? openDatabase(configuration.databaseUrl) : undefined;
+  const indexingClient = configuration.organizer
+    ? (await import("../agents/organizer/index-client.ts")).createNoteIndexClient({
+        baseUrl: configuration.organizer.runtimeUrl,
+        serviceToken: configuration.organizer.serviceToken,
+        deploymentProtectionSecret: configuration.organizer.deploymentProtectionSecret,
+      })
+    : undefined;
   const closeDatabases = async () => {
     await Promise.all([database?.close(), organizer?.close()]);
   };
   const app = createApp(authenticateRequest, {
     notes: database ? createNoteStore(database.db) : undefined,
     organizer,
+    indexing: database ? createNoteIndexJobs(database.db) : undefined,
+    onNoteSaved: indexingClient ? (noteId) => indexingClient.start(noteId) : undefined,
     appOrigin: browserAuth?.appOrigin,
     authRoutes:
       browser && browserAuth

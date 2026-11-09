@@ -31,13 +31,17 @@ function service() {
     delete: vi.fn<NoteService["delete"]>().mockResolvedValue({ status: "deleted" }),
   };
 }
-function app(store?: NoteService, userId: string | null = owner) {
+function app(
+  store?: NoteService,
+  userId: string | null = owner,
+  onSaved?: (id: string) => Promise<unknown>,
+) {
   const routes = new Hono<AuthEnv>();
   routes.use(
     "*",
     requireAuth(async () => (userId ? { userId } : null)),
   );
-  routes.route("/notes", createNoteRoutes(store));
+  routes.route("/notes", createNoteRoutes(store, onSaved));
   return routes;
 }
 function request(
@@ -369,4 +373,44 @@ describe("notes HTTP contract with a stubbed persistence boundary", () => {
       });
     },
   );
+});
+
+describe("index wake after a committed note write", () => {
+  it.each(["throw", "reject", "pending"])(
+    "preserves a successful save when wake is %s",
+    async (mode) => {
+      const store = service();
+      const wake = vi.fn(() => {
+        if (mode === "throw") throw new Error("runtime down");
+        if (mode === "reject") return Promise.reject(new Error("runtime down"));
+        return new Promise(() => {});
+      });
+      const response = await app(store, owner, wake).request(
+        "/notes",
+        request("POST", input, { "Idempotency-Key": key }),
+      );
+      expect(response.status).toBe(201);
+      expect(await response.json()).toEqual(note);
+      expect(wake).toHaveBeenCalledExactlyOnceWith(id);
+    },
+  );
+  it("wakes after update but not after conflicts or deletes", async () => {
+    const store = service();
+    const wake = vi.fn().mockResolvedValue(undefined);
+    const routes = app(store, owner, wake);
+    expect(
+      (await routes.request(`/notes/${id}`, request("PUT", edit, { "If-Match": tag }))).status,
+    ).toBe(200);
+    expect(wake).toHaveBeenCalledExactlyOnceWith(id);
+    wake.mockClear();
+    store.update.mockResolvedValue({ status: "conflict" });
+    expect(
+      (await routes.request(`/notes/${id}`, request("PUT", edit, { "If-Match": tag }))).status,
+    ).toBe(412);
+    expect(
+      (await routes.request(`/notes/${id}`, request("DELETE", undefined, { "If-Match": tag })))
+        .status,
+    ).toBe(204);
+    expect(wake).not.toHaveBeenCalled();
+  });
 });

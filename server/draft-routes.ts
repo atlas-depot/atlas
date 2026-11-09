@@ -1,3 +1,4 @@
+import { wakeNoteIndex, type NoteSaved } from "./note-index-routes.ts";
 import { Hono } from "hono";
 import { apiError, ifMatchSchema } from "../shared/http.ts";
 import { noteContentSchema, noteIdSchema } from "../shared/notes.ts";
@@ -11,7 +12,7 @@ const unavailable = () =>
   apiError("SERVICE_UNAVAILABLE", "Draft storage is temporarily unavailable.");
 const stale = () => apiError("PRECONDITION_FAILED", "The draft changed. Reload before retrying.");
 
-export function createDraftRoutes(service?: OrganizeService) {
+export function createDraftRoutes(service?: OrganizeService, onSaved?: NoteSaved) {
   const routes = new Hono<AuthEnv>();
   routes.get("/organize-work", async (c) => {
     if (!service?.work) return c.json(unavailable(), 503);
@@ -79,10 +80,12 @@ export function createDraftRoutes(service?: OrganizeService) {
           if (result.status === "stale") return c.json(stale(), 412);
           if (result.status === "deleted") return c.body(null, 204);
           if ("draft" in result) return c.json(result.draft, 200, { ETag: result.draft.etag });
-          if ("value" in result)
+          if ("value" in result) {
+            wakeNoteIndex(onSaved, result.value.note.id);
             return c.json(result.value.note, 201, {
               ETag: JSON.stringify(`${result.value.note.id}:${result.value.revision}`),
             });
+          }
           return c.json(unavailable(), 503);
         } catch {
           return c.json(unavailable(), 503);
