@@ -103,6 +103,17 @@ Use an isolated local PostgreSQL server with pgvector installed and a test role 
 
 Drizzle Kit uses esbuild's packaged platform executable. `allowBuilds.esbuild: false` disables its dependency install scripts; migration generation must continue to work after a frozen install.
 
+### Note-index migration cutover
+
+`0006_note-index` requires a write-paused cutover. Its backfill runs once. Older writers do not create or refresh index intents, and maintenance cannot recover missing or outdated intents. Overlapping old and new writers are unsupported.
+
+1. Block note mutations at every old API entry point, including direct deployment URLs and AI-draft Save. Stop other writers to this database, including development scripts. Drain in-flight writes and transactions before running the migration. Hiding the UI or moving an alias alone is insufficient.
+2. The designated migration operator applies the reviewed migration with `pnpm db:migrate`. Keep writes blocked if migration or verification fails.
+3. Deploy the intent-aware API and matching private indexing runtime. Enable maintenance only on the deployment responsible for this database. Verify a synthetic create and edit publish their current revisions, and deletion removes derived data, before reopening normal writes.
+4. Resume writes only through the new API. Old URLs must remain unable to write. Retained private runtimes may finish their pinned runs, but this does not permit old note-writing API instances to resume.
+
+Rolling back to an older API requires keeping writes blocked. If a legacy write slipped through after backfill, stop the affected writers and review a data repair before reopening. Re-running the recorded migration does not repair those intents. This is an operator procedure, not an automatically enforced deployment gate.
+
 ### Note indexing
 
 Note creation, edits, AI draft Save and development seed insertion persist an indexing intent in the same transaction. Successful API writes wake the existing private organizer runtime without waiting for embeddings. Wake failures do not fail Save. The enabled maintenance schedule recovers committed work after a process exit or dispatch outage. Source edits immediately delete old derived passages and reset the intent. Source deletion cascades to both index and intent.

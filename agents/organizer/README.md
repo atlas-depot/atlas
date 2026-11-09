@@ -42,6 +42,8 @@ Session titles are fixed and content tracing is disabled. Ending requests zero W
 
 ## Note indexing
 
+Apply `0006_note-index` using the [write-paused cutover](../../docs/development.md#note-index-migration-cutover). Old note writers must be stopped and drained before its one-time backfill.
+
 The same private runtime executes note indexing for #67. `POST /internal/note-index/start`
 accepts only a note ID and requires the existing service Basic credential. It claims the
 current database intent and starts one Workflow. The single step reads, projects, embeds
