@@ -1,6 +1,6 @@
 # Architecture
 
-Atlas has an authenticated React/TypeScript notes workspace and a Hono API connected to PostgreSQL and a private eve organizer. WorkOS browser sign-in uses a short-lived sealed `atlas_login_transaction` cookie during login and stores only the sealed HttpOnly `atlas_session` cookie after the callback. The connected flow supports editable AI drafts saved separately from their source notes.
+Atlas has an authenticated React/TypeScript notes workspace and a Hono API connected to PostgreSQL and a private eve organizer. WorkOS browser sign-in uses a short-lived sealed `atlas_login_transaction` cookie during login and stores only the sealed HttpOnly session cookie after the callback: `__Host-atlas_session` on HTTPS, `atlas_session` on loopback HTTP. The connected flow supports editable AI drafts saved separately from their source notes.
 
 ## Accepted decisions
 
@@ -24,20 +24,25 @@ The notes sprint covers online personal notes, explicit Save, rich block editing
 
 The executable provides public health and authentication routes plus a protected API boundary. Protected API requests without a verified Bearer token or browser session are rejected. Authenticated note CRUD and organizer routes enforce ownership against the configured database. Note routes return `503` when persistence is unavailable or not configured. Deterministic tests can inject a trusted identity. Terminal invalid or expired sessions return `401`; a successful browser refresh returns `200` with a resealed cookie. Rejected cookie-origin checks return `403`. Provider outages during verification or refresh return `500`; logout falls back to clearing the local cookie and redirecting to `APP_ORIGIN` when WorkOS cannot confirm the session.
 
-`server/browser-auth.ts` owns hosted AuthKit PKCE, the sealed `atlas_session` cookie, refresh and WorkOS logout. `server/workos.ts` verifies Bearer signatures locally against the client JWKS fetched and cached over HTTPS; a JWKS outage is a server failure. `server/auth.ts` keeps one protected boundary and enforces Bearer-versus-cookie precedence; an `Authorization` header never falls back to the cookie. Browser tokens stay inside the HttpOnly cookie and are never returned by the session route.
+`server/browser-auth.ts` owns hosted AuthKit PKCE, the sealed session cookie, refresh and WorkOS logout. `server/workos.ts` verifies Bearer signatures locally against the client JWKS fetched and cached over HTTPS; a JWKS outage is a server failure. `server/auth.ts` keeps one protected boundary and enforces Bearer-versus-cookie precedence; an `Authorization` header never falls back to the cookie. Browser tokens stay inside the HttpOnly cookie and are never returned by the session route.
 
-Deterministic tests use a synthetic provider and a local fake WorkOS API; they cover state, PKCE, refresh outcomes, logout, account replacement, CSRF and Bearer precedence. Live Google and email/password verification, five-person dashboard access, failed/cancelled login and provider recovery succeeded against WorkOS Staging. The editor uses BlockNote and Base UI, safe legacy Markdown preview and explicit Save. Its HTTP client uses individual-note reads and exact ETag/If-Match handling. The production authentication gate handles sign-out and account-replacement cleanup. Development fixtures use the same client and screen; separate browser tests exercise the real Hono routes and PostgreSQL persistence.
+Deterministic tests use a synthetic provider and a local fake WorkOS API; they cover state, PKCE, refresh outcomes, logout, account replacement, CSRF and Bearer precedence. Live Google and email/password verification, five-person dashboard access, failed/cancelled login and provider recovery succeeded against WorkOS Staging ([evidence log](process/evidence-log.md#2026-10-28-workos-staging-smoke)). The editor uses BlockNote and Base UI, safe legacy Markdown preview and explicit Save. Its HTTP client uses individual-note reads and exact ETag/If-Match handling. The production authentication gate handles sign-out and account-replacement cleanup. Development fixtures use the same client and screen; separate browser tests exercise the real Hono routes and PostgreSQL persistence.
 
-The [note schemas](../shared/notes.ts) own the payload and timestamp contract. [HTTP schemas](../shared/http.ts) own errors and conditional-write headers. [Session schemas](../shared/auth.ts) own the browser-safe identity returned by `GET /api/auth/session`.
+The [note schemas](../shared/notes.ts) own the payload and timestamp contract. [HTTP schemas](../shared/http.ts) own errors and conditional-write headers. [Session schemas](../shared/auth.ts) own the browser-safe identity returned by `GET /api/auth/session`. The [API contract](api.md) summarizes routes and status codes.
 
 ## Responsibility boundaries
 
 ```text
 src/            React notes workspace and development-only source viewer
+src/fixtures/   Synthetic briefing fixtures and their parser for the source viewer
 server/         HTTP routing, authentication and backend operations
 shared/         Browser-safe schemas and types
+drizzle/        Generated SQL migrations, snapshots and journal
 agents/         Private agent runtimes called by the backend
 experiments/    Isolated experiments with separate setup
+e2e/            Playwright browser tests with test-only API and organizer seams
+scripts/        Repository automation, currently the ClickUp status sync
+public/         Static files served unchanged, currently the code font
 ```
 
 - Authenticate requests at the shared API boundary. Resource operations still enforce ownership from that trusted identity; a supplied note ID never grants access.
@@ -64,7 +69,7 @@ A connector tool is not necessarily a sync service. Before selecting one, verify
 
 ## Verification boundaries
 
-Use deterministic tests for access, data integrity and action safety, then separately evaluate real model behavior. A passing provider smoke does not prove either category. Before extending the scaffold, verify the affected user flow, cross-account access, source traceability and recovery behavior described in [security](security.md) and [development](development.md).
+Use deterministic tests for access, data integrity and action safety, then separately evaluate real model behavior. A passing provider smoke does not prove either category. Before extending the app, verify the affected user flow, cross-account access, source traceability and recovery behavior described in [security](security.md) and [development](development.md).
 
 ## References
 

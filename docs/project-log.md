@@ -20,6 +20,6 @@ No completed contribution entries have been added by this documentation reset. T
 
 ## Historical material
 
-The earlier architecture, process, and research documents remain available at [pre-reset commit 3a1a6f3](https://github.com/EfeDurmaz16/atlas/tree/3a1a6f3/docs). They document earlier assumptions and source links, not current implementation facts. This reset replaces those assumptions with the accepted direction and explicitly open team decisions.
+The earlier architecture, process, and research documents remain available at [pre-reset commit 3a1a6f3](https://github.com/atlas-depot/atlas/tree/3a1a6f3/docs). They document earlier assumptions and source links, not current implementation facts. This reset replaces those assumptions with the accepted direction and explicitly open team decisions.
 
-Static prototype files and screenshots remain in [docs/prototypes](prototypes/). Their presence proves only that artifacts exist, not that responsive behavior, accessibility, or the backend has been validated. See [design references](design/references.md) for their historical status.
+Static prototype files and screenshots remain in Git history at [docs/prototypes in 3a1a6f3](https://github.com/atlas-depot/atlas/tree/3a1a6f3/docs/prototypes). Their presence proves only that artifacts exist, not that responsive behavior, accessibility, or the backend has been validated. See [design references](design/references.md) for their historical status.

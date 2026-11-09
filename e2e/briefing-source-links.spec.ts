@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-// Expected values come from fixtures/briefing/expected.json (the `message-1`
+// Expected values come from src/fixtures/briefing/expected.json (the `message-1`
 // record of the valid example), not from what the application renders.
 const messageSource = {
   content: "The project review is on 22 October at 14:00.",

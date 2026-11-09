@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import emptyExampleText from "../../fixtures/briefing/empty-example.json?raw";
-import expectedText from "../../fixtures/briefing/expected.json?raw";
-import malformedMissingAuthorText from "../../fixtures/briefing/malformed-missing-author.json?raw";
-import validExampleText from "../../fixtures/briefing/valid-example.json?raw";
+import emptyExampleText from "./briefing/empty-example.json?raw";
+import expectedText from "./briefing/expected.json?raw";
+import malformedMissingAuthorText from "./briefing/malformed-missing-author.json?raw";
+import validExampleText from "./briefing/valid-example.json?raw";
 import { type BriefingExample, parseFixtures } from "./parse-fixtures";
 
 type Path = Array<string | number>;

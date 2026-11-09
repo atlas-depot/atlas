@@ -1,9 +1,9 @@
 import "./briefing-example.css";
 import { useState } from "react";
 
-import emptyRaw from "../fixtures/briefing/empty-example.json?raw";
-import malformedRaw from "../fixtures/briefing/malformed-missing-author.json?raw";
-import validRaw from "../fixtures/briefing/valid-example.json?raw";
+import emptyRaw from "./fixtures/briefing/empty-example.json?raw";
+import malformedRaw from "./fixtures/briefing/malformed-missing-author.json?raw";
+import validRaw from "./fixtures/briefing/valid-example.json?raw";
 import {
   parseFixtures,
   type BriefingExample,

@@ -1,13 +1,13 @@
 # Atlas agent instructions
 
 Atlas helps people recover scattered context, keep notes, and act through a personal AI assistant.
-This repository contains a minimal runnable web scaffold and planning material.
+This repository contains the React notes workspace, its Hono API on PostgreSQL, a private eve organizer agent, and the product and process docs.
 
 ## Decisions and scope
 
 Current user instructions take precedence over these files.
 Read `docs/product.md` for product scope and `docs/architecture.md` for accepted constraints versus team proposals when the task changes either.
-UI direction and unresolved backend choices require team discussion; existing prototypes are historical references, not implementation contracts.
+UI direction and unresolved backend choices require team discussion; old prototypes in Git history are historical references, not implementation contracts.
 Do not promote an example, candidate library, or previous proposal into an accepted decision.
 
 ## Working here
@@ -16,7 +16,7 @@ Do not promote an example, candidate library, or previous proposal into an accep
 - Use English for code, repository documents, and commits.
 - Keep each change reviewable; use atomic Conventional Commits without agent co-author footers.
 - Use plain hyphens rather than em dash characters in repository text.
-- Vite+ is the selected development toolchain. Read actual manifests for commands and version pins once the scaffold exists; do not invent successful checks for missing code.
+- Vite+ is the selected development toolchain. Read the actual manifests and `docs/development.md` for commands and version pins; report only checks that actually ran.
 - Add a dependency or package only for a concrete consumer or capability. Consult current primary documentation before integrations.
 - Keep proposed architecture separate from implemented behavior in reports.
 

@@ -4,12 +4,14 @@ No current visual direction is locked. Earlier approvals and fixed token/layout 
 
 ## Preserved artifacts
 
+The prototype files were removed from the working tree. They remain in Git history at commit `3a1a6f3`.
+
 | Artifact | Historical status |
 | --- | --- |
-| [Today slice](../prototypes/atlas-today-slice/index.html) | Rejected execution; retained to understand failure modes |
-| [UI system](../prototypes/atlas-ui-system/index.html) | Rejected exploration; screenshots retained |
-| [Today redesign v2](../prototypes/atlas-today-redesign-v2/index.html) | Historical exploration, not production guidance |
-| [App v3](../prototypes/atlas-app-v3/index.html) | Historical exploration, not production guidance |
+| [Today slice](https://github.com/atlas-depot/atlas/blob/3a1a6f3/docs/prototypes/atlas-today-slice/index.html) | Rejected execution; retained to understand failure modes |
+| [UI system](https://github.com/atlas-depot/atlas/blob/3a1a6f3/docs/prototypes/atlas-ui-system/index.html) | Rejected exploration; screenshots in Git history |
+| [Today redesign v2](https://github.com/atlas-depot/atlas/blob/3a1a6f3/docs/prototypes/atlas-today-redesign-v2/index.html) | Historical exploration, not production guidance |
+| [App v3](https://github.com/atlas-depot/atlas/blob/3a1a6f3/docs/prototypes/atlas-app-v3/index.html) | Historical exploration, not production guidance |
 
 Do not copy fixed widths, colors, custom components, or icon code from these prototypes into production by default. Current product constraints live in [product.md](../product.md).
 
@@ -30,4 +32,4 @@ The previous audit dated July 2026 cited the following sources. This list preser
 - [NN/g heuristics](https://www.nngroup.com/articles/ten-usability-heuristics/) and [minimalist design](https://www.nngroup.com/articles/aesthetic-minimalist-design/): status, recovery, and information restraint.
 - [WIRED on Cursor](https://www.wired.com/story/cursor-launches-pro-design-tools-figma): secondary reporting on design tooling, not an Atlas requirement.
 
-The full [old reference audit](https://github.com/EfeDurmaz16/atlas/blob/3a1a6f3/docs/design/atlas-ui-reference-audit.md) and [old token exploration](https://github.com/EfeDurmaz16/atlas/blob/3a1a6f3/docs/design/atlas-design-tokens.md) remain in Git history. Bring alternatives to the team before turning one into components or a token contract.
+The full [old reference audit](https://github.com/atlas-depot/atlas/blob/3a1a6f3/docs/design/atlas-ui-reference-audit.md) and [old token exploration](https://github.com/atlas-depot/atlas/blob/3a1a6f3/docs/design/atlas-design-tokens.md) remain in Git history. Bring alternatives to the team before turning one into components or a token contract.

@@ -20,10 +20,13 @@ Backend policy authorizes execution. Tool names, a prompt, or an LLM classifier 
 - Check permissions again after an approval wait; credentials or access may have changed.
 - Use stable attempt identities and provider idempotency where supported. On a timeout, reconcile the provider outcome before retrying a write.
 - Record requested, approved, attempted, succeeded, failed, and unknown outcomes honestly. An accepted API request is not proof of delivery.
+- Bound paid model work on the server. An owner can hold at most three active Organize runs (`429` above that), and the research tool accepts a question of at most 500 characters.
 
 ## Credentials and disclosure
 
 Use least-privilege OAuth scopes and protected token storage with encryption and restricted backend access. Implement revocation and refresh through the chosen connector. Never expose access/refresh tokens, passwords, API keys, session cookies, or recovery secrets to model context, browser bundles, logs, screenshots, fixtures, or exports.
+
+The browser session cookie is `HttpOnly` and `SameSite=Lax`. It is named `__Host-atlas_session` on HTTPS and `atlas_session` only on loopback HTTP during local development.
 
 Send providers only the content needed for the requested task. Enforce disclosure rules in backend code; a model's sensitivity classification is advisory. Review provider retention and routing settings before sending real private data. Do not promise private/local processing while calling a cloud model.
 

@@ -12,7 +12,7 @@ All five teammates are intended members of the human `atlas-reviewers` CODEOWNER
 
 Keep merge authority separate from review and CI requirements. Only the Efe-only `atlas-merge` team may bypass the update restriction, and only through a PR. Efe has no review/CI bypass. Organization owners can still administer these settings; ordinary merge restrictions do not remove organization administration rights.
 
-Protection setup must follow the base branch: enable mandatory CODEOWNER approval after this team ownership file lands on `main`, not while Efe is the sole owner. Verify active team access before claiming everyone can review. Once `.github/workflows/ci.yml` has run on a real pull request, its `verify` check is the CI status to require; do not require a check name before a workflow produces it. The `coverage` job is a separate check; read its summary and logs during review. It is not a required merge check and has no percentage gate. CI success, review approval and deployment are separate facts.
+`.github/CODEOWNERS` on `main` assigns every path to the `atlas-reviewers` team, so the precondition for code-owner review is met. Required code-owner review is the intended policy. Enabling it in the branch ruleset is a repository-settings task for Efe; do not claim it is enabled until the ruleset shows it. Verify active team access before claiming everyone can review. Once `.github/workflows/ci.yml` has run on a real pull request, its `verify` check is the CI status to require; do not require a check name before a workflow produces it. `verify` passes only when all six jobs pass: format, lint and typecheck, build, database regression, coverage and browser regression. Coverage has no percentage gate; read its summary and logs during review. CI success, review approval and deployment are separate facts.
 
 ## Issues
 
@@ -24,7 +24,7 @@ Keep decisions and scope changes in the issue, with links to the implementing PR
 
 ## Pull requests
 
-Keep one reviewable change per PR. Use atomic Conventional Commits without AI co-author or generated-by footers. Never commit secrets or unrelated local edits.
+Keep one reviewable change per PR. Use atomic Conventional Commits without AI co-author or generated-by footers. Reviewers check the commit format; no hook or CI job enforces it. Never commit secrets or unrelated local edits.
 
 Use three short fields, normally about 100 words rather than a hard word limit:
 
