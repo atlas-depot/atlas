@@ -6,6 +6,7 @@ import {
   conversationInputIdsSchema,
   conversationTextSchema,
 } from "../../shared/conversations.ts";
+import type { SearchAdmission } from "../note-search-routes.ts";
 import type { openDatabase } from "./connection.ts";
 import { enqueueTurnCleanup } from "./conversation-cleanup.ts";
 import { readConversationMessage } from "./conversation-messages.ts";
@@ -49,11 +50,16 @@ async function turnInputs(tx: ConversationTransaction, turnId: string) {
 /** Internal persistence only. Callers execute models after durable admission/runtime binding. */
 export function createConversationTurns(db: Database) {
   return {
+    /**
+     * `admit` runs under the conversation lock and only for an input not yet stored, so a
+     * replay or two overlapping retries of one key spend at most one admission.
+     */
     async acceptInput(
       owner: string,
       conversationId: string,
       operationId: string,
       value: z.input<typeof inputSchema>,
+      admit?: SearchAdmission,
     ) {
       const input = inputSchema.parse(value);
       const operation = conversationIdSchema.parse(operationId);
@@ -92,6 +98,12 @@ export function createConversationTurns(db: Database) {
         const joined = running ? await turnInputs(tx, running.id) : [];
         // Refuse rather than quietly queue a steer the running attempt cannot take.
         if (joined.length >= MAX_TURN_INPUTS) return { status: "policy_unsupported" as const };
+        const admission = await admit?.(owner);
+        if (admission && !admission.allowed)
+          return {
+            status: "rate_limited" as const,
+            retryAfterSeconds: admission.retryAfterSeconds,
+          };
         const [message] = await tx
           .insert(conversationMessages)
           .values({
@@ -118,29 +130,18 @@ export function createConversationTurns(db: Database) {
             ordinal: joined.length,
             steer: true,
           });
+          // Any reader that inspected the attempt before this input must not publish: its
+          // observation predates the steer. The version bump fences that finalization.
+          await tx
+            .update(conversationTurns)
+            .set({ checkpointVersion: sql`${conversationTurns.checkpointVersion} + 1` })
+            .where(eq(conversationTurns.id, running.id));
         }
         return {
           status: "saved" as const,
           value: (await readConversationMessage(tx, parent.id, message!.id))!,
         };
       });
-    },
-
-    /** True when this owner already holds this exact input, so a replay needs no admission. */
-    async hasInput(owner: string, conversationId: string, operationId: string) {
-      const operation = conversationIdSchema.parse(operationId);
-      const [row] = await db
-        .select({ id: conversationMessages.id })
-        .from(conversationMessages)
-        .innerJoin(conversations, eq(conversations.id, conversationMessages.conversationId))
-        .where(
-          and(
-            eq(conversations.ownerId, owner),
-            eq(conversations.id, conversationIdSchema.parse(conversationId)),
-            eq(conversationMessages.operationId, operation),
-          ),
-        );
-      return row !== undefined;
     },
 
     /**
@@ -339,7 +340,11 @@ export function createConversationTurns(db: Database) {
       const size = z.number().int().min(1).max(100).parse(limit);
       const idle = z.number().int().min(0).parse(idleMs);
       return db
-        .select({ ownerId: conversations.ownerId, conversationId: conversations.id })
+        .select({
+          ownerId: conversations.ownerId,
+          conversationId: conversations.id,
+          turnId: conversationTurns.id,
+        })
         .from(conversationTurns)
         .innerJoin(conversations, eq(conversations.id, conversationTurns.conversationId))
         .where(

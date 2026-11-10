@@ -195,15 +195,7 @@ export function createConversationAnswers({
       operationId: string,
       input: z.input<typeof sendConversationMessageSchema>,
     ) {
-      if (!(await turns.hasInput(owner, conversationId, operationId))) {
-        const admission = await admit(owner);
-        if (!admission.allowed)
-          return {
-            status: "rate_limited" as const,
-            retryAfterSeconds: admission.retryAfterSeconds,
-          };
-      }
-      const accepted = await turns.acceptInput(owner, conversationId, operationId, input);
+      const accepted = await turns.acceptInput(owner, conversationId, operationId, input, admit);
       if (accepted.status === "saved") await advanceQuietly(owner, conversationId);
       return accepted;
     },
@@ -249,8 +241,11 @@ export function createConversationAnswers({
 
     /** Maintenance: continue attempts no reader is watching, then retire finished sessions. */
     async sweep(limit: number) {
-      for (const { ownerId, conversationId } of await turns.unobserved(limit, 30_000))
+      for (const { ownerId, conversationId, turnId } of await turns.unobserved(limit, 30_000)) {
+        // Rotate first, so an attempt whose runtime keeps failing cannot starve the others.
+        await turns.touch(turnId);
         await advanceQuietly(ownerId, conversationId);
+      }
       return { cleanupPending: await sweepCleanup(limit) };
     },
   };

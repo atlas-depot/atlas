@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { eq, inArray, sql } from "drizzle-orm";
 import { readFileSync } from "node:fs";
 import { expect, it } from "vite-plus/test";
 import type { NotePassageSource } from "../../shared/passages.ts";
@@ -6,7 +7,12 @@ import { evidenceId, type AnswerObservation, type AnswerRuntime } from "../conve
 import { createConversationAnswers } from "../conversation-answers.ts";
 import { createConversationAdmission } from "./conversation-admission.ts";
 import { createConversationCleanupStore } from "./conversation-cleanup.ts";
-import { conversationCleanupIntents, conversations } from "./conversation-schema.ts";
+import {
+  conversationAdmissions,
+  conversationCleanupIntents,
+  conversations,
+  conversationTurns,
+} from "./conversation-schema.ts";
 import { createConversationStore } from "./conversations.ts";
 import { createConversationTurns } from "./conversation-turns.ts";
 import { setupIndexTestDatabase } from "./index-test-database.ts";
@@ -30,6 +36,8 @@ function fakeRuntime() {
   };
   let observation: AnswerObservation = { status: "running", text: "" };
   let lostSubmits = 0;
+  const unreachable = new Set<string>();
+  const inspected: string[] = [];
   const runtime: AnswerRuntime = {
     async allocate(operationId) {
       calls.allocate.push(operationId);
@@ -44,7 +52,11 @@ function fakeRuntime() {
       calls.steer.push({ sessionId, key, message });
       return { status: "delivered", sessionId, deliveryId: `delivery-${key}` };
     },
-    inspect: async () => observation,
+    async inspect(sessionId) {
+      if (unreachable.has(sessionId)) throw new Error("runtime unreachable");
+      inspected.push(sessionId);
+      return observation;
+    },
     async retire(sessionId) {
       calls.retire.push(sessionId);
       return { status: "ended" };
@@ -55,6 +67,8 @@ function fakeRuntime() {
     runtime,
     observe: (next: AnswerObservation) => void (observation = next),
     loseNextSubmit: () => void (lostSubmits = 1),
+    inspected,
+    unreachable,
   };
 }
 
@@ -134,6 +148,12 @@ it("resolves a repeated send and a reconnect in another process to one delivery"
   expect(
     await f.first.send(f.owner, f.id, key, { text: "A different question under the same key" }),
   ).toEqual({ status: "conflict" });
+  // Overlapping retries of one key spend one admission, not two.
+  const [window] = await database.db
+    .select()
+    .from(conversationAdmissions)
+    .where(eq(conversationAdmissions.ownerId, f.owner));
+  expect(window?.admittedAt).toHaveLength(1);
 });
 
 it("keeps an accepted input when delivery is interrupted and redelivers it under the same key", async () => {
@@ -365,4 +385,53 @@ it("retires the session of a published answer and keeps a failed retirement pend
       (intent) => intent.sessionId === session,
     ),
   ).toMatchObject({ attempts: 1, lastFailureCode: "cleanup_failed" });
+});
+
+it("does not publish an answer observed before a steer joined, and delivers the steer first", async () => {
+  const f = await fixture();
+  const turns = createConversationTurns(database.db);
+  const opening = await f.first.send(f.owner, f.id, randomUUID(), { text: "Summarize my week" });
+  const observed = (await turns.dispatchState(f.owner, f.id))!.turn;
+  // Another request stores a steer after this reader inspected the attempt.
+  const steer = await turns.acceptInput(f.owner, f.id, randomUUID(), {
+    text: "Only Monday",
+    policy: "steer",
+  });
+  if (opening.status !== "saved" || steer.status !== "saved") throw new Error("Inputs not saved");
+  expect(
+    await turns.finalize(f.owner, f.id, observed.id, {
+      status: "no-support",
+      text: "Answer that never saw the steer.",
+      citations: [],
+      expectedVersion: observed.checkpointVersion,
+    }),
+  ).toEqual({ status: "conflict" });
+  expect(f.fake.calls.steer).toHaveLength(0);
+  f.fake.observe(f.result([], [], "Nothing saved about Monday."));
+  await f.second.refresh(f.owner, f.id);
+  expect(f.fake.calls.steer.map((call) => call.key)).toEqual([steer.value.id]);
+  expect((await f.history()).at(-1)).toMatchObject({
+    text: "Nothing saved about Monday.",
+    inputIds: [opening.value.id, steer.value.id],
+  });
+});
+
+it("maintenance rotates past an attempt whose runtime keeps failing", async () => {
+  const f = await fixture();
+  const [other] = await database.db.insert(conversations).values({ ownerId: f.owner }).returning();
+  await f.first.send(f.owner, f.id, randomUUID(), { text: "Unreachable" });
+  await f.first.send(f.owner, other!.id, randomUUID(), { text: "Healthy" });
+  const [stuck, healthy] = f.fake.calls.submit.map((call) => call.sessionId);
+  // Both are unobserved. The failing one is older, so it is always selected first.
+  await database.db
+    .update(conversationTurns)
+    .set({
+      updatedAt: sql`now() - CASE WHEN ${conversationTurns.sessionId} = ${stuck} THEN interval '2 hours' ELSE interval '1 hour' END`,
+    })
+    .where(inArray(conversationTurns.sessionId, [stuck!, healthy!]));
+  f.fake.unreachable.add(stuck!);
+  f.fake.inspected.length = 0;
+  await f.first.sweep(1);
+  await f.first.sweep(1);
+  expect(f.fake.inspected).toEqual([healthy]);
 });
