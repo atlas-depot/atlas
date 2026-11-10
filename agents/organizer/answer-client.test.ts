@@ -98,6 +98,57 @@ await test("an answer is not read until every steering input has settled, then c
   });
 });
 
+await test("an unhandled steering delivery cannot be credited with the opening turn's answer", () => {
+  const events = [
+    consumed("delivery-1", "turn-1"),
+    ...search("turn-1", "search-1", "search_notes", { passages: [passage] }),
+    reply("turn-1", answer),
+    turnSettled("turn-1"),
+    settled("delivery-1", "turn-1"),
+    event({ type: "delivery.settled", data: { deliveryId: "delivery-2", outcome: "rejected" } }),
+  ];
+  assert.deepEqual(
+    observeAnswer(events, { deliveryId: "delivery-1", steerDeliveryIds: ["delivery-2"] }),
+    {
+      status: "failed",
+      text: "",
+    },
+  );
+  assert.equal(observeAnswer(events, deliveries).status, "result");
+});
+
+await test("no-support requires a completed note search, including a successful empty search", () => {
+  const noSupport = { status: "no-support", text: "The notes do not cover that.", citations: [] };
+  const read = (toolEvents: SessionStreamEvent[]) =>
+    observeAnswer(
+      [
+        consumed("delivery-1", "turn-1"),
+        ...toolEvents,
+        reply("turn-1", noSupport),
+        turnSettled("turn-1"),
+        settled("delivery-1", "turn-1"),
+      ],
+      deliveries,
+    );
+  const empty = search("turn-1", "search-1", "search_notes", { passages: [] });
+  const failed = [
+    search("turn-1", "search-2", "search_notes", { passages: [] })[0]!,
+    event({
+      type: "call.settled",
+      scope: { turnId: "turn-1" },
+      data: {
+        callId: "search-2",
+        outcome: "failed",
+        error: { code: "TOOL_FAILED", message: "Search unavailable" },
+      },
+    }),
+  ];
+  assert.deepEqual(read(empty), { status: "result", result: noSupport, evidence: [] });
+  for (const events of [[], failed, [...empty, ...failed]]) {
+    assert.deepEqual(read(events), { status: "failed", text: "" });
+  }
+});
+
 await test("cancelled, unfinished and unreadable work never becomes a result", () => {
   const base = [consumed("delivery-1", "turn-1")];
   assert.deepEqual(

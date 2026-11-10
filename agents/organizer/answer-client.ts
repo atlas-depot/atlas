@@ -97,11 +97,14 @@ export function observeAnswer(
   const ended = events.some((event) => event.type === "session.ended");
   const turnIds: string[] = [];
   const settled = new Set<string>();
+  let unhandledDelivery = false;
   for (const event of events) {
     if (event.type === "delivery.consumed" && ids.includes(event.data.deliveryId))
       turnIds.push(event.data.turnId);
-    else if (event.type === "delivery.settled" && ids.includes(event.data.deliveryId))
+    else if (event.type === "delivery.settled" && ids.includes(event.data.deliveryId)) {
+      if (event.data.outcome !== "handled") unhandledDelivery = true;
       settled.add(event.data.deliveryId);
+    }
   }
   const scoped = events.filter(
     (event) => event.scope?.turnId !== undefined && turnIds.includes(event.scope.turnId),
@@ -113,6 +116,7 @@ export function observeAnswer(
     })
     .join("\n")
     .slice(0, MAX_TEXT);
+  if (unhandledDelivery) return { status: "failed", text };
   const pending = ids.some((id) => !settled.has(id));
   if (pending && !ended) return { status: "running", text };
   // The last turn to take one of our inputs carries the answer to all of them.
@@ -126,6 +130,7 @@ export function observeAnswer(
 
   const searches = new Set<string>();
   const evidence = new Map<string, AnswerEvidence>();
+  let searched = false;
   let result: { value: unknown } | undefined;
   for (const event of scoped) {
     if (
@@ -134,20 +139,18 @@ export function observeAnswer(
       event.data.capability.name === "search_notes"
     )
       searches.add(event.data.callId);
-    else if (
-      event.type === "call.settled" &&
-      searches.has(event.data.callId) &&
-      event.data.outcome === "completed"
-    ) {
+    else if (event.type === "call.settled" && searches.has(event.data.callId)) {
+      if (event.data.outcome !== "completed") return { status: "failed", text };
       const passages = readSearchEvidence(event.data.output);
       if (!passages) return { status: "failed", text };
+      searched = true;
       for (const passage of passages) evidence.set(passage.id, passage);
     } else if (event.type === "content.completed" && event.scope?.turnId === turnId) {
       const part = resultPartSchema.safeParse(event.data);
       if (part.success) result = { value: part.data.value };
     }
   }
-  return result
+  return result && searched
     ? { status: "result", result: result.value, evidence: [...evidence.values()] }
     : { status: "failed", text };
 }
