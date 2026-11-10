@@ -1,8 +1,11 @@
 import { z } from "zod";
+import { noteTextSchema } from "./document.ts";
 import { notePassageSourceSchema } from "./passages.ts";
 
+export const searchQuerySchema = noteTextSchema.trim().min(1).max(500);
+
 export const noteSearchRequestSchema = z.strictObject({
-  query: z.string().trim().min(1).max(500),
+  query: searchQuerySchema,
   limit: z.number().int().min(1).max(10).optional(),
 });
 

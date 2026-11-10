@@ -40,6 +40,8 @@ it("rejects invalid queries before transport and sanitizes remote failures", asy
   });
   await expect(embed(" ")).rejects.toThrow();
   await expect(embed("x".repeat(501))).rejects.toThrow();
+  await expect(embed("find\0note")).rejects.toThrow();
+  await expect(embed("find\ud800note")).rejects.toThrow();
   expect(fetchImpl).not.toHaveBeenCalled();
   await expect(embed("find note")).rejects.toThrow("Search embedding is unavailable.");
   for (const bad of [{ embedding: [1] }, { embedding: vector(), extra: "private" }]) {

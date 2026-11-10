@@ -1,7 +1,7 @@
-import { z } from "zod";
 import { encodeSearchQuery, embeddingVectorSchema } from "../shared/embedding.ts";
+import { searchQuerySchema } from "../shared/note-search.ts";
 
-export const searchQuerySchema = z.string().trim().min(1).max(500);
+export { searchQuerySchema } from "../shared/note-search.ts";
 
 /** Shares the exact query instruction and vector validation with the indexing profile. */
 export function createSearchQueryEncoder(embed: (texts: string[]) => Promise<number[][]>) {

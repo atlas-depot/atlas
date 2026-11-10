@@ -1,5 +1,6 @@
 import { expect, it, vi } from "vite-plus/test";
 import { EMBEDDING_DIMENSIONS, encodeSearchQuery } from "../shared/embedding.ts";
+import { noteSearchRequestSchema } from "../shared/note-search.ts";
 import { createSearchQueryEncoder } from "./search-query.ts";
 
 const vector = () => Array.from({ length: EMBEDDING_DIMENSIONS }, (_, i) => (i === 0 ? 1 : 0));
@@ -18,6 +19,16 @@ it("rejects empty and oversized queries before any provider call", async () => {
   await expect(encode("x".repeat(501))).rejects.toThrow();
   expect(embed).not.toHaveBeenCalled();
 });
+
+it.each(["find\0note", "find\ud800note", "find\udc00note"])(
+  "rejects malformed note text at the public and private query boundaries: %#",
+  async (query) => {
+    expect(noteSearchRequestSchema.safeParse({ query }).success).toBe(false);
+    const embed = vi.fn().mockResolvedValue([vector()]);
+    await expect(createSearchQueryEncoder(embed)(query)).rejects.toThrow();
+    expect(embed).not.toHaveBeenCalled();
+  },
+);
 
 it("rejects malformed or incompatible provider output", async () => {
   for (const response of [[], [vector(), vector()], [[1]], [Array(EMBEDDING_DIMENSIONS).fill(0)]]) {

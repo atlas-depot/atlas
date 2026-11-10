@@ -37,6 +37,8 @@ void test("private query embedding requires service auth and validates before mo
       '{"query":" "}',
       '{"query":"x","ownerId":"other"}',
       JSON.stringify({ query: "x".repeat(501) }),
+      JSON.stringify({ query: "find\0note" }),
+      JSON.stringify({ query: "find\ud800note" }),
       "x".repeat(4097),
     ]) {
       assert.equal((await request(body)).status, 400);
