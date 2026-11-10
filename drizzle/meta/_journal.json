@@ -50,6 +50,13 @@
       "when": 1794209741266,
       "tag": "0006_note-index",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1794300025989,
+      "tag": "0007_search-admission",
+      "breakpoints": true
     }
   ]
 }

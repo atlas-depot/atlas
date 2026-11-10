@@ -53,6 +53,12 @@ no-support. Coverage counts only current revisions of the user's notes: a ready 
 zero passages but contributes one ready count; processing/unindexed notes are pending; current
 index failures are failed. Embedding and storage failures return distinct sanitized `503` errors.
 
+Before embedding, PostgreSQL atomically admits at most 20 search requests per verified user in
+the preceding 60 seconds across API processes. Rejected requests return `429 RATE_LIMITED` with
+`Retry-After` and make no provider call. Provider failures consume admission. Missing or failed
+admission storage returns `503` rather than allowing an uncounted call. Expired owner counters
+are removed in bounded batches as subsequent requests arrive.
+
 ## Organize
 
 All Organize and draft routes use the same authentication and cookie-origin checks. Start requires the saved source ETag in `If-Match`, checked while locking that source revision. With no organizer settings, these routes return `503`.
