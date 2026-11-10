@@ -1,6 +1,7 @@
 # Proposal: note search result contract for #68
 
-Status: proposal for Efe, not an accepted API decision.
+Status: Efe approved the direction in issue #68 on 10 November 2026, with the clarifications
+below. Live embedding evaluation still needs separate authorization.
 
 ## Decision
 
@@ -15,13 +16,27 @@ defaults to 5 and is at most 10. The server derives ownership from authenticatio
 query with the exact #67 profile, and returns only live, revision-checked passages and #66
 source references. It does not accept an owner ID, note ID, vector or model from the client.
 
-A successful response has `{ "candidates": [...], "coverage": "complete" | "pending" |
-"failed" | "mixed" }`. `candidates: []` with `coverage: "complete"` is an actual empty
-searchable corpus; `pending` and `failed` explain why zero candidates may be incomplete.
-Nonempty candidates are ranked hints, including for no-support questions. The answer layer must
-check whether a candidate actually supports a claim. A source edit or deletion that wins before
-delivery suppresses that candidate. Provider and storage failures are sanitized, distinct 503
-error codes; they are never an empty-success response.
+A successful response has `{ "candidates": [{ "text", "source", "score" }], "coverage":
+{ "ready", "pending", "failed" } }`. Array order supplies rank; `score` is cosine similarity,
+not confidence that the question was answered. Counts include only the authenticated user's
+current note revisions. A matching ready publication counts as ready even if it has zero
+passages. A current intent with a failure code counts as failed; all other current notes without
+a matching ready publication count as pending, including processing and missing intents.
+Empty candidates do not establish semantic no-support. The answer layer verifies support in
+#71. Search overfetches at most ten times the requested limit and revalidates live ownership,
+revision, passage text and source reference before delivery. Fewer than `limit` safe candidates
+may be returned. Provider and storage failures are sanitized, distinct 503 errors.
+
+## Per-user request limit awaiting Efe's decision
+
+The existing three-active-Organize-run guard limits concurrent long jobs, not search requests
+across API processes. It cannot safely throttle query embeddings. I propose a shared PostgreSQL
+owner/window counter checked atomically before calling the embedding provider: at most 20 search
+requests per verified owner in a rolling minute, returning sanitized `429 RATE_LIMITED` without
+embedding the rejected query. Failed provider attempts still consume admission because they use
+resources. A bounded expiry cleanup removes old counters. The number and policy need Efe's
+approval before adding the table or claiming production rate protection; they do not block the
+other #68 behavior.
 
 ## Alternatives
 
@@ -54,8 +69,19 @@ Agree a frozen synthetic Turkish/English set before tuning. Proposed seed notes 
 | `Perşembe bisiklet tamiri nerede?` | None | Distractor terms combine A and C |
 | `What is the team's April revenue?` | None | No supporting note |
 
-Report top-k source recall separately from whether a downstream answer can safely say "no
-supporting source". A no-support question must not be reported as answered merely because
+Add two same-topic distractors to the frozen live set: G, `The Thursday meeting moved from the
+library to room C only for next month.` and H, `The Friday design review in room B12 was
+cancelled; the replacement is Monday in room A2.` Questions about the original meeting/review
+must identify the relevant time and revision rather than treating shared topic words as support.
+Add a long synthetic note I with several passages about unrelated project tasks and one passage
+stating `The accessibility review is at 16:30 in room D4.` The question `Where is the
+accessibility review?` expects I's D4 passage, not merely note I.
+
+Report top-1 hit rate, expected-source rank and top-k source recall separately from whether a
+downstream answer can safely say "no supporting source". Compare top scores for supported and
+unsupported questions without assuming a reliable cutoff. The earlier #67 cutoff observation
+is recorded in [the #67 discussion](https://github.com/atlas-depot/atlas/issues/67); link live
+measurements there as well. A no-support question must not be reported as answered merely because
 search returns a ranked candidate. Test ownership, stale revision and deletion with
 deterministic vectors and real PostgreSQL. Separately report any live Qwen quality sample, its
 configuration and cost; mocked vectors establish only data flow. If the candidate contract
