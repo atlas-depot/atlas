@@ -91,7 +91,8 @@ versions are marked stale. No previous full note revision is archived.
 
 Sending a message accepts one input and returns before the answer exists. `policy` is
 `queue` (default) or `steer`. A queued input waits for the running answer. Up to 100 waiting inputs
-can be answered together. The answer lists every input it consumed. A
+can be answered together; any beyond that stay queued for the next answer. The answer lists
+every input it consumed. A
 steer joins the running answer and redirects it; with no answer running it starts one. A
 steer is never turned into a queued message: when the running answer cannot take it the
 request returns `409`. Repeat an uncertain send with the same key and body. It returns the
@@ -108,8 +109,9 @@ starts a second run for the same inputs. Runtime trouble does not fail the read.
 
 An answer is `completed` only when every citation names a passage the attempt retrieved from
 the owner's notes and quotes it exactly. A malformed result or an unknown source becomes an
-`incomplete` answer with reason `failed`. `no-support` means the notes did not cover the
-question; it carries no citations. If a source is deleted before publication, the generated text is suppressed. History keeps
+`incomplete` answer with reason `failed`. `no-support` means the attempt found no supporting passage; it carries
+no citations. It is not proof that no note covers the question: search returns a bounded
+set of candidates and some notes may not be indexed yet. If a source is deleted before publication, the generated text is suppressed. History keeps
 an empty `incomplete` answer with reason `failed`.
 A source edited meanwhile keeps its old-revision citation, marked `stale`. These checks
 establish where a quote came from, not that it supports the claim.

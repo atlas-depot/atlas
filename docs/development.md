@@ -115,7 +115,10 @@ Migration `0009_conversation-delivery` adds runtime delivery receipts, the steer
 and the per-owner send window. It only adds nullable or defaulted columns and one table, so
 it needs no write pause. Deploy the API and the private runtime together: the runtime now
 expects the service usernames `api` and `chat` instead of `atlas-api`, and an API from before
-this change cannot reach it. Answers run only when the organizer settings are present, and
+this change cannot reach it. The new API also cannot read or retire Organize runs pinned to
+a runtime from before this change. Before the cutover, stop starting Organize runs and let
+running ones finish or cancel them, then wait for the maintenance sweep to report no pending
+cleanup. Runs left behind stay unreadable until their sessions expire on their own. Answers run only when the organizer settings are present, and
 unattended continuation and session cleanup need `ORGANIZER_MAINTENANCE_ENABLED=true`.
 
 ### Note-index migration cutover

@@ -8,6 +8,7 @@ import { createConversationTurns } from "./conversation-turns.ts";
 import {
   conversationAdmissions,
   conversationMessages,
+  conversationTurnInputs,
   conversationTurns,
   conversations,
 } from "./conversation-schema.ts";
@@ -188,6 +189,12 @@ it("rejects input reordering and foreign identity, and starts a steer normally w
   expect(await createConversationStore(database.db).read(f.owner, f.id)).toMatchObject({
     activeTurn: { inputIds: [one.id, two.id, steer.id] },
   });
+  // It opened the attempt, so it is delivered with the opening inputs, not as a steer.
+  expect(
+    (await database.db.select().from(conversationTurnInputs)).filter(
+      (input) => input.messageId === steer.id,
+    ),
+  ).toMatchObject([{ steer: false, deliveryId: null }]);
 });
 
 async function source(owner: string) {

@@ -50,7 +50,11 @@ export const answerResultSchema = z
   .refine((result) => (result.status === "completed") === result.citations.length > 0);
 export type AnswerResult = z.infer<typeof answerResultSchema>;
 
-/** JSON Schema sent with the input so the runtime constrains the reply to this shape. */
+/**
+ * JSON Schema sent with the input so the runtime constrains the reply to this shape. It
+ * mirrors the field limits. The rule tying citations to status stays in `answerResultSchema`:
+ * conditional keywords are not portable across model providers' tool schemas.
+ */
 export const answerOutputSchema = {
   type: "object",
   additionalProperties: false,
@@ -62,7 +66,7 @@ export const answerOutputSchema = {
       description:
         "completed only when retrieved passages support the answer; otherwise no-support.",
     },
-    text: { type: "string", minLength: 1 },
+    text: { type: "string", minLength: 1, maxLength: 100_000 },
     citations: {
       type: "array",
       maxItems: 100,
@@ -72,7 +76,11 @@ export const answerOutputSchema = {
         additionalProperties: false,
         required: ["passageId", "excerpt"],
         properties: {
-          passageId: { type: "string", description: "The id of a passage search_notes returned." },
+          passageId: {
+            type: "string",
+            pattern: "^p_[0-9a-f]{16}$",
+            description: "The id of a passage search_notes returned.",
+          },
           excerpt: {
             type: "string",
             minLength: 1,

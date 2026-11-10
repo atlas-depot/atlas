@@ -215,6 +215,30 @@ describe("conversation answer HTTP boundary", () => {
     ).toBe(503);
   });
 
+  it("stops, resumes and retries for the verified owner and returns the current conversation", async () => {
+    const { app, answers } = answering();
+    const post = (path: string, headers: Record<string, string> = {}) =>
+      app.request(`/api/conversations/${id}/${path}`, { method: "POST", headers });
+    answers.stop.mockResolvedValueOnce({ status: "paused", message: undefined });
+    for (const action of ["stop", "resume"] as const) {
+      const response = await post(action);
+      expect([response.status, await response.json()]).toEqual([
+        200,
+        { conversation, activeTurn: null },
+      ]);
+      expect(answers[action]).toHaveBeenCalledExactlyOnceWith("verified-owner", id);
+    }
+    answers.retry.mockResolvedValueOnce({ status: "saved", value: {} as never });
+    const turnId = "6f1c2a8e-3b4d-4c5e-8f90-1a2b3c4d5e6f";
+    const retried = await post(`turns/${turnId}/retry`, { "Idempotency-Key": key });
+    expect([retried.status, await retried.json()]).toEqual([
+      202,
+      { conversation, activeTurn: null },
+    ]);
+    expect(answers.retry).toHaveBeenCalledExactlyOnceWith("verified-owner", id, turnId, key);
+    expect((await post(`turns/${turnId}/retry`)).status).toBe(400);
+  });
+
   it("continues existing work on a read instead of starting more", async () => {
     const { app, answers } = answering();
     expect((await app.request(`/api/conversations/${id}`)).status).toBe(200);
