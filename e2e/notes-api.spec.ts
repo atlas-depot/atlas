@@ -362,7 +362,7 @@ test("keyboard search and source opening work on narrow mobile through the real 
   await page.keyboard.press("Enter");
 
   await expect(searchRegion.getByText('Query: "pgvector cosine"')).toBeVisible();
-  await expect(searchRegion.getByText("Vector Search Architecture")).toBeVisible();
+  await expect(searchRegion.getByText("Vector Search Architecture").first()).toBeVisible();
   await expect(
     searchRegion.getByText("Retrieval Pipeline - Block vector-block - Revision 1"),
   ).toBeVisible();
@@ -370,7 +370,9 @@ test("keyboard search and source opening work on narrow mobile through the real 
     searchRegion.getByText("PostgreSQL pgvector ranks passages by cosine similarity."),
   ).toBeVisible();
 
-  const openSourceButton = searchRegion.getByRole("button", { name: "Open source", exact: true });
+  const openSourceButton = searchRegion
+    .getByRole("button", { name: "Open source", exact: true })
+    .first();
   await openSourceButton.focus();
   await page.keyboard.press("Enter");
 
