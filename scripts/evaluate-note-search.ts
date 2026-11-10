@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { z } from "zod";
 import { createNoteEmbedder } from "../agents/organizer/embeddings.ts";
@@ -52,8 +52,44 @@ if (passages.length + fixture.queries.length > 100)
   throw new Error("Evaluation exceeds input cap.");
 
 let tokens = 0;
+const maxRequests = Math.ceil(passages.length / 16) + Math.ceil(fixture.queries.length / 16);
+let requests = 0;
+const reportedCosts: Array<number | null> = [];
+const keyBudgetSchema = z.object({
+  data: z.object({
+    limit: z.number().positive().max(1),
+    limit_remaining: z.number().positive(),
+    limit_reset: z.null(),
+    include_byok_in_limit: z.literal(true),
+  }),
+});
 const embed = createNoteEmbedder({
   apiKey,
+  fetch: async (input, init) => {
+    const url = new URL(input instanceof Request ? input.url : input.toString());
+    if (url.href !== "https://openrouter.ai/api/v1/embeddings" || requests >= maxRequests)
+      throw new Error("Unexpected evaluation request.");
+    // Verify the existing experiment key before each paid batch, including BYOK spending.
+    const preflight = await fetch("https://openrouter.ai/api/v1/key", {
+      headers: { authorization: `Bearer ${apiKey}` },
+      redirect: "error",
+      signal: AbortSignal.timeout(15_000),
+    });
+    if (!preflight.ok || !keyBudgetSchema.safeParse(await preflight.json()).success)
+      throw new Error("Evaluation requires a non-resetting key capped at $1, including BYOK.");
+    requests += 1;
+    const response = await fetch(input, { ...init, redirect: "error" });
+    const usage = z
+      .object({ usage: z.object({ cost: z.number().finite().nonnegative() }) })
+      .safeParse(
+        await response
+          .clone()
+          .json()
+          .catch(() => null),
+      );
+    reportedCosts.push(usage.success ? usage.data.usage.cost : null);
+    return response;
+  },
   onUsage: (count) => {
     tokens += count;
   },
@@ -101,6 +137,7 @@ console.log(
       model: EMBEDDING_MODEL,
       dimensions: EMBEDDING_DIMENSIONS,
       fingerprint: EMBEDDING_FINGERPRINT,
+      fixtureSha256: createHash("sha256").update(JSON.stringify(fixture)).digest("hex"),
       noteCount: notes.length,
       passageCount: passages.length,
       queryCount: fixture.queries.length,
@@ -109,8 +146,10 @@ console.log(
         .length,
       answerableCount: answerable.length,
       providerReportedInputTokens: tokens,
-      // Listed 10 November 2026: https://openrouter.ai/qwen/qwen3-embedding-8b/pricing
-      estimatedUsdAtListedRate: Number(((tokens * 0.01) / 1_000_000).toFixed(8)),
+      requests,
+      providerReportedCostCredits: reportedCosts.every((cost) => cost !== null)
+        ? reportedCosts.reduce<number>((sum, cost) => sum + (cost ?? 0), 0)
+        : null,
       results,
     },
     null,

@@ -1,7 +1,7 @@
 # Proposal: note search result contract for #68
 
-Status: Efe approved the direction in issue #68 on 10 November 2026, with the clarifications
-below. Live embedding evaluation still needs separate authorization.
+Status: Efe approved the contract, rolling rate limit and a synthetic live evaluation capped
+at $1 on 10 November 2026. The measured results belong in the implementing PR's evidence.
 
 ## Decision
 
@@ -27,16 +27,15 @@ Empty candidates do not establish semantic no-support. The answer layer verifies
 revision, passage text and source reference before delivery. Fewer than `limit` safe candidates
 may be returned. Provider and storage failures are sanitized, distinct 503 errors.
 
-## Per-user request limit awaiting Efe's decision
+## Approved per-user request limit
 
 The existing three-active-Organize-run guard limits concurrent long jobs, not search requests
-across API processes. It cannot safely throttle query embeddings. I propose a shared PostgreSQL
-owner/window counter checked atomically before calling the embedding provider: at most 20 search
-requests per verified owner in a rolling minute, returning sanitized `429 RATE_LIMITED` without
-embedding the rejected query. Failed provider attempts still consume admission because they use
-resources. A bounded expiry cleanup removes old counters. The number and policy need Efe's
-approval before adding the table or claiming production rate protection; they do not block the
-other #68 behavior.
+across API processes. Search instead uses one PostgreSQL row per owner with at most 20 admission
+timestamps. The database clock and a row lock enforce at most 20 admitted requests in the
+preceding 60 seconds. Rejections return sanitized `429 RATE_LIMITED` with `Retry-After` before
+embedding. Failed provider attempts consume admission. Missing or failed admission storage
+returns `503`. Each request first commits a separate bounded cleanup of expired rows, without
+waiting on active owner locks. Expired rows can remain until later traffic performs cleanup.
 
 ## Alternatives
 
@@ -69,10 +68,9 @@ Agree a frozen synthetic Turkish/English set before tuning. Proposed seed notes 
 | `Perşembe bisiklet tamiri nerede?` | None | Distractor terms combine A and C |
 | `What is the team's April revenue?` | None | No supporting note |
 
-Add two same-topic distractors to the frozen live set: G, `The Thursday meeting moved from the
-library to room C only for next month.` and H, `The Friday design review in room B12 was
-cancelled; the replacement is Monday in room A2.` Questions about the original meeting/review
-must identify the relevant time and revision rather than treating shared topic words as support.
+The frozen live set adds two same-topic distractors: G describes a Monday meeting in room C,
+and H describes a Friday review checklist without recording its meeting location. H deliberately
+does not repeat B's location, which would make B an incorrectly exclusive relevance label.
 Add a long synthetic note I with several passages about unrelated project tasks and one passage
 stating `The accessibility review is at 16:30 in room D4.` The question `Where is the
 accessibility review?` expects I's D4 passage, not merely note I.
@@ -80,10 +78,17 @@ accessibility review?` expects I's D4 passage, not merely note I.
 Report top-1 hit rate, expected-source rank and top-k source recall separately from whether a
 downstream answer can safely say "no supporting source". Compare top scores for supported and
 unsupported questions without assuming a reliable cutoff. The earlier #67 cutoff observation
-is recorded in [the #67 discussion](https://github.com/atlas-depot/atlas/issues/67); link live
-measurements there as well. A no-support question must not be reported as answered merely because
+comes from the 8 November model-selection sample: Qwen's calibration cutoff of
+`0.7487874586479794` rejected all 12 held-out answerable questions, as well as both held-out
+unsupported questions. This was a whole-note screening experiment, not a production passage
+search threshold. A no-support question must not be reported as answered merely because
 search returns a ranked candidate. Test ownership, stale revision and deletion with
 deterministic vectors and real PostgreSQL. Separately report any live Qwen quality sample, its
 configuration and cost; mocked vectors establish only data flow. If the candidate contract
 makes no-support handling impractical, revise it with Efe using those examples before adding
 a cutoff.
+
+Run `node scripts/evaluate-note-search.ts` only after live-call authorization, with
+`OPENROUTER_API_KEY` set to a non-resetting key capped at $1 including BYOK. The runner checks
+that budget before each bounded batch, makes no automatic retries, and reports response-supplied
+cost in credits or `null` when unavailable. It does not infer actual cost from a listed price.
