@@ -1,17 +1,35 @@
 import { randomUUID } from "node:crypto";
 import { eq, sql } from "drizzle-orm";
-import { expect, it } from "vite-plus/test";
+import { drizzle } from "drizzle-orm/node-postgres";
+import { afterEach, expect, it, vi } from "vite-plus/test";
 import { EMBEDDING_DIMENSIONS, EMBEDDING_FINGERPRINT } from "../../shared/embedding.ts";
 import { projectNotePassages } from "../passages.ts";
+import * as projection from "../passages.ts";
 import { setupIndexTestDatabase } from "./index-test-database.ts";
 import { createNoteIndexJobs } from "./note-index-jobs.ts";
 import { createNoteIndexStore } from "./note-index.ts";
 import { createNoteSearchStore } from "./note-search.ts";
 import { createNoteStore } from "./notes.ts";
 import { noteIndexes, noteIndexIntents, notePassages, notes } from "./schema.ts";
+import * as schema from "./schema.ts";
 
 const database = setupIndexTestDatabase();
 const vector = () => Array.from({ length: EMBEDDING_DIMENSIONS }, (_, i) => (i === 0 ? 1 : 0));
+afterEach(() => vi.restoreAllMocks());
+
+function observedSearch() {
+  const queries: string[] = [];
+  const db = drizzle({
+    client: database.db.$client,
+    schema,
+    logger: { logQuery: (query) => queries.push(query) },
+  });
+  return {
+    search: createNoteSearchStore(db),
+    queries,
+    project: vi.spyOn(projection, "projectNotePassages"),
+  };
+}
 
 async function published(owner: string, content: string) {
   const note = await createNoteStore(database.db).create(owner, {
@@ -203,39 +221,108 @@ it("overfetches and skips invalid top passages while retaining a later safe cand
   expect(result.coverage).toEqual({ ready: 2, pending: 0, failed: 0 });
 });
 
-it("suppresses a candidate when a source edit commits while search waits on its lock", async () => {
-  const owner = randomUUID();
-  const note = await published(owner, "Evidence about to change.");
-  let entered!: () => void;
-  let release!: () => void;
-  const writerEntered = new Promise<void>((resolve) => (entered = resolve));
-  const writerGate = new Promise<void>((resolve) => (release = resolve));
-  const writer = database.other.transaction(async (tx) => {
-    await tx.select().from(notes).where(eq(notes.id, note.note.id)).for("update");
-    await tx
-      .update(notes)
-      .set({ content: "Replacement text.", revision: 2 })
-      .where(eq(notes.id, note.note.id));
-    await tx.delete(noteIndexes).where(eq(noteIndexes.noteId, note.note.id));
-    entered();
-    await writerGate;
-  });
-  await writerEntered;
-  const search = createNoteSearchStore(database.db).candidates(owner, vector());
-  try {
-    const deadline = Date.now() + 5_000;
-    let waiting = false;
-    while (Date.now() < deadline && !waiting) {
-      const result = await database.db.execute(
-        sql`select exists(select 1 from pg_stat_activity where datname = current_database() and wait_event_type = 'Lock') as waiting`,
-      );
-      waiting = result.rows[0].waiting === true;
-      if (!waiting) await new Promise((resolve) => setTimeout(resolve, 10));
+it.each(["edit", "delete"])(
+  "suppresses a candidate when a source %s commits while search waits on its lock",
+  async (change) => {
+    const owner = randomUUID();
+    const note = await published(owner, "Evidence about to change.");
+    let entered!: () => void;
+    let release!: () => void;
+    const writerEntered = new Promise<void>((resolve) => (entered = resolve));
+    const writerGate = new Promise<void>((resolve) => (release = resolve));
+    const writer = database.other.transaction(async (tx) => {
+      await tx.select().from(notes).where(eq(notes.id, note.note.id)).for("update");
+      if (change === "edit") {
+        await tx
+          .update(notes)
+          .set({ content: "Replacement text.", revision: 2 })
+          .where(eq(notes.id, note.note.id));
+        await tx.delete(noteIndexes).where(eq(noteIndexes.noteId, note.note.id));
+      } else {
+        await tx.delete(notes).where(eq(notes.id, note.note.id));
+      }
+      entered();
+      await writerGate;
+    });
+    await writerEntered;
+    const search = createNoteSearchStore(database.db).candidates(owner, vector());
+    try {
+      const deadline = Date.now() + 5_000;
+      let waiting = false;
+      while (Date.now() < deadline && !waiting) {
+        const result = await database.db.execute(
+          sql`select exists(select 1 from pg_stat_activity where datname = current_database() and wait_event_type = 'Lock') as waiting`,
+        );
+        waiting = result.rows[0].waiting === true;
+        if (!waiting) await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+      expect(waiting).toBe(true);
+    } finally {
+      release();
+      await writer;
     }
-    expect(waiting).toBe(true);
-  } finally {
-    release();
-    await writer;
-  }
-  expect((await search).passages).toEqual([]);
+    expect((await search).passages).toEqual([]);
+  },
+);
+
+it.each([
+  { noteCount: 1, passagesPerNote: 5, limit: 5 },
+  { noteCount: 5, passagesPerNote: 1, limit: 5 },
+  { noteCount: 1, passagesPerNote: 10, limit: 10 },
+  { noteCount: 10, passagesPerNote: 1, limit: 10 },
+  { noteCount: 10, passagesPerNote: 1, limit: 5 },
+])(
+  "bounds validation to $limit passages with $noteCount available notes",
+  async ({ noteCount, passagesPerNote, limit }) => {
+    const owner = randomUUID();
+    const fixtures = [];
+    for (let i = 0; i < noteCount; i++) {
+      const texts = Array.from({ length: passagesPerNote }, (_, j) => `Note ${i}, passage ${j}.`);
+      const note = await published(owner, texts.join("\n\n"));
+      fixtures.push({ id: note.note.id, texts });
+    }
+    const observed = observedSearch();
+    const result = await observed.search.candidates(owner, vector(), limit);
+    const expected = fixtures
+      .sort((a, b) => a.id.localeCompare(b.id))
+      .flatMap((note) => note.texts)
+      .slice(0, limit);
+    expect(result.passages.map((passage) => passage.text)).toEqual(expected);
+    expect(result.coverage).toEqual({ ready: noteCount, pending: 0, failed: 0 });
+    expect(observed.project).toHaveBeenCalledTimes(Math.min(noteCount, limit));
+    expect(observed.queries.filter((query) => query.includes("for share"))).toHaveLength(1);
+    // BEGIN, ranking, one source read, coverage, COMMIT. No per-result round trips.
+    expect(observed.queries).toHaveLength(5);
+  },
+);
+
+it("reuses source validation across rejected windows and still returns later ranked evidence", async () => {
+  const owner = randomUUID();
+  const invalid = await published(
+    owner,
+    Array.from({ length: 6 }, (_, i) => `Invalid ${i}.`).join("\n\n"),
+  );
+  const valid = await published(owner, "Valid first.\n\nValid second.");
+  await database.db
+    .update(notePassages)
+    .set({ text: "Tampered." })
+    .where(eq(notePassages.noteId, invalid.note.id));
+  await database.db
+    .update(notePassages)
+    .set({
+      embedding: Array.from({ length: EMBEDDING_DIMENSIONS }, (_, i) => (i === 1 ? 1 : 0)),
+    })
+    .where(eq(notePassages.noteId, valid.note.id));
+  const observed = observedSearch();
+  const result = await observed.search.candidates(owner, vector(), 2);
+  expect(result.passages.map((passage) => passage.text)).toEqual(["Valid first.", "Valid second."]);
+  expect(observed.project).toHaveBeenCalledTimes(2);
+  expect(observed.queries.filter((query) => query.includes("for share"))).toHaveLength(2);
+});
+
+it("does not load sources for an empty candidate set", async () => {
+  const observed = observedSearch();
+  expect((await observed.search.candidates(randomUUID(), vector())).passages).toEqual([]);
+  expect(observed.project).not.toHaveBeenCalled();
+  expect(observed.queries.filter((query) => query.includes("for share"))).toHaveLength(0);
 });
