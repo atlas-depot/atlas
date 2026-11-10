@@ -38,7 +38,7 @@ export function createNoteEmbedder(options: {
   const provider = createOpenRouter({ apiKey: options.apiKey, fetch: options.fetch });
   const model = provider.textEmbeddingModel(EMBEDDING_MODEL, {
     extraBody: { dimensions: EMBEDDING_DIMENSIONS, encoding_format: "float" },
-    provider: { require_parameters: true },
+    provider: { require_parameters: true, only: ["deepinfra"], allow_fallbacks: false },
   });
 
   return async (texts: string[], signal?: AbortSignal): Promise<number[][]> => {
