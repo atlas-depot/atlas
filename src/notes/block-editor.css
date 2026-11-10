@@ -91,6 +91,11 @@
   opacity: 1 !important;
 }
 
+.bn-shadcn .bn-color-picker-dropdown {
+  width: max-content;
+  max-width: 100vw;
+  overflow-wrap: normal;
+}
 .bn-color-icon {
   display: inline-flex;
   width: 22px;
