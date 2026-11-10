@@ -279,6 +279,10 @@ export function NotesWorkspace({
     setOpeningId(id);
     setReadFailure(null);
     setDeleteNotice(null);
+    if (sourceTarget) {
+      setActiveSourceTarget(null);
+      setUnavailableSourceTarget(null);
+    }
     try {
       const snapshot = await store.read(id);
       if (compare) setComparison(snapshot);
@@ -286,7 +290,7 @@ export function NotesWorkspace({
         setUnavailableSourceTarget(null);
         setActiveSourceTarget(sourceTarget ?? null);
         applySnapshot(snapshot);
-        requestAnimationFrame(() => titleRef.current?.focus());
+        if (!sourceTarget) requestAnimationFrame(() => titleRef.current?.focus());
       }
     } catch (error) {
       const kind = classifyFailure(error);
@@ -557,15 +561,24 @@ export function NotesWorkspace({
     const targetId = resolvedSource?.noteId;
     if (!targetId) return null;
     const found = notes.find((item) => item.id === targetId);
-    return found ? found.title || "Untitled note" : null;
+    return found ? found.title || "Untitled note" : (resolvedSource?.target.noteTitle ?? null);
   }, [notes, resolvedSource]);
 
+  function dismissSource() {
+    setActiveSourceTarget(null);
+    setUnavailableSourceTarget(null);
+    setReadFailure((current) => (current?.sourceTarget ? null : current));
+  }
+
   return (
-    <main className="notes-workspace space-y-5 p-4 sm:p-6">
+    <main className="notes-workspace workspace-shell">
       <header className="workspace-header">
-        <h1 className="text-2xl font-semibold">Atlas notes</h1>
+        <h1 className="workspace-brand" aria-label="Atlas notes">
+          atlas
+        </h1>
         <Button
           ref={newNoteRef}
+          variant="ghost"
           disabled={loadState !== "ready" || busy || blocked}
           onClick={() => requestSelection({ kind: "new" })}
         >
@@ -690,9 +703,21 @@ export function NotesWorkspace({
       )}
       <div className="notes-body">
         {(loadState === "ready" || draft !== null) && (
-          <>
-            <nav aria-label="Notes" className="space-y-3">
-              <h2 className="font-semibold">Your notes</h2>
+          <aside className="workspace-sidebar">
+            {search && (loadState === "ready" || draft !== null) && (
+              <NoteSearchWorkspace
+                key={searchResetToken}
+                client={search}
+                notes={notes}
+                enabled={requestsEnabled && !blocked}
+                canOpenSource={!busy}
+                activeSourceTarget={unavailableSourceTarget ?? activeSourceTarget}
+                onOpenSource={requestOpenSource}
+                onUnauthenticated={handleSearchUnauthenticated}
+              />
+            )}
+            <nav aria-label="Notes" className="workspace-note-list">
+              <h2>Your notes</h2>
               {notes.length === 0 ? (
                 <p>
                   {blocked
@@ -700,12 +725,12 @@ export function NotesWorkspace({
                     : "No notes yet. Create a new note to get started."}
                 </p>
               ) : (
-                <ul className="flex flex-wrap gap-2 lg:flex-col">
+                <ul>
                   {notes.map((note) => (
                     // A grid item stretches, so the button keeps its full column width.
                     <li key={note.id} className="grid">
                       <Button
-                        variant={saved?.note.id === note.id ? "secondary" : "outline"}
+                        variant={saved?.note.id === note.id ? "secondary" : "ghost"}
                         aria-current={saved?.note.id === note.id ? "true" : undefined}
                         disabled={busy || blocked}
                         className="note-list-button"
@@ -718,152 +743,152 @@ export function NotesWorkspace({
                 </ul>
               )}
             </nav>
-            {!draft && resolvedSource && (
-              <OpenedSourcePanel
-                resolved={resolvedSource}
-                fallbackTitle={fallbackSourceTitle}
-                onDismiss={() => {
-                  setActiveSourceTarget(null);
-                  setUnavailableSourceTarget(null);
-                }}
-              />
-            )}
-            {draft && (
-              <div className="note-detail" data-editor-mode={editorMode}>
-                {resolvedSource && (
-                  <OpenedSourcePanel
-                    resolved={resolvedSource}
-                    fallbackTitle={fallbackSourceTitle}
-                    onDismiss={() => {
-                      setActiveSourceTarget(null);
-                      setUnavailableSourceTarget(null);
-                    }}
-                  />
-                )}
-                <section aria-label="Original note" className="note-editor-plane space-y-3">
-                  <Label htmlFor="note-title">Title</Label>
-                  <Input
-                    ref={titleRef}
-                    id="note-title"
-                    value={draft.title}
-                    maxLength={256}
-                    disabled={openingId !== null || deleting}
-                    onChange={(event) => setDraft({ ...draft, title: event.target.value })}
-                  />
-                  <Suspense fallback={<p>Opening editor...</p>}>
-                    <BlockNoteEditor
-                      key={editorKey}
-                      initialContent={draft.content}
-                      disabled={openingId !== null || deleting}
-                      highlightedBlockId={
-                        resolvedSource?.status === "matched" ? resolvedSource.blockId : undefined
-                      }
-                      highlightedRange={
-                        resolvedSource?.status === "matched"
-                          ? resolvedSource.markdownRange
-                          : undefined
-                      }
-                      onChange={(content) =>
-                        setDraft((current) => (current ? { ...current, content } : current))
-                      }
-                      onModeChange={setEditorMode}
-                      onValidityChange={setEditorValid}
+          </aside>
+        )}
+        <div className="workspace-content">
+          {(loadState === "ready" || draft !== null) && (
+            <>
+              {!draft && resolvedSource && (
+                <OpenedSourcePanel
+                  resolved={resolvedSource}
+                  fallbackTitle={fallbackSourceTitle}
+                  onDismiss={dismissSource}
+                />
+              )}
+              {draft && (
+                <div className="note-detail" data-editor-mode={editorMode}>
+                  {resolvedSource && (
+                    <OpenedSourcePanel
+                      resolved={resolvedSource}
+                      hasLocalChanges={dirty}
+                      fallbackTitle={fallbackSourceTitle}
+                      onDismiss={dismissSource}
                     />
-                  </Suspense>
-                  {!valid && (
-                    <p role="alert">
-                      The text contains unsupported characters or is too long. Use up to 256
-                      characters for the title and 100,000 for the content. Your text is preserved.
-                    </p>
                   )}
-                  <div className="flex flex-wrap items-center gap-3">
-                    {saved && (
-                      <Button
-                        ref={deleteButtonRef}
-                        variant="destructive"
-                        disabled={busy || writeBlocked || deleteBlocked}
-                        onClick={() => setDeleteOpen(true)}
-                      >
-                        Delete note
-                      </Button>
+                  <section aria-label="Original note" className="note-editor-plane space-y-3">
+                    <Label htmlFor="note-title" className="sr-only">
+                      Title
+                    </Label>
+                    <Input
+                      ref={titleRef}
+                      id="note-title"
+                      className="document-title"
+                      placeholder="Untitled note"
+                      value={draft.title}
+                      maxLength={256}
+                      disabled={openingId !== null || deleting}
+                      onChange={(event) => setDraft({ ...draft, title: event.target.value })}
+                    />
+                    <Suspense fallback={<p>Opening editor...</p>}>
+                      <BlockNoteEditor
+                        key={editorKey}
+                        initialContent={draft.content}
+                        disabled={openingId !== null || deleting}
+                        highlightedBlockId={
+                          !dirty && resolvedSource?.status === "matched"
+                            ? resolvedSource.blockId
+                            : undefined
+                        }
+                        highlightedRange={
+                          !dirty && resolvedSource?.status === "matched"
+                            ? resolvedSource.markdownRange
+                            : undefined
+                        }
+                        onChange={(content) =>
+                          setDraft((current) => (current ? { ...current, content } : current))
+                        }
+                        onModeChange={setEditorMode}
+                        onValidityChange={setEditorValid}
+                      />
+                    </Suspense>
+                    {!valid && (
+                      <p role="alert">
+                        The text contains unsupported characters or is too long. Use up to 256
+                        characters for the title and 100,000 for the content. Your text is
+                        preserved.
+                      </p>
                     )}
-                  </div>
-                </section>
-                {editorMode === "source" && typeof draft.content === "string" && (
-                  <Card>
-                    <CardHeader>
-                      <CardTitle>
-                        <h2>Preview</h2>
-                      </CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                      {draft.content ? (
-                        <MarkdownPreview content={draft.content} />
-                      ) : (
-                        <p>Write Markdown to see a preview.</p>
+                    <div className="note-document-actions">
+                      {saved && (
+                        <Button
+                          ref={deleteButtonRef}
+                          variant="ghost"
+                          className="text-destructive"
+                          disabled={busy || writeBlocked || deleteBlocked}
+                          onClick={() => setDeleteOpen(true)}
+                        >
+                          Delete note
+                        </Button>
                       )}
-                    </CardContent>
-                  </Card>
-                )}
-                {comparison && (
-                  <Card className="note-comparison">
-                    <CardHeader>
-                      <CardTitle>
-                        <h2>Latest saved version</h2>
-                      </CardTitle>
-                    </CardHeader>
-                    <CardContent className="space-y-3">
-                      <p>{comparison.note.title || "Untitled note"}</p>
-                      <NoteContentView content={comparison.note.content} />
-                      <Button
-                        variant="outline"
-                        disabled={busy || blocked}
-                        onClick={() => requestSelection({ kind: "replace", snapshot: comparison })}
-                      >
-                        Use latest version
-                      </Button>
-                    </CardContent>
-                  </Card>
-                )}
-              </div>
-            )}
-          </>
-        )}
-        {search && (loadState === "ready" || draft !== null) && (
-          <NoteSearchWorkspace
-            key={searchResetToken}
-            client={search}
-            notes={notes}
-            enabled={requestsEnabled && !blocked}
-            activeSourceTarget={unavailableSourceTarget ?? activeSourceTarget}
-            onOpenSource={requestOpenSource}
-            onUnauthenticated={handleSearchUnauthenticated}
-          />
-        )}
-        {!example && organizer && (
-          <OrganizeWorkspace
-            client={organizer}
-            source={saved}
-            sourceDirty={dirty}
-            enabled={requestsEnabled && !blocked}
-            canStart={
-              draft !== null &&
-              valid &&
-              !busy &&
-              !writeBlocked &&
-              deleteFailure === null &&
-              !["creation-conflict", "conflict", "missing"].includes(saveState)
-            }
-            prepareSource={save}
-            onCheckNotes={refreshNotes}
-            onSaved={(snapshot) =>
-              setNotes((current) => [
-                toSummary(snapshot.note),
-                ...current.filter((note) => note.id !== snapshot.note.id),
-              ])
-            }
-          />
-        )}
+                    </div>
+                  </section>
+                  {editorMode === "source" && typeof draft.content === "string" && (
+                    <Card>
+                      <CardHeader>
+                        <CardTitle>
+                          <h2>Preview</h2>
+                        </CardTitle>
+                      </CardHeader>
+                      <CardContent>
+                        {draft.content ? (
+                          <MarkdownPreview content={draft.content} />
+                        ) : (
+                          <p>Write Markdown to see a preview.</p>
+                        )}
+                      </CardContent>
+                    </Card>
+                  )}
+                  {comparison && (
+                    <Card className="note-comparison">
+                      <CardHeader>
+                        <CardTitle>
+                          <h2>Latest saved version</h2>
+                        </CardTitle>
+                      </CardHeader>
+                      <CardContent className="space-y-3">
+                        <p>{comparison.note.title || "Untitled note"}</p>
+                        <NoteContentView content={comparison.note.content} />
+                        <Button
+                          variant="outline"
+                          disabled={busy || blocked}
+                          onClick={() =>
+                            requestSelection({ kind: "replace", snapshot: comparison })
+                          }
+                        >
+                          Use latest version
+                        </Button>
+                      </CardContent>
+                    </Card>
+                  )}
+                </div>
+              )}
+            </>
+          )}
+          {!example && organizer && (
+            <OrganizeWorkspace
+              client={organizer}
+              source={saved}
+              sourceDirty={dirty}
+              enabled={requestsEnabled && !blocked}
+              canStart={
+                draft !== null &&
+                valid &&
+                !busy &&
+                !writeBlocked &&
+                deleteFailure === null &&
+                !["creation-conflict", "conflict", "missing"].includes(saveState)
+              }
+              prepareSource={save}
+              onCheckNotes={refreshNotes}
+              onSaved={(snapshot) =>
+                setNotes((current) => [
+                  toSummary(snapshot.note),
+                  ...current.filter((note) => note.id !== snapshot.note.id),
+                ])
+              }
+            />
+          )}
+        </div>
       </div>
       <AlertDialog
         open={pending !== null}

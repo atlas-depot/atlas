@@ -1109,6 +1109,289 @@ test.describe("recovery and auth", () => {
 });
 
 test.describe("search and source opening", () => {
+  test("disables source opening during a save without erasing the search", async ({ page }) => {
+    await serveNotes(page, [[serverNote, `"${firstId}:1"`]]);
+    let releaseSave!: () => void;
+    const saved = new Promise<void>((resolve) => {
+      releaseSave = resolve;
+    });
+    await page.route(`**/api/notes/${firstId}`, async (route) => {
+      if (route.request().method() !== "PUT") return route.fallback();
+      await saved;
+      return route.fulfill({
+        json: { ...serverNote, ...updateNoteSchema.parse(route.request().postDataJSON()) },
+        headers: { ETag: `"${firstId}:2"` },
+      });
+    });
+    await page.route("**/api/note-search", (route) =>
+      route.fulfill({
+        json: {
+          candidates: [
+            {
+              text: "Original text",
+              score: 0.9,
+              source: {
+                kind: "markdown",
+                noteId: firstId,
+                version: `"${firstId}:1"`,
+                startOffset: 0,
+                endOffset: 13,
+                headingPath: [],
+              },
+            },
+          ],
+          coverage: { ready: 1, pending: 0, failed: 0 },
+        },
+      }),
+    );
+    await page.goto("/");
+    const search = page.getByRole("region", { name: "Search notes" });
+    const query = search.getByLabel("Search saved notes");
+    await query.fill("saved evidence");
+    await query.press("Enter");
+    const open = search.getByRole("button", { name: "Open source", exact: true });
+    await expect(open).toBeEnabled();
+    await page
+      .getByRole("textbox", { name: /^(Markdown source|Note content)$/ })
+      .fill("Updated text");
+    const request = page.waitForRequest((request) => request.method() === "PUT");
+    await page.getByRole("button", { name: "Save", exact: true }).click();
+    await request;
+    await expect(open).toBeDisabled();
+    await expect(query).toHaveValue("saved evidence");
+    releaseSave();
+    await expect(page.getByRole("status")).toHaveText("Saved");
+    await expect(open).toBeEnabled();
+    await expect(query).toHaveValue("saved evidence");
+  });
+
+  test("retains a missing source title and clears stale source errors on dismiss or another failure", async ({
+    page,
+  }) => {
+    const thirdId = "fa100001-1234-4000-8000-000000000003";
+    const missing = { ...serverNote, id: secondId, title: "Missing evidence" };
+    const denied = { ...serverNote, id: thirdId, title: "Other evidence" };
+    await serveNotes(page, [[serverNote, `"${firstId}:1"`], [missing], [denied]]);
+    await page.route(`**/api/notes/${secondId}`, (route) =>
+      route.fulfill({ status: 404, json: { error: { code: "NOT_FOUND", message: "Missing" } } }),
+    );
+    let failureStatus = 403;
+    await page.route(`**/api/notes/${thirdId}`, (route) =>
+      route.fulfill({
+        status: failureStatus,
+        json: { error: { code: "FORBIDDEN", message: "Denied" } },
+      }),
+    );
+    await page.route("**/api/note-search", (route) =>
+      route.fulfill({
+        json: {
+          candidates: [missing, denied].map((note) => ({
+            text: "Original text",
+            score: 0.9,
+            source: {
+              kind: "markdown",
+              noteId: note.id,
+              version: `"${note.id}:1"`,
+              startOffset: 0,
+              endOffset: 13,
+              headingPath: [],
+            },
+          })),
+          coverage: { ready: 3, pending: 0, failed: 0 },
+        },
+      }),
+    );
+    await page.goto("/");
+    const search = page.getByRole("region", { name: "Search notes" });
+    await search.getByLabel("Search saved notes").fill("evidence");
+    await search.getByLabel("Search saved notes").press("Enter");
+    const openMissing = search
+      .locator(".note-search-card")
+      .filter({ hasText: "Missing evidence" })
+      .getByRole("button", { name: "Open source", exact: true });
+    const openOther = search
+      .locator(".note-search-card")
+      .filter({ hasText: "Other evidence" })
+      .getByRole("button", { name: "Open source", exact: true });
+    const panel = page.getByRole("region", { name: "Opened source" });
+    await openMissing.click();
+    await expect(panel).toContainText("Missing evidence");
+    await expect(openMissing).toBeEnabled();
+    await page.getByRole("button", { name: "Dismiss source", exact: true }).click();
+    await expect(panel).toHaveCount(0);
+    await expect(page.getByRole("alert")).toBeEmpty();
+    await expect(page.getByRole("button", { name: "Refresh notes", exact: true })).toHaveCount(0);
+    for (const status of [403, 500]) {
+      failureStatus = status;
+      await openMissing.click();
+      await expect(panel).toContainText("Missing evidence");
+      await openOther.click();
+      await expect(page.getByRole("alert")).not.toBeEmpty();
+      await expect(panel).toHaveCount(0);
+      await expect(page.getByRole("textbox", { name: "Title", exact: true })).toHaveValue("A");
+      await expectEditorContent(
+        page.getByRole("textbox", { name: /^(Markdown source|Note content)$/ }),
+        "Original text",
+      );
+    }
+  });
+
+  test("never displays a delayed search from the previous account", async ({ page }) => {
+    let bob = false;
+    let releaseAlice!: () => void;
+    const aliceResponse = new Promise<void>((resolve) => {
+      releaseAlice = resolve;
+    });
+    await page.route("**/api/auth/session", (route) =>
+      route.fulfill({
+        json: {
+          user: bob ? { ...browserUser, id: "user_bob", email: "bob@example.test" } : browserUser,
+        },
+      }),
+    );
+    await serveNotes(page, [[serverNote, `"${firstId}:1"`]]);
+    await page.route("**/api/notes", (route) =>
+      route.fulfill({ json: { notes: bob ? [] : [toListRow(serverNote)] } }),
+    );
+    await page.route("**/api/note-search", async (route) => {
+      const alice = route.request().postDataJSON().query === "Alice private query";
+      if (alice) await aliceResponse;
+      return route.fulfill({
+        json: {
+          candidates: [
+            {
+              text: alice ? "Alice private search evidence" : "Bob separate search evidence",
+              score: 0.9,
+              source: {
+                kind: "markdown",
+                noteId: alice ? firstId : secondId,
+                version: `"${alice ? firstId : secondId}:1"`,
+                startOffset: 0,
+                endOffset: 13,
+                headingPath: [],
+              },
+            },
+          ],
+          coverage: { ready: 1, pending: 0, failed: 0 },
+        },
+      });
+    });
+    await page.goto("/");
+    const search = page.getByRole("region", { name: "Search notes" });
+    const query = search.getByLabel("Search saved notes");
+    await query.fill("Alice private query");
+    const started = page.waitForRequest((request) => request.url().endsWith("/api/note-search"));
+    await query.press("Enter");
+    await started;
+    bob = true;
+    await page.evaluate("window.dispatchEvent(new Event('focus'))");
+    await expect(page.getByText("Signed in as bob@example.test")).toBeVisible();
+    await expect(query).toHaveValue("");
+    await query.fill("Bob query");
+    await query.press("Enter");
+    await expect(search.getByText("Bob separate search evidence")).toBeVisible();
+    const completed = page.waitForResponse(
+      (response) =>
+        response.url().endsWith("/api/note-search") &&
+        response.request().postDataJSON().query === "Alice private query",
+    );
+    releaseAlice();
+    await (await completed).finished();
+    await page.evaluate(
+      "new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))",
+    );
+    await expect(page.getByText("Alice private search evidence")).toHaveCount(0);
+    await expect(search.getByText("Bob separate search evidence")).toBeVisible();
+    await expect(query).toHaveValue("Bob query");
+  });
+
+  for (const width of [375, 1280]) {
+    for (const syntax of ["plain", "source-only"]) {
+      test(`reveals the exact ${syntax} Markdown match at ${width}px without reselecting edits`, async ({
+        page,
+      }, testInfo) => {
+        const prefix = (
+          syntax === "plain" ? "A saved paragraph.\n\n" : "<aside>Keep exact HTML.</aside>\n\n"
+        ).repeat(80);
+        const evidence = "Matched 🧭 evidence near the end.";
+        const content = `${prefix}${evidence}\n\nTrailing context.`;
+        const note = { ...serverNote, content };
+        await serveNotes(page, [[note, `"${firstId}:1"`]]);
+        await page.route("**/api/note-search", (route) =>
+          route.fulfill({
+            json: {
+              candidates: [
+                {
+                  text: evidence,
+                  score: 0.9,
+                  source: {
+                    kind: "markdown",
+                    noteId: firstId,
+                    version: `"${firstId}:1"`,
+                    headingPath: [],
+                    startOffset: prefix.length,
+                    endOffset: prefix.length + evidence.length,
+                  },
+                },
+              ],
+              coverage: { ready: 1, pending: 0, failed: 0 },
+            },
+          }),
+        );
+        await page.setViewportSize({ width, height: 812 });
+        await page.goto("/");
+        const search = page.getByRole("region", { name: "Search notes" });
+        await search.getByLabel("Search saved notes").fill("matched evidence");
+        await search.getByLabel("Search saved notes").press("Enter");
+        await search.getByRole("button", { name: "Open source", exact: true }).press("Enter");
+        const source = page.getByRole("textbox", { name: "Markdown source", exact: true });
+        if (syntax === "plain") {
+          await expect(source).toHaveCount(0);
+          const block = page.locator('[data-cited-block="true"]');
+          await expect(block).toContainText(evidence);
+          await expect(block).toBeFocused();
+          await expect(block).toBeInViewport();
+        } else {
+          await expect(source).toBeFocused();
+          await expect
+            .poll(() =>
+              source.evaluate((element: { selectionStart: number; selectionEnd: number }) => ({
+                start: element.selectionStart,
+                end: element.selectionEnd,
+              })),
+            )
+            .toEqual({ start: prefix.length, end: prefix.length + evidence.length });
+          expect(await source.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
+          await expect(source).toBeInViewport();
+        }
+        await expect(page.getByRole("button", { name: "Save", exact: true })).toBeDisabled();
+        expect(
+          await page.evaluate("document.documentElement.scrollWidth <= window.innerWidth"),
+        ).toBe(true);
+        await page.screenshot({
+          path: testInfo.outputPath(`markdown-source-${syntax}-${width}.png`),
+        });
+        if (syntax === "plain") {
+          await page
+            .getByRole("textbox", { name: "Note content", exact: true })
+            .fill("Locally rewritten evidence");
+          await expect(page.locator('[data-cited-block="true"]')).toHaveCount(0);
+        } else {
+          await source.press("ArrowRight");
+          await source.pressSequentially(" More context");
+          await expect(source).toHaveValue(
+            `${prefix}${evidence} More context\n\nTrailing context.`,
+          );
+        }
+        await expect(page.locator("[data-cited-range]")).toHaveCount(0);
+        await expect(page.getByRole("region", { name: "Opened source" })).toContainText(
+          "unsaved changes",
+        );
+        await expect(page.getByRole("button", { name: "Save", exact: true })).toBeEnabled();
+      });
+    }
+  }
+
   test("opens a matching block source, warns when the note revision changed, and reports missing blocks explicitly", async ({
     page,
   }) => {
@@ -1213,8 +1496,15 @@ test.describe("search and source opening", () => {
       page.locator('[data-node-type="blockContainer"][data-id="block-pgvector"]'),
     ).toHaveAttribute("data-cited-block", "true");
 
+    await page
+      .getByRole("textbox", { name: "Note content", exact: true })
+      .fill("Locally replaced evidence");
+    await expect(page.locator("[data-cited-block='true']")).toHaveCount(0);
+    await expect(openedSource).toContainText("unsaved changes");
+
     secondEtag = `"${secondId}:3"`;
     await searchRegion.getByRole("button", { name: "Open source", exact: true }).click();
+    await page.getByRole("button", { name: "Discard changes", exact: true }).click();
     await expect(openedSource).toContainText(
       "This note changed since Revision 2 (now Revision 3).",
     );
@@ -1453,8 +1743,16 @@ test.describe("search and source opening", () => {
     await expect(
       searchRegion.getByText("Current query passage wins over older in-flight response."),
     ).toBeVisible();
+    const oldResponse = page.waitForResponse(
+      (response) =>
+        response.url().endsWith("/api/note-search") &&
+        response.request().postDataJSON().query === "older query",
+    );
     resolveSlowQuery();
-    await page.waitForTimeout(50);
+    await (await oldResponse).finished();
+    await page.evaluate(
+      "new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))",
+    );
     await expect(
       searchRegion.getByText("Current query passage wins over older in-flight response."),
     ).toBeVisible();

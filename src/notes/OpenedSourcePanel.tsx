@@ -1,3 +1,4 @@
+import { useEffect, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -12,18 +13,30 @@ import type { ResolvedSourceState } from "./source-location";
 export function OpenedSourcePanel({
   resolved,
   fallbackTitle,
+  hasLocalChanges = false,
   onDismiss,
 }: {
   resolved: ResolvedSourceState;
   fallbackTitle?: string | null;
+  hasLocalChanges?: boolean;
   onDismiss: () => void;
 }) {
+  const panelRef = useRef<HTMLElement>(null);
+  useEffect(() => {
+    if (resolved.status !== "matched") panelRef.current?.focus();
+  }, [resolved.status, resolved.target]);
   const displayTitle = resolved.noteTitle ?? fallbackTitle ?? "Unavailable note";
   const heading =
     resolved.target.origin === "citation" ? "Opened citation source" : "Opened search source";
 
   return (
-    <section aria-label="Opened source" className="opened-source-panel">
+    <section
+      ref={panelRef}
+      tabIndex={-1}
+      aria-label="Opened source"
+      aria-live="polite"
+      className="opened-source-panel"
+    >
       <Card size="sm">
         <CardHeader>
           <CardTitle>{heading}</CardTitle>
@@ -68,6 +81,12 @@ export function OpenedSourcePanel({
             </div>
           </dl>
 
+          {hasLocalChanges ? (
+            <p role="note" className="opened-source-warning">
+              This note has unsaved changes. Source details refer to the saved version. Highlighting
+              is paused.
+            </p>
+          ) : null}
           {resolved.warningMessage ? (
             <p role="note" className="opened-source-warning">
               {resolved.warningMessage}
@@ -83,7 +102,7 @@ export function OpenedSourcePanel({
 
           {resolved.resolvedText && resolved.resolvedText !== resolved.excerpt ? (
             <div className="opened-source-excerpt-group">
-              <p className="opened-source-excerpt-label">Current block text</p>
+              <p className="opened-source-excerpt-label">Saved block text</p>
               <blockquote className="opened-source-excerpt">{resolved.resolvedText}</blockquote>
             </div>
           ) : null}

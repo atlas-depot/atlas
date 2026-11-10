@@ -8,6 +8,7 @@ import type { NoteSnapshot } from "./notes-store";
 export type SourceTarget = {
   origin: "search" | "citation";
   query?: string;
+  noteTitle?: string;
   source: NotePassageSource;
   excerpt: string | null;
   deleted?: boolean;
@@ -149,6 +150,7 @@ function findBlockById(blocks: AtlasBlock[], blockId: string): AtlasBlock | null
 }
 
 function summarizeBlockText(block: AtlasBlock): string {
+  let ownText = "";
   if (block.type === "table") {
     const cellTexts: string[] = [];
     for (const row of block.content.rows) {
@@ -161,22 +163,13 @@ function summarizeBlockText(block: AtlasBlock): string {
         }
       }
     }
-    if (cellTexts.length > 0) {
-      return cellTexts.join(" | ");
-    }
+    ownText = cellTexts.join(" | ");
   } else if (block.type !== "divider") {
-    const ownText = inlineItemsText(block.content).trim();
-    if (ownText.length > 0) {
-      return ownText;
-    }
+    ownText = inlineItemsText(block.content).trim();
   }
-  if (block.children.length > 0) {
-    return block.children
-      .map((child) => summarizeBlockText(child))
-      .filter((text) => text.length > 0)
-      .join(" ");
-  }
-  return "";
+  return [ownText, ...block.children.map(summarizeBlockText)]
+    .filter((text) => text.length > 0)
+    .join("\n");
 }
 
 function baseResolvedSource(
@@ -363,7 +356,10 @@ export function describeSearchOutcome(query: string, response: NoteSearchRespons
       query: trimmedQuery,
       candidates: [],
       coverage,
-      emptyMessage: `Search index is still updating (${coverage.pending} ${coverage.pending === 1 ? "note" : "notes"} pending). Retry search once indexing finishes.`,
+      emptyMessage:
+        coverage.failed > 0
+          ? coverageNotice
+          : `Search index is still updating (${coverage.pending} ${coverage.pending === 1 ? "note" : "notes"} pending). Retry search once indexing finishes.`,
       coverageNotice: null,
       canRetry: true,
     };

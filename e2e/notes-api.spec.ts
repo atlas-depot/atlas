@@ -322,6 +322,19 @@ test("keyboard search and source opening work on narrow mobile through the real 
             content: [{ type: "text", text: "Retrieval Pipeline", styles: {} }],
             children: [],
           },
+          ...Array.from({ length: 30 }, (_, index) => ({
+            id: `context-${index}`,
+            type: "paragraph",
+            props: {},
+            content: [
+              {
+                type: "text",
+                text: `Background paragraph ${index} for source navigation.`,
+                styles: {},
+              },
+            ],
+            children: [],
+          })),
           {
             id: "vector-block",
             type: "paragraph",
@@ -383,6 +396,9 @@ test("keyboard search and source opening work on narrow mobile through the real 
   await expect(
     page.locator('[data-node-type="blockContainer"][data-id="vector-block"]'),
   ).toHaveAttribute("data-cited-block", "true");
+  const matched = page.locator('[data-node-type="blockContainer"][data-id="vector-block"]');
+  await expect(matched).toBeInViewport();
+  await expect(matched).toBeFocused();
   expect(await page.evaluate("document.documentElement.scrollWidth <= window.innerWidth")).toBe(
     true,
   );

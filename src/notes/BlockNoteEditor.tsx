@@ -1,8 +1,9 @@
-import { useEffect, useId, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { ArrowUUpLeftIcon } from "@phosphor-icons/react/dist/csr/ArrowUUpLeft";
 import { ArrowUUpRightIcon } from "@phosphor-icons/react/dist/csr/ArrowUUpRight";
 import { Button } from "@/components/ui/button";
 import { canImportGeneratedMarkdown } from "./generated-markdown";
+import { findMarkdownSourceBlock } from "./markdown-source-location";
 import { noteSchema as schema } from "./editor-schema";
 import { noteSyntaxHighlighting } from "./code-theme";
 import { createCodePasteHandler } from "./code-detection";
@@ -60,6 +61,7 @@ export function BlockNoteEditor(props: EditorProps) {
 function MarkdownNoteEditor(props: EditorProps & { source: string }) {
   const contentId = useId();
   const [source, setSource] = useState(props.source);
+  const sourceRef = useRef<HTMLTextAreaElement>(null);
   const [converted] = useState(() => {
     try {
       const parser = getMarkdownParser();
@@ -80,14 +82,80 @@ function MarkdownNoteEditor(props: EditorProps & { source: string }) {
   useEffect(() => {
     if (!converted) onModeChange("source");
   }, [converted, onModeChange]);
+  const startOffset = props.highlightedRange?.startOffset;
+  const endOffset = props.highlightedRange?.endOffset;
+  useEffect(() => {
+    const textarea = sourceRef.current;
+    if (
+      !textarea ||
+      startOffset === undefined ||
+      endOffset === undefined ||
+      !Number.isInteger(startOffset) ||
+      !Number.isInteger(endOffset) ||
+      startOffset < 0 ||
+      endOffset <= startOffset ||
+      endOffset > textarea.value.length
+    )
+      return;
+    textarea.setSelectionRange(startOffset, endOffset);
+    textarea.focus({ preventScroll: true });
+    // Measure the wrapped prefix with the textarea's own typography. Selection APIs
+    // do not scroll a textarea, and counting newlines fails for wrapped mobile text.
+    const mirror = document.createElement("textarea");
+    const style = getComputedStyle(textarea);
+    for (const property of [
+      "font",
+      "line-height",
+      "letter-spacing",
+      "padding",
+      "border",
+      "box-sizing",
+      "white-space",
+      "overflow-wrap",
+      "tab-size",
+    ]) {
+      mirror.style.setProperty(property, style.getPropertyValue(property));
+    }
+    Object.assign(mirror.style, {
+      position: "fixed",
+      visibility: "hidden",
+      width: `${textarea.clientWidth}px`,
+      height: "0",
+      minHeight: "0",
+      fieldSizing: "fixed",
+    });
+    mirror.value = textarea.value.slice(0, startOffset);
+    document.body.append(mirror);
+    textarea.scrollTop = Math.max(0, mirror.scrollHeight - textarea.clientHeight / 3);
+    mirror.remove();
+    textarea.scrollIntoView({ block: "center" });
+  }, [startOffset, endOffset]);
+  const mappedBlockId = useMemo(() => {
+    if (!converted || startOffset === undefined || endOffset === undefined) return undefined;
+    return findMarkdownSourceBlock(
+      props.source,
+      converted.blocks,
+      { startOffset, endOffset },
+      (blocks) => getMarkdownParser().blocksToMarkdownLossy(blocks),
+    );
+  }, [converted, props.source, startOffset, endOffset]);
   if (converted)
     return (
-      <RichDocumentEditor
-        {...props}
-        initialContent={props.importGeneratedMarkdown ? converted : props.initialContent}
-        importedFromMarkdown={props.importGeneratedMarkdown}
-        document={converted}
-      />
+      <>
+        {props.highlightedRange && !mappedBlockId ? (
+          <p role="note">
+            This passage cannot be highlighted in the current view. Its retrieved excerpt is shown
+            above.
+          </p>
+        ) : null}
+        <RichDocumentEditor
+          {...props}
+          highlightedBlockId={mappedBlockId ?? props.highlightedBlockId}
+          initialContent={props.importGeneratedMarkdown ? converted : props.initialContent}
+          importedFromMarkdown={props.importGeneratedMarkdown}
+          document={converted}
+        />
+      </>
     );
   const citedRangeAttr = props.highlightedRange
     ? `${props.highlightedRange.startOffset}-${props.highlightedRange.endOffset}`
@@ -99,11 +167,12 @@ function MarkdownNoteEditor(props: EditorProps & { source: string }) {
         Source mode preserves this Markdown without conversion.
       </p>
       <Textarea
+        ref={sourceRef}
         id={contentId}
         value={source}
         maxLength={100_000}
         rows={6}
-        className="note-source"
+        className="note-source max-h-[60vh]"
         data-cited-range={citedRangeAttr}
         readOnly={props.disabled}
         onChange={(event) => {
@@ -161,6 +230,7 @@ function RichDocumentEditor({
     const clearMarks = () => {
       for (const previous of root.querySelectorAll("[data-cited-block='true']")) {
         previous.removeAttribute("data-cited-block");
+        previous.removeAttribute("tabindex");
       }
     };
     clearMarks();
@@ -175,6 +245,8 @@ function RichDocumentEditor({
       }
       if (!scrolled && typeof matched.scrollIntoView === "function") {
         scrolled = true;
+        matched.tabIndex = -1;
+        matched.focus({ preventScroll: true });
         matched.scrollIntoView({ block: "nearest" });
       }
     };

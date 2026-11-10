@@ -169,6 +169,31 @@ describe("source location resolution and search outcome classification", () => {
     );
   });
 
+  it("includes descendant content when a parent block is the cited source", () => {
+    const snapshot = createBlockSnapshot();
+    const target = createSearchSourceTarget(
+      {
+        text: "PostgreSQL stores note revisions.\n  - pgvector indexes passages.",
+        score: 0.92,
+        source: {
+          kind: "block",
+          noteId,
+          version: snapshot.etag,
+          blockId: "block-1",
+          headingPath: ["Storage"],
+        },
+      },
+      "pgvector",
+    );
+
+    expect(resolveSourceInNote(target, snapshot)).toMatchObject({
+      status: "matched",
+      blockId: "block-1",
+      resolvedText: "PostgreSQL stores note revisions.\npgvector indexes passages.",
+      warningMessage: null,
+    });
+  });
+
   it("reports location_missing when the cited block ID no longer exists instead of claiming another block", () => {
     const snapshot = createBlockSnapshot(`"${noteId}:3"`);
     const target = createSearchSourceTarget(
@@ -338,5 +363,17 @@ describe("source location resolution and search outcome classification", () => {
     expect(matchesWithPending.coverageNotice).toContain(
       "Search index is updating (1 note pending).",
     );
+  });
+
+  it("reports both pending and failed indexing when no candidates are available", () => {
+    const outcome = describeSearchOutcome("storage", {
+      candidates: [],
+      coverage: { ready: 0, pending: 2, failed: 3 },
+    });
+    expect(outcome.kind).toBe("index-updating");
+    expect(outcome.emptyMessage).toContain("3 notes failed to index");
+    expect(outcome.emptyMessage).toMatch(/2 (?:notes )?pending/);
+    expect(outcome.coverageNotice).toBeNull();
+    expect(outcome.canRetry).toBe(true);
   });
 });

@@ -44,6 +44,7 @@ export function NoteSearchWorkspace({
   client,
   notes,
   enabled,
+  canOpenSource,
   activeSourceTarget,
   onOpenSource,
   onUnauthenticated,
@@ -51,6 +52,7 @@ export function NoteSearchWorkspace({
   client: NoteSearchClient;
   notes: NoteSummary[];
   enabled: boolean;
+  canOpenSource: boolean;
   activeSourceTarget: SourceTarget | null;
   onOpenSource: (target: SourceTarget) => void;
   onUnauthenticated: () => void;
@@ -61,6 +63,7 @@ export function NoteSearchWorkspace({
   const [searching, setSearching] = useState(false);
   const [outcome, setOutcome] = useState<SearchOutcome | null>(null);
   const [failure, setFailure] = useState<string | null>(null);
+  const [resultTitles, setResultTitles] = useState<Record<string, string>>({});
   const requestIdRef = useRef(0);
   const inFlightIdRef = useRef(0);
   const enabledRef = useRef(enabled);
@@ -85,6 +88,9 @@ export function NoteSearchWorkspace({
     const trimmed = rawQuery.trim();
     if (!enabledRef.current || trimmed.length === 0) return;
 
+    const titles = Object.fromEntries(
+      notes.map((note) => [note.id, note.title.trim() || "Untitled note"]),
+    );
     const requestId = ++requestIdRef.current;
     inFlightIdRef.current = requestId;
     setSubmittedQuery(trimmed);
@@ -97,6 +103,7 @@ export function NoteSearchWorkspace({
         return;
       }
       setOutcome(describeSearchOutcome(trimmed, response));
+      setResultTitles(titles);
       setFailure(null);
     } catch (error) {
       if (requestId !== requestIdRef.current) {
@@ -126,7 +133,7 @@ export function NoteSearchWorkspace({
   function resolveNoteTitle(noteId: string): string {
     const found = notes.find((item) => item.id === noteId);
     if (!found) {
-      return "Saved note";
+      return resultTitles[noteId] ?? "Saved note";
     }
     return found.title.trim() || "Untitled note";
   }
@@ -165,7 +172,7 @@ export function NoteSearchWorkspace({
       </div>
 
       {submittedQuery ? (
-        <p className="note-search-query-summary">
+        <p className="note-search-query-summary" aria-live="polite">
           {isSearching ? `Searching for "${submittedQuery}"...` : `Query: "${submittedQuery}"`}
         </p>
       ) : null}
@@ -189,7 +196,7 @@ export function NoteSearchWorkspace({
       ) : null}
 
       {!failure && outcome ? (
-        <div className="note-search-results" data-search-outcome={outcome.kind}>
+        <div className="note-search-results" data-search-outcome={outcome.kind} aria-live="polite">
           {outcome.coverageNotice ? (
             <div className="note-search-feedback">
               <p role="note" className="note-search-notice">
@@ -261,9 +268,13 @@ export function NoteSearchWorkspace({
                           <Button
                             type="button"
                             variant="outline"
-                            disabled={!enabled}
+                            disabled={!enabled || !canOpenSource}
+                            aria-current={isActive ? "location" : undefined}
                             onClick={() =>
-                              onOpenSource(createSearchSourceTarget(candidate, outcome.query))
+                              onOpenSource({
+                                ...createSearchSourceTarget(candidate, outcome.query),
+                                noteTitle,
+                              })
                             }
                           >
                             Open source
