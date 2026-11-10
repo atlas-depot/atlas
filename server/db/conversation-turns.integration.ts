@@ -167,7 +167,7 @@ it("concurrent Stop and completion publish exactly one terminal answer", async (
   );
 });
 
-it("rejects input reordering, foreign identity and unsupported steer execution without rewriting policy", async () => {
+it("rejects input reordering and foreign identity, and starts a steer normally when nothing is running", async () => {
   const f = await fixture();
   const one = await f.input("One");
   const two = await f.input("Two");
@@ -178,10 +178,11 @@ it("rejects input reordering, foreign identity and unsupported steer execution w
   expect(
     await f.first.startAttempt(f.owner, f.id, randomUUID(), { inputIds: [randomUUID()] }),
   ).toEqual({ status: "conflict" });
-  expect(await f.first.startAttempt(f.owner, f.id, randomUUID(), { inputIds: [steer.id] })).toEqual(
-    { status: "policy_unsupported" },
-  );
   expect(steer).toMatchObject({ deliveryPolicy: "steer" });
+  expect(await f.first.startNext(f.owner, f.id)).toMatchObject({ status: "started" });
+  expect(await createConversationStore(database.db).read(f.owner, f.id)).toMatchObject({
+    activeTurn: { inputIds: [one.id, two.id, steer.id] },
+  });
 });
 
 async function source(owner: string) {

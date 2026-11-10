@@ -154,7 +154,8 @@ export function finalizeConversationTurn(db: ReturnType<typeof openDatabase>["db
         return { status: "source_unavailable" as const };
       }
       const message = await publishConversationAnswer(tx, parent, turn, input);
-      if (input.status === "incomplete") await enqueueTurnCleanup(tx, owner, turn);
+      // Every terminal attempt leaves a runtime session that must be retired.
+      await enqueueTurnCleanup(tx, owner, turn);
       return { status: "saved" as const, value: message };
     });
   };
