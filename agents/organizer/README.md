@@ -1,6 +1,6 @@
 # Private note organizer
 
-Implements [#50](https://github.com/atlas-depot/atlas/issues/50). Hono derives the owner from its verified session and calls this private eve service through the [Organize HTTP contract](../../docs/api.md#organize). #51 owns note CRUD; #53 owns the editable draft handoff, Save and Discard. No browser receives the service credential or raw eve session identifiers.
+Implements [#50](https://github.com/atlas-depot/atlas/issues/50). Hono derives the owner from its verified session and calls this private eve service as `api` through the [Organize HTTP contract](../../docs/api.md#organize). #51 owns note CRUD; #53 owns the editable draft handoff, Save and Discard. No browser receives the service credential or raw eve session identifiers.
 
 Install the root workspace with `pnpm install --frozen-lockfile`. Copy `.env.example` here to `.env.local` and supply development credentials. Run `pnpm --dir agents/organizer dev`. The local service binds to `127.0.0.1:2027`. Model quality trials use synthetic notes and an explicitly budgeted provider key; routine tests never call paid models.
 
@@ -61,6 +61,25 @@ Unsupported projections remain failed until the note changes. No public retry en
 or retry button is required. Keep old deployments and their service credentials available
 until their work finishes. An expired allocation token fences a late Workflow before it
 can call the provider.
+
+## Question answering
+
+Implements [#71](https://github.com/atlas-depot/atlas/issues/71); the decisions are in the
+[proposal](../../docs/proposals/71-grounded-chat-turn.md). The same agent answers questions
+over the user's notes. The service username fixes the job: `api` runs Organize and indexing,
+`chat` runs answers. `job.ts` holds the rule. A chat session gets `instructions/answer.ts`
+and the `search_notes` tool only; `research` and the Organize instructions are withheld.
+A session touched by both principals gets neither tool.
+
+`search_notes` accepts a query and a limit. It finds the owner through the running attempt
+bound to its own session ID, embeds the query with the index profile and returns current
+owned passages with a server-computed ID. It needs `DATABASE_URL` and `OPENROUTER_API_KEY`
+in the runtime. `answer-client.ts` sends inputs with an idempotency key and the reply schema,
+uses `turnPolicy: "steer"` only for an explicit steer, and reads results from bounded
+snapshots. `eve-transport.ts` carries the request code both clients share.
+
+The `reconcile` schedule also continues answers no reader is polling and retires finished,
+stopped or deleted answer sessions.
 
 ## Build and verification
 

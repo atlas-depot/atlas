@@ -69,6 +69,10 @@ are removed in bounded batches as subsequent requests arrive.
 | `GET /api/conversations/:id` | `200 { conversation, activeTurn }`, including the current checkpoint when running |
 | `GET /api/conversations/:id/messages?limit=50&cursor=...` | `200 { messages, nextCursor }`, ascending immutable sequence |
 | `DELETE /api/conversations/:id`, empty body | `204` after content deletion and durable cleanup-intent recording |
+| `POST /api/conversations/:id/messages`, `{ text, policy? }` plus UUID `Idempotency-Key` | `202 { message, conversation, activeTurn }` |
+| `POST /api/conversations/:id/stop`, empty body | `200 { conversation, activeTurn }` with the queue paused |
+| `POST /api/conversations/:id/resume`, empty body | `200 { conversation, activeTurn }` |
+| `POST /api/conversations/:id/turns/:turnId/retry`, empty body plus UUID `Idempotency-Key` | `202 { conversation, activeTurn }` |
 
 Pages default to 50 and allow at most 100 records. Use the returned cursor unchanged.
 Creation accepts no owner, ID or title. Identical owner/key replay returns the current
@@ -85,15 +89,33 @@ Note deletion clears their stored
 excerpts, retaining delivered answer text and deleted-source references. Changed source
 versions are marked stale. No previous full note revision is archived.
 
-Turn admission, checkpointing, finalization, Stop/resume and runtime bookkeeping are internal
-store operations for #71. This API does not execute models or accept public message writes yet.
-Stop pauses the queue and preserves an incomplete output. Finalization rechecks source access
-under note locks before publishing. An unavailable source suppresses unpublished text and
-records an empty failed attempt. Exact terminal retries return the current redacted record.
-The caller must validate citation provenance and answer support against its generation evidence.
-Runtime identities stay private. Cleanup intents survive conversation deletion, including
-allocation operations whose remote session ID has not arrived. They remain until retirement
-of the exact session is verified. #71 owns the runtime adapter and cleanup worker.
+Sending a message accepts one input and returns before the answer exists. `policy` is
+`queue` (default) or `steer`. A queued input waits for the running answer. All inputs waiting
+when an answer starts are answered together, and the answer lists every input it consumed. A
+steer joins the running answer and redirects it; with no answer running it starts one. A
+steer is never turned into a queued message: when the running answer cannot take it the
+request returns `409`. Repeat an uncertain send with the same key and body. It returns the
+same message and starts nothing new; a changed body returns `409`.
+
+Each owner may send 20 new messages in any 60 seconds and hold three running answers.
+Above the first limit the request returns `429 RATE_LIMITED` with `Retry-After`; a replay is
+not counted. Above the second the input stays queued and starts on a later read.
+
+`GET /api/conversations/:id` continues existing work: it reads the private runtime once,
+saves progress or publishes the finished answer, and starts the next queued inputs. It never
+starts a second run for the same inputs. Runtime trouble does not fail the read.
+
+An answer is `completed` only when every citation names a passage the attempt retrieved from
+the owner's notes and quotes it exactly. A malformed result or an unknown source becomes an
+`incomplete` answer with reason `failed`. `no-support` means the notes did not cover the
+question; it carries no citations. A source deleted before publication suppresses the answer.
+A source edited meanwhile keeps its old-revision citation, marked `stale`. These checks
+establish where a quote came from, not that it supports the claim.
+
+Stop cancels the running answer as `incomplete` with reason `cancelled`, ends its runtime
+session and pauses the queue. Queued inputs stay until resume. Retry starts a new attempt
+over the same inputs and keeps the incomplete answer in history. With no private runtime
+configured these four routes return `503`. Runtime identities never appear in a response.
 
 ## Organize
 

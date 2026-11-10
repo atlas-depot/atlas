@@ -111,7 +111,12 @@ Use the same short write pause described below: drain old writers, apply the mig
 reopen only on the new API. An older API can delete notes without redacting conversation
 excerpts, so do not leave old note-delete entry points available once conversations are enabled.
 Rolling back the API requires keeping note mutations and conversation operations disabled.
-Runtime execution and the cleanup worker belong to #71. This migration alone starts neither.
+Migration `0009_conversation-delivery` adds runtime delivery receipts, the steering marker
+and the per-owner send window. It only adds nullable or defaulted columns and one table, so
+it needs no write pause. Deploy the API and the private runtime together: the runtime now
+expects the service usernames `api` and `chat` instead of `atlas-api`, and an API from before
+this change cannot reach it. Answers run only when the organizer settings are present, and
+unattended continuation and session cleanup need `ORGANIZER_MAINTENANCE_ENABLED=true`.
 
 ### Note-index migration cutover
 
