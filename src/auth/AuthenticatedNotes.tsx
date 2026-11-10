@@ -3,12 +3,14 @@ import type { SessionUser } from "../../shared/auth";
 import { Button } from "@/components/ui/button";
 import { NotesWorkspace } from "@/notes/NotesWorkspace";
 import type { NotesStore } from "@/notes/notes-store";
+import { createNoteSearchClient, type NoteSearchClient } from "@/notes/note-search-store";
 import { createSessionClient } from "./session";
 import { SignInLink } from "./SignInLink";
 import { createOrganizeClient, type OrganizeClient } from "@/notes/organize-store";
 
 const sessionClient = createSessionClient();
 const organizeClient = createOrganizeClient();
+const noteSearchClient = createNoteSearchClient();
 
 type SessionState =
   | { kind: "loading" }
@@ -95,6 +97,19 @@ export function AuthenticatedNotes({ store }: { store: NotesStore }) {
       save: async (...args) => {
         verified();
         return organizeClient.save(...args);
+      },
+    };
+  }, [accountId]);
+
+  const search = useMemo<NoteSearchClient>(() => {
+    const verified = () => {
+      if (accountId === null || verifiedUserId.current !== accountId)
+        throw new Error("Confirm your session before searching notes.");
+    };
+    return {
+      search: async (query, limit) => {
+        verified();
+        return noteSearchClient.search(query, limit);
       },
     };
   }, [accountId]);
@@ -209,6 +224,7 @@ export function AuthenticatedNotes({ store }: { store: NotesStore }) {
         key={session.user.id}
         store={guardedStore}
         organizer={organizer}
+        search={search}
         requestsEnabled={sessionCheck === "verified"}
       />
     </div>
