@@ -90,16 +90,17 @@ excerpts, retaining delivered answer text and deleted-source references. Changed
 versions are marked stale. No previous full note revision is archived.
 
 Sending a message accepts one input and returns before the answer exists. `policy` is
-`queue` (default) or `steer`. A queued input waits for the running answer. All inputs waiting
-when an answer starts are answered together, and the answer lists every input it consumed. A
+`queue` (default) or `steer`. A queued input waits for the running answer. Up to 100 waiting inputs
+can be answered together. The answer lists every input it consumed. A
 steer joins the running answer and redirects it; with no answer running it starts one. A
 steer is never turned into a queued message: when the running answer cannot take it the
 request returns `409`. Repeat an uncertain send with the same key and body. It returns the
-same message and starts nothing new; a changed body returns `409`.
+same message and may continue its accepted work. A changed body returns `409`.
 
-Each owner may send 20 new messages in any 60 seconds and hold three running answers.
+Each owner may send 20 new messages in any 60 seconds. New queued attempts wait while three
+answers are running for that owner. Explicit retries are exempt from this concurrency limit.
 Above the first limit the request returns `429 RATE_LIMITED` with `Retry-After`; a replay is
-not counted. Above the second the input stays queued and starts on a later read.
+not counted. Once a slot opens, a read or the maintenance sweep can start the queued work.
 
 `GET /api/conversations/:id` continues existing work: it reads the private runtime once,
 saves progress or publishes the finished answer, and starts the next queued inputs. It never
@@ -108,7 +109,8 @@ starts a second run for the same inputs. Runtime trouble does not fail the read.
 An answer is `completed` only when every citation names a passage the attempt retrieved from
 the owner's notes and quotes it exactly. A malformed result or an unknown source becomes an
 `incomplete` answer with reason `failed`. `no-support` means the notes did not cover the
-question; it carries no citations. A source deleted before publication suppresses the answer.
+question; it carries no citations. If a source is deleted before publication, the generated text is suppressed. History keeps
+an empty `incomplete` answer with reason `failed`.
 A source edited meanwhile keeps its old-revision citation, marked `stale`. These checks
 establish where a quote came from, not that it supports the claim.
 

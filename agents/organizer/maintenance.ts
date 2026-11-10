@@ -1,7 +1,6 @@
 import { z } from "zod";
 import { createConversationAnswers } from "../../server/conversation-answers.ts";
 import { openDatabase, readDatabaseUrl } from "../../server/db/connection.ts";
-import { createConversationAdmission } from "../../server/db/conversation-admission.ts";
 import { createConversationCleanupStore } from "../../server/db/conversation-cleanup.ts";
 import { createConversationTurns } from "../../server/db/conversation-turns.ts";
 import { createDurableEveAnswerer } from "./answer-client.ts";
@@ -53,7 +52,6 @@ export async function reconcileConversationAnswers(environment: NodeJS.ProcessEn
     const result = await createConversationAnswers({
       turns: createConversationTurns(connection.db),
       cleanup: createConversationCleanupStore(connection.db),
-      admit: createConversationAdmission(connection.db),
       runtimeUrl,
       runtimeFor: (baseUrl) =>
         createDurableEveAnswerer({

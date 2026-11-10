@@ -5,7 +5,7 @@ import { expect, it } from "vite-plus/test";
 import type { NotePassageSource } from "../../shared/passages.ts";
 import { evidenceId, type AnswerObservation, type AnswerRuntime } from "../conversation-answer.ts";
 import { createConversationAnswers } from "../conversation-answers.ts";
-import { createConversationAdmission } from "./conversation-admission.ts";
+import { openDatabase } from "./connection.ts";
 import { createConversationCleanupStore } from "./conversation-cleanup.ts";
 import {
   conversationAdmissions,
@@ -78,7 +78,6 @@ async function fixture(owner = randomUUID()) {
     createConversationAnswers({
       turns: createConversationTurns(db),
       cleanup: createConversationCleanupStore(db),
-      admit: createConversationAdmission(db),
       runtimeUrl: "https://answers.example.test",
       runtimeFor: () => fake.runtime,
     });
@@ -126,11 +125,25 @@ async function fixture(owner = randomUUID()) {
     history,
     note,
     result,
+    service,
     first: service(database.db),
     /** A second API process: its own pool and no shared memory. */
     second: service(database.other),
   };
 }
+
+it("accepts a new message using one pool connection", async () => {
+  const f = await fixture();
+  const connection = openDatabase(database.url, { max: 1 });
+  try {
+    const answer = await f
+      .service(connection.db)
+      .send(f.owner, f.id, randomUUID(), { text: "When?" });
+    expect(answer).toMatchObject({ status: "saved" });
+  } finally {
+    await connection.close();
+  }
+});
 
 it("resolves a repeated send and a reconnect in another process to one delivery", async () => {
   const f = await fixture();
@@ -434,4 +447,25 @@ it("maintenance rotates past an attempt whose runtime keeps failing", async () =
   await f.first.sweep(1);
   await f.first.sweep(1);
   expect(f.fake.inspected).toEqual([healthy]);
+});
+
+it("starts an accepted conversation in maintenance once its owner has a free slot", async () => {
+  const f = await fixture();
+  const [second, third, delayed, paused] = await database.db
+    .insert(conversations)
+    .values(Array.from({ length: 4 }, () => ({ ownerId: f.owner })))
+    .returning();
+  await f.first.stop(f.owner, paused!.id);
+  for (const id of [f.id, second!.id, third!.id, delayed!.id, paused!.id])
+    expect(await f.first.send(f.owner, id, randomUUID(), { text: id })).toMatchObject({
+      status: "saved",
+    });
+  const active = (id: string) => f.store.read(f.owner, id).then((state) => state?.activeTurn);
+  await f.second.sweep(5);
+  expect(await active(delayed!.id)).toBeNull();
+  await f.first.stop(f.owner, f.id);
+  await f.second.sweep(5);
+  expect(await active(delayed!.id)).toMatchObject({ status: "running" });
+  expect(f.fake.calls.submit.filter((call) => call.message === delayed!.id)).toHaveLength(1);
+  expect(await active(paused!.id)).toBeNull();
 });

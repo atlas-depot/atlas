@@ -1,12 +1,25 @@
 import { randomUUID } from "node:crypto";
-import { and, asc, eq, inArray, isNull, lt, notExists, sql } from "drizzle-orm";
+import {
+  and,
+  asc,
+  count,
+  eq,
+  exists,
+  gte,
+  inArray,
+  isNull,
+  lt,
+  notExists,
+  notInArray,
+  sql,
+} from "drizzle-orm";
 import { z } from "zod";
 import {
   conversationIdSchema,
   conversationInputIdsSchema,
   conversationTextSchema,
 } from "../../shared/conversations.ts";
-import type { SearchAdmission } from "../note-search-routes.ts";
+import { admitConversationInput, expireConversationAdmissions } from "./conversation-admission.ts";
 import type { openDatabase } from "./connection.ts";
 import { enqueueTurnCleanup } from "./conversation-cleanup.ts";
 import { readConversationMessage } from "./conversation-messages.ts";
@@ -49,21 +62,39 @@ async function turnInputs(tx: ConversationTransaction, turnId: string) {
 
 /** Internal persistence only. Callers execute models after durable admission/runtime binding. */
 export function createConversationTurns(db: Database) {
+  function unconsumedInputs(
+    reader: Pick<Database, "select">,
+    id: string | typeof conversations.id,
+  ) {
+    return reader
+      .select({ id: conversationMessages.id })
+      .from(conversationMessages)
+      .where(
+        and(
+          eq(conversationMessages.conversationId, id),
+          eq(conversationMessages.role, "user"),
+          notExists(
+            reader
+              .select({ id: conversationTurnInputs.messageId })
+              .from(conversationTurnInputs)
+              .where(eq(conversationTurnInputs.messageId, conversationMessages.id)),
+          ),
+        ),
+      );
+  }
+
   return {
-    /**
-     * `admit` runs under the conversation lock and only for an input not yet stored, so a
-     * replay or two overlapping retries of one key spend at most one admission.
-     */
+    /** Replays return the saved input; only a new message reserves an admission. */
     async acceptInput(
       owner: string,
       conversationId: string,
       operationId: string,
       value: z.input<typeof inputSchema>,
-      admit?: SearchAdmission,
     ) {
       const input = inputSchema.parse(value);
       const operation = conversationIdSchema.parse(operationId);
       const payloadHash = conversationPayloadHash([input.text, input.policy]);
+      await expireConversationAdmissions(db);
       return db.transaction(async (tx) => {
         const parent = await lockOwnedConversation(tx, owner, conversationId);
         if (!parent) return { status: "not_found" as const };
@@ -98,8 +129,8 @@ export function createConversationTurns(db: Database) {
         const joined = running ? await turnInputs(tx, running.id) : [];
         // Refuse rather than quietly queue a steer the running attempt cannot take.
         if (joined.length >= MAX_TURN_INPUTS) return { status: "policy_unsupported" as const };
-        const admission = await admit?.(owner);
-        if (admission && !admission.allowed)
+        const admission = await admitConversationInput(tx, owner);
+        if (!admission.allowed)
           return {
             status: "rate_limited" as const,
             retryAfterSeconds: admission.retryAfterSeconds,
@@ -163,21 +194,7 @@ export function createConversationTurns(db: Database) {
           );
         if (running) return { status: "busy" as const, turn: running };
         if (parent.queuePaused) return { status: "paused" as const };
-        const pending = await tx
-          .select({ id: conversationMessages.id })
-          .from(conversationMessages)
-          .where(
-            and(
-              eq(conversationMessages.conversationId, parent.id),
-              eq(conversationMessages.role, "user"),
-              notExists(
-                tx
-                  .select({ id: conversationTurnInputs.messageId })
-                  .from(conversationTurnInputs)
-                  .where(eq(conversationTurnInputs.messageId, conversationMessages.id)),
-              ),
-            ),
-          )
+        const pending = await unconsumedInputs(tx, parent.id)
           .orderBy(asc(conversationMessages.sequence))
           .limit(MAX_TURN_INPUTS);
         if (pending.length === 0) return { status: "idle" as const };
@@ -333,6 +350,33 @@ export function createConversationTurns(db: Database) {
         )
         .limit(2);
       return rows.length === 1 ? rows[0]!.ownerId : undefined;
+    },
+
+    /** A saved input may have no running turn yet, including after the owner reached the cap. */
+    async runnableQueues(limit: number) {
+      const running = db
+        .select({ id: conversationTurns.conversationId })
+        .from(conversationTurns)
+        .where(eq(conversationTurns.status, "running"));
+      const fullOwners = db
+        .select({ owner: conversations.ownerId })
+        .from(conversations)
+        .where(inArray(conversations.id, running))
+        .groupBy(conversations.ownerId)
+        .having(gte(count(), MAX_RUNNING_TURNS_PER_OWNER));
+      return db
+        .select({ conversationId: conversations.id, ownerId: conversations.ownerId })
+        .from(conversations)
+        .where(
+          and(
+            eq(conversations.queuePaused, false),
+            notInArray(conversations.id, running),
+            notInArray(conversations.ownerId, fullOwners),
+            exists(unconsumedInputs(db, conversations.id)),
+          ),
+        )
+        .orderBy(asc(conversations.updatedAt), asc(conversations.id))
+        .limit(z.number().int().min(1).max(100).parse(limit));
     },
 
     /** Running attempts nobody has observed recently, oldest first, for maintenance. */

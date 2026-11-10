@@ -42,7 +42,7 @@ evaluation that is reported separately.
 ```text
 POST /api/conversations/:id/messages
   admission -> accept input (idempotent by key)
-  queue: start an attempt over all unconsumed inputs when none is running
+  queue: start an attempt over the next 100 unconsumed inputs at most when none is running
   steer: join the running attempt, then forward to its session
 attempt: prepare runtime -> allocate session -> bind -> submit
 GET /api/conversations/:id

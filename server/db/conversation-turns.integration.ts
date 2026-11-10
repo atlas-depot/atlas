@@ -5,7 +5,12 @@ import type { NotePassageSource } from "../../shared/passages.ts";
 import { setupIndexTestDatabase } from "./index-test-database.ts";
 import { createConversationStore } from "./conversations.ts";
 import { createConversationTurns } from "./conversation-turns.ts";
-import { conversationMessages, conversationTurns, conversations } from "./conversation-schema.ts";
+import {
+  conversationAdmissions,
+  conversationMessages,
+  conversationTurns,
+  conversations,
+} from "./conversation-schema.ts";
 import { createNoteStore, noteTag } from "./notes.ts";
 import { notes } from "./schema.ts";
 
@@ -283,7 +288,14 @@ it("bounds accepted input and quote text before any database write", async () =>
 it("accepts 100 grouped inputs and citations, rejects 101 before writing, and preserves the remaining queue", async () => {
   const f = await fixture();
   const inputIds: string[] = [];
-  for (let index = 0; index < 101; index++) inputIds.push((await f.input(`Question ${index}`)).id);
+  // Simulate accepted sends spanning multiple rate-limit windows.
+  for (let index = 0; index < 101; index++) {
+    if (index > 0 && index % 20 === 0)
+      await database.db
+        .delete(conversationAdmissions)
+        .where(eq(conversationAdmissions.ownerId, f.owner));
+    inputIds.push((await f.input(`Question ${index}`)).id);
+  }
   await expect(f.first.startAttempt(f.owner, f.id, randomUUID(), { inputIds })).rejects.toThrow();
   expect(
     await database.db

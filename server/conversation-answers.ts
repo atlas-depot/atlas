@@ -8,7 +8,6 @@ import {
 } from "./conversation-answer.ts";
 import type { createConversationCleanupStore } from "./db/conversation-cleanup.ts";
 import type { createConversationTurns } from "./db/conversation-turns.ts";
-import type { SearchAdmission } from "./note-search-routes.ts";
 
 type Turns = ReturnType<typeof createConversationTurns>;
 type Cleanup = ReturnType<typeof createConversationCleanupStore>;
@@ -46,13 +45,11 @@ function finalization(observation: Exclude<AnswerObservation, { status: "running
 export function createConversationAnswers({
   turns,
   cleanup,
-  admit,
   runtimeUrl,
   runtimeFor,
 }: {
   turns: Turns;
   cleanup: Cleanup;
-  admit: SearchAdmission;
   /** Immutable deployment URL, stored with the attempt before any runtime call. */
   runtimeUrl: string;
   runtimeFor: (baseUrl: string) => AnswerRuntime;
@@ -195,7 +192,7 @@ export function createConversationAnswers({
       operationId: string,
       input: z.input<typeof sendConversationMessageSchema>,
     ) {
-      const accepted = await turns.acceptInput(owner, conversationId, operationId, input, admit);
+      const accepted = await turns.acceptInput(owner, conversationId, operationId, input);
       if (accepted.status === "saved") await advanceQuietly(owner, conversationId);
       return accepted;
     },
@@ -246,6 +243,8 @@ export function createConversationAnswers({
         await turns.touch(turnId);
         await advanceQuietly(ownerId, conversationId);
       }
+      for (const { ownerId, conversationId } of await turns.runnableQueues(limit))
+        await advanceQuietly(ownerId, conversationId);
       return { cleanupPending: await sweepCleanup(limit) };
     },
   };

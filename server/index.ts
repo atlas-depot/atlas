@@ -8,7 +8,6 @@ import { createBrowserAuth } from "./browser-auth.ts";
 import { openDatabase } from "./db/connection.ts";
 import { createNoteStore } from "./db/notes.ts";
 import { createConversationStore } from "./db/conversations.ts";
-import { createConversationAdmission } from "./db/conversation-admission.ts";
 import { createConversationCleanupStore } from "./db/conversation-cleanup.ts";
 import { createConversationTurns } from "./db/conversation-turns.ts";
 import { createConversationAnswers } from "./conversation-answers.ts";
@@ -66,7 +65,6 @@ async function main() {
       ? createConversationAnswers({
           turns: createConversationTurns(database.db),
           cleanup: createConversationCleanupStore(database.db),
-          admit: createConversationAdmission(database.db),
           runtimeUrl: organizerSettings.runtimeUrl,
           runtimeFor: (baseUrl) =>
             answerRuntime({
