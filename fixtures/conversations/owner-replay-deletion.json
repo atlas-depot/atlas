@@ -48,20 +48,30 @@
       }
     },
     {
+      "id": "c9de02fd-071f-4c7c-8831-c074e640d952",
+      "operationId": "b98fdf18-dab4-4938-8b15-38a4c80a28a7",
+      "role": "user",
+      "text": "Can you check the follow-up?",
+      "sequence": 4
+    },
+    {
       "id": "cf982391-64d3-4e64-a974-79ab5720a180",
       "operationId": "2ba13b47-05c7-49f2-9387-2b6f1e94d3ff",
       "role": "assistant",
       "text": "Partial answer",
-      "sequence": 4,
+      "sequence": 5,
       "state": "incomplete",
-      "reason": "cancelled"
+      "reason": "cancelled",
+      "addresses": [
+        "c9de02fd-071f-4c7c-8831-c074e640d952"
+      ]
     },
     {
       "id": "f21c9051-0d0d-4a18-ae90-22a166145042",
       "operationId": "069cfa8d-5efc-49c1-9667-b73fb1dbe974",
       "role": "user",
       "text": "What changed?",
-      "sequence": 5,
+      "sequence": 6,
       "state": "queued"
     }
   ],

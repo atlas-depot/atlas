@@ -75,6 +75,6 @@ PostgreSQL race test before adoption, not an assumption based on single-threaded
 | Storage transaction fails before commit | Caller does not acknowledge a saved message, sequence or deletion. |
 | Cleanup provider outcome is unknown | Durable intent remains retryable/inspectable without claiming remote success. |
 
-The first experiment after approval should migrate an isolated PostgreSQL/pgvector test
+The first experiment after approval should migrate an isolated PostgreSQL test
 database, replay the JSON fixture through two independent pools, and force the deletion races
 with real row locks. Do not apply a migration to shared staging as part of this preparation.
