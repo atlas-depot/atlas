@@ -37,6 +37,28 @@ Titles are at most 256 UTF-16 code units. Content is a legacy Markdown string or
 
 Responses never include the owner ID or the internal revision. `origin` appears only on notes saved from an AI draft. It holds the source note ID, source revision and research sources. Note writes cannot set or replace it.
 
+## Note search
+
+`POST /api/note-search` accepts `{ query, limit? }` for a verified user. After trimming, query
+must contain 1-500 characters; limit defaults to 5 and must be 1-10. The server derives note
+ownership from authentication and uses the same Qwen query encoding profile as the note index.
+Client-supplied owner, note, vector and model fields are rejected.
+
+`200` returns `{ candidates: [{ text, source, score }], coverage: { ready, pending, failed } }`.
+Array order is rank. `score` is cosine similarity for ranking, not confidence that a passage
+answers the query. `source` is the existing revision-bound block or Markdown passage reference.
+Only live owned passages whose revision, text and source still match are returned. A bounded
+overfetch can result in fewer than the requested limit. Empty candidates do not prove semantic
+no-support. Coverage counts only current revisions of the user's notes: a ready empty note has
+zero passages but contributes one ready count; processing/unindexed notes are pending; current
+index failures are failed. Embedding and storage failures return distinct sanitized `503` errors.
+
+Before embedding, PostgreSQL atomically admits at most 20 search requests per verified user in
+the preceding 60 seconds across API processes. Rejected requests return `429 RATE_LIMITED` with
+`Retry-After` and make no provider call. Provider failures consume admission. Missing or failed
+admission storage returns `503` rather than allowing an uncounted call. Expired owner counters
+are removed in bounded batches as subsequent requests arrive.
+
 ## Organize
 
 All Organize and draft routes use the same authentication and cookie-origin checks. Start requires the saved source ETag in `If-Match`, checked while locking that source revision. With no organizer settings, these routes return `503`.

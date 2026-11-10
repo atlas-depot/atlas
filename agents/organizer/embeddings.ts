@@ -29,7 +29,11 @@ export class NoteEmbeddingError extends Error {
   }
 }
 
-export function createNoteEmbedder(options: { apiKey: string; fetch?: typeof fetch }) {
+export function createNoteEmbedder(options: {
+  apiKey: string;
+  fetch?: typeof fetch;
+  onUsage?: (tokens: number) => void;
+}) {
   if (!options.apiKey.trim()) throw new NoteEmbeddingError("provider_unavailable");
   const provider = createOpenRouter({ apiKey: options.apiKey, fetch: options.fetch });
   const model = provider.textEmbeddingModel(EMBEDDING_MODEL, {
@@ -64,6 +68,7 @@ export function createNoteEmbedder(options: { apiKey: string; fetch?: typeof fet
         ) {
           throw new NoteEmbeddingError("invalid_embedding");
         }
+        options.onUsage?.(result.usage.tokens);
         // The installed provider maps response order, ignoring index. Bind each vector to its input.
         embeddings.push(
           ...response.data.data.sort((a, b) => a.index - b.index).map((item) => item.embedding),

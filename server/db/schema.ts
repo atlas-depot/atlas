@@ -123,6 +123,25 @@ export const noteCreateRequests = pgTable(
   (table) => [primaryKey({ columns: [table.ownerId, table.key] })],
 );
 
+/** Content-free rolling admission history, shared by all API processes. */
+export const noteSearchAdmissions = pgTable(
+  "note_search_admissions",
+  {
+    ownerId: text("owner_id").primaryKey(),
+    admittedAt: timestamp("admitted_at", { withTimezone: true, mode: "string" })
+      .array()
+      .notNull()
+      .default(sql`ARRAY[]::timestamptz[]`),
+    expiresAt: timestamp("expires_at", { withTimezone: true, mode: "string" })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    index("note_search_admissions_expiry_idx").on(table.expiresAt),
+    check("note_search_admissions_bounded", sql`cardinality(${table.admittedAt}) <= 20`),
+  ],
+);
+
 export const organizeRuns = pgTable(
   "organize_runs",
   {

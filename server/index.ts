@@ -7,6 +7,9 @@ import { createRequestAuthenticator } from "./auth.ts";
 import { createBrowserAuth } from "./browser-auth.ts";
 import { openDatabase } from "./db/connection.ts";
 import { createNoteStore } from "./db/notes.ts";
+import { createNoteSearchStore } from "./db/note-search.ts";
+import { createSearchAdmission } from "./db/note-search-admission.ts";
+import { createSearchEmbeddingClient } from "./search-embedding-client.ts";
 import { readServerEnv } from "./env.ts";
 import { createBearerAuthenticator } from "./workos.ts";
 
@@ -60,6 +63,15 @@ async function main() {
     notes: database ? createNoteStore(database.db) : undefined,
     organizer,
     indexing: database ? createNoteIndexJobs(database.db) : undefined,
+    search: database ? createNoteSearchStore(database.db) : undefined,
+    admitSearch: database ? createSearchAdmission(database.db) : undefined,
+    embedSearch: configuration.organizer
+      ? createSearchEmbeddingClient({
+          baseUrl: configuration.organizer.runtimeUrl,
+          serviceToken: configuration.organizer.serviceToken,
+          deploymentProtectionSecret: configuration.organizer.deploymentProtectionSecret,
+        })
+      : undefined,
     onNoteSaved: indexingClient ? (noteId) => indexingClient.start(noteId) : undefined,
     appOrigin: browserAuth?.appOrigin,
     authRoutes:
