@@ -3,7 +3,7 @@ import test from "node:test";
 import channel from "./agent/channels/note-index.ts";
 
 const serviceToken = "synthetic-private-service-credential";
-const authorization = `Basic ${Buffer.from(`atlas-api:${serviceToken}`).toString("base64")}`;
+const authorization = `Basic ${Buffer.from(`api:${serviceToken}`).toString("base64")}`;
 async function request(method: string, path: string, body?: string, authorized = true) {
   const route = channel.routes.find(
     (route) => route.transport !== "websocket" && route.method === method && route.path === path,

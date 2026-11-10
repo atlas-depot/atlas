@@ -30,7 +30,7 @@ export function createNoteIndexClient(options: {
       const response = await (options.fetchImpl ?? fetch)(new URL(path, base.data), {
         method: body ? "POST" : "GET",
         headers: {
-          authorization: `Basic ${Buffer.from(`atlas-api:${options.serviceToken}`).toString("base64")}`,
+          authorization: `Basic ${Buffer.from(`api:${options.serviceToken}`).toString("base64")}`,
           ...(body ? { "content-type": "application/json" } : {}),
           ...(options.deploymentProtectionSecret
             ? { "x-vercel-protection-bypass": options.deploymentProtectionSecret }

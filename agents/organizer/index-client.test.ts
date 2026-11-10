@@ -27,7 +27,7 @@ void test("private client sends identifier only, explicit auth, bounded timeout 
   assert.equal(requests[1].url, "https://old-deployment.example/internal/note-index/runs/wrun_123");
   assert.equal(
     requests[0].headers.get("authorization"),
-    `Basic ${Buffer.from(`atlas-api:${serviceToken}`).toString("base64")}`,
+    `Basic ${Buffer.from(`api:${serviceToken}`).toString("base64")}`,
   );
   assert.equal(requests[0].headers.get("x-vercel-protection-bypass"), "synthetic");
   assert.equal(requests[0].redirect, "error");

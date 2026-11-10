@@ -20,10 +20,7 @@ export function createNoteSearchChannel(
       POST("/internal/note-search/embed", async (request) => {
         const token = process.env.ORGANIZER_SERVICE_TOKEN;
         if (!token || token.length < 32) return json({ error: "Unavailable" }, 503);
-        const auth = await routeAuth(
-          request,
-          httpBasic({ username: "atlas-api", password: token }),
-        );
+        const auth = await routeAuth(request, httpBasic({ username: "api", password: token }));
         if (auth instanceof Response) return auth;
         try {
           const raw = await readBody(request, 4096);

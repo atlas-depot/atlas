@@ -16,7 +16,7 @@ const json = (body: unknown, status = 200) =>
 async function authorize(request: Request) {
   const token = process.env.ORGANIZER_SERVICE_TOKEN;
   if (!token || token.length < 32) return json({ error: "Unavailable" }, 503);
-  return routeAuth(request, httpBasic({ username: "atlas-api", password: token }));
+  return routeAuth(request, httpBasic({ username: "api", password: token }));
 }
 
 export default defineChannel({

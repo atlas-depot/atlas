@@ -381,7 +381,7 @@ await test("deployment access supplements service auth and cannot follow redirec
       assert.equal(headers.get("x-vercel-protection-bypass"), "synthetic-preview-access");
       assert.equal(
         headers.get("authorization"),
-        `Basic ${Buffer.from(`atlas-api:${serviceToken}`).toString("base64")}`,
+        `Basic ${Buffer.from(`api:${serviceToken}`).toString("base64")}`,
       );
       assert.equal(init?.redirect, "error");
       return Response.json({ ok: true, ...reference }, { status: 202 });

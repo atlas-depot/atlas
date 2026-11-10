@@ -23,7 +23,7 @@ void test("private query embedding requires service auth and validates before mo
       new Request("http://127.0.0.1:2027/internal/note-search/embed", {
         method: "POST",
         headers: authorized
-          ? { authorization: `Basic ${Buffer.from(`atlas-api:${token}`).toString("base64")}` }
+          ? { authorization: `Basic ${Buffer.from(`api:${token}`).toString("base64")}` }
           : {},
         body,
       }),
@@ -68,7 +68,7 @@ void test("private provider failures never disclose query or provider details", 
     const response = await route.handler(
       new Request("http://127.0.0.1:2027/internal/note-search/embed", {
         method: "POST",
-        headers: { authorization: `Basic ${Buffer.from(`atlas-api:${token}`).toString("base64")}` },
+        headers: { authorization: `Basic ${Buffer.from(`api:${token}`).toString("base64")}` },
         body: JSON.stringify({ query: "PRIVATE question" }),
       }),
       { params: {} } as Parameters<typeof route.handler>[1],

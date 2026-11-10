@@ -1,17 +1,21 @@
-import { Client, ClientError, type ClientSession, type SessionStreamEvent } from "eve/client";
-import { setTimeout as delay } from "node:timers/promises";
+import type { SessionStreamEvent } from "eve/client";
 import { z } from "zod";
 import {
   generatedDraftSchema,
   type GeneratedDraft,
   type OrganizeUsage,
 } from "../../server/organize-note.ts";
+import {
+  createEveTransport,
+  deliveryReceiptSchema,
+  expired,
+  ExpiredSubmission,
+  type ReaderClient,
+} from "./eve-transport.ts";
+import { API_PRINCIPAL } from "./job.ts";
 import { researchResultSchema } from "./research.ts";
 
-const referenceSchema = z.object({
-  sessionId: z.string().min(1).max(512),
-  deliveryId: z.string().min(1).max(512),
-});
+const referenceSchema = deliveryReceiptSchema;
 export type OrganizerReference = z.infer<typeof referenceSchema>;
 export type OrganizerAllocation = { sessionId: string; deliveryId: null };
 export type OrganizerObservation = (
@@ -25,10 +29,6 @@ export type OrganizerObservation = (
   | { status: "cancelled" }
   | { status: "failed"; reason: "generation_failed" | "invalid_draft" | "expired" }
 ) & { usage?: OrganizeUsage };
-
-type SessionReader = Pick<ClientSession, "snapshot" | "end">;
-type ReaderClient = { sessions: { attach(sessionId: string): SessionReader } };
-class ExpiredSubmission extends Error {}
 
 /** Short server requests only. eve owns generation independently of these readers. */
 export function createDurableEveOrganizer({
@@ -49,89 +49,26 @@ export function createDurableEveOrganizer({
   fetchImpl?: typeof fetch;
   client?: ReaderClient;
 }) {
-  const endpoint = new URL(baseUrl);
-  const loopback = ["localhost", "127.0.0.1", "[::1]"].includes(endpoint.hostname);
-  if (
-    (endpoint.protocol !== "https:" && !(endpoint.protocol === "http:" && loopback)) ||
-    endpoint.username ||
-    endpoint.password ||
-    endpoint.search ||
-    endpoint.hash ||
-    serviceToken.length < 32
-  ) {
-    throw new Error("Organizer endpoint or service credential is invalid.");
-  }
-  if (
-    !Number.isSafeInteger(requestTimeoutMs) ||
-    requestTimeoutMs < 1 ||
-    requestTimeoutMs > 2_147_483_647 ||
-    !Number.isSafeInteger(maxModelCalls) ||
-    maxModelCalls < 1
-  ) {
+  if (!Number.isSafeInteger(maxModelCalls) || maxModelCalls < 1) {
     throw new Error("Organizer request and model-call limits must be positive integers.");
   }
-  const url = `${endpoint.href.replace(/\/$/, "")}/eve/v1/session`;
-  const deploymentHeaders: Record<string, string> = deploymentProtectionSecret
-    ? { "x-vercel-protection-bypass": deploymentProtectionSecret }
-    : {};
-  const reader =
-    client ??
-    new Client({
-      baseUrl: endpoint.href.replace(/\/$/, ""),
-      auth: { basic: { username: "atlas-api", password: serviceToken } },
-      headers: deploymentHeaders,
-      redirect: "error",
-    });
-
-  const post = async (target: string, body: unknown, signal: AbortSignal): Promise<unknown> => {
-    const response = await fetchImpl(target, {
-      method: "POST",
-      headers: {
-        ...deploymentHeaders,
-        authorization: `Basic ${Buffer.from(`atlas-api:${serviceToken}`).toString("base64")}`,
-        "content-type": "application/json",
-      },
-      body: JSON.stringify(body),
-      signal,
-      redirect: "error",
-      credentials: "omit",
-      cache: "no-store",
-    });
-    if (response.status !== 202) {
-      if (response.status === 409 || response.status === 410) {
-        const error = z.object({ code: z.string() }).safeParse(await response.json());
-        if (
-          error.success &&
-          ((response.status === 410 && error.data.code === "session_expired") ||
-            (response.status === 409 && error.data.code === "session_not_active"))
-        )
-          throw new ExpiredSubmission();
-      }
-      await response.body?.cancel();
-      throw new Error();
-    }
-    return await response.json();
-  };
+  const transport = createEveTransport({
+    baseUrl,
+    serviceToken,
+    username: API_PRINCIPAL,
+    deploymentProtectionSecret,
+    requestTimeoutMs,
+    fetchImpl,
+    client,
+  });
+  const reader = transport.reader;
 
   return {
     async allocate({ operationId }: { operationId: string }): Promise<OrganizerAllocation> {
       if (!operationId || operationId.length > 256)
         throw new Error("Invalid organizer operation ID.");
       try {
-        const signal = AbortSignal.timeout(requestTimeoutMs);
-        const candidates = new Set<string>();
-        for (let attempt = 0; attempt < 5; attempt++) {
-          const result = z
-            .object({ sessionId: referenceSchema.shape.sessionId })
-            .parse(await post(url, { operationId }, signal));
-          // Empty creates can race and return different candidate IDs. Seeing a previous ID
-          // again confirms the operation now resolves to that canonical owner. No model ran.
-          if (candidates.has(result.sessionId))
-            return { sessionId: result.sessionId, deliveryId: null };
-          candidates.add(result.sessionId);
-          if (attempt < 4) await delay(100, undefined, { signal });
-        }
-        throw new Error();
+        return { sessionId: await transport.allocate(operationId), deliveryId: null };
       } catch {
         throw new Error("Organizer allocation is unconfirmed. No model input was submitted.");
       }
@@ -152,15 +89,10 @@ export function createDurableEveOrganizer({
       // Persist the fixed session ID before calling this. HTTP idempotencyKey is not yet
       // exposed by the 0.91 client serializer. An expired fixed session never starts a replacement.
       try {
-        const result = referenceSchema.parse(
-          await post(
-            `${url}/${encodeURIComponent(sessionId)}`,
-            { idempotencyKey: operationId, message: JSON.stringify(note) },
-            AbortSignal.timeout(requestTimeoutMs),
-          ),
-        );
-        if (result.sessionId !== sessionId) throw new Error();
-        return result;
+        return await transport.deliver(sessionId, {
+          idempotencyKey: operationId,
+          message: JSON.stringify(note),
+        });
       } catch (error) {
         if (error instanceof ExpiredSubmission) return { status: "expired" };
         throw new Error("Organizer submission is unconfirmed. Retry the same fixed session only.");
@@ -185,31 +117,15 @@ export function createDurableEveOrganizer({
       reference: OrganizerReference | OrganizerAllocation,
     ): Promise<{ status: "ended" | "expired" }> {
       const sessionId = referenceSchema.shape.sessionId.parse(reference.sessionId);
-      const session = reader.sessions.attach(sessionId);
-      // Submit end once, then independently verify durable history. A lost end receipt is retryable.
       try {
-        await session.end({
-          reason: "Atlas retired this draft",
-          signal: AbortSignal.timeout(requestTimeoutMs),
-        });
-      } catch (error) {
-        if (expired(error)) return { status: "expired" };
-        // Inactive or a lost response alone does not establish completed cleanup.
+        return await transport.retire(sessionId, "Atlas retired this draft");
+      } catch {
+        throw new Error(
+          "Organizer retirement is unconfirmed. Retry cleanup without starting a run.",
+        );
       }
-      try {
-        const snapshot = await session.snapshot({ signal: AbortSignal.timeout(requestTimeoutMs) });
-        if (snapshot.events.some((event) => event.type === "session.ended"))
-          return { status: "ended" };
-      } catch (error) {
-        if (expired(error)) return { status: "expired" };
-      }
-      throw new Error("Organizer retirement is unconfirmed. Retry cleanup without starting a run.");
     },
   };
-}
-
-function expired(error: unknown): boolean {
-  return ClientError.is(error) && error.status === 410 && error.code === "session_expired";
 }
 
 /** Snapshot-derived metadata never advances merely because another reader polled. */
