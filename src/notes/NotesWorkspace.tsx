@@ -17,6 +17,9 @@ import { noteContentSchema, type CreateNote, type NoteSummary } from "../../shar
 import { SignInLink } from "@/auth/SignInLink";
 import { MarkdownPreview } from "./MarkdownPreview";
 import { NoteContentView } from "./NoteContentView";
+import { NoteSearchWorkspace } from "./NoteSearchWorkspace";
+import type { NoteSearchClient } from "./note-search-store";
+import { OpenedSourcePanel } from "./OpenedSourcePanel";
 import { OrganizeWorkspace } from "./OrganizeWorkspace";
 import type { OrganizeClient } from "./organize-store";
 import { toSummary, type NoteSnapshot, type NotesStore } from "./notes-store";
@@ -28,13 +31,24 @@ import {
   statusMessage,
   type RequestFailure,
 } from "./editor-state";
+import {
+  resolveDeletedSource,
+  resolveSourceInNote,
+  resolveUnavailableSource,
+  type SourceTarget,
+} from "./source-location";
 
 type Draft = CreateNote;
 type Selection =
   | { kind: "new" }
-  | { kind: "read"; id: string }
+  | { kind: "read"; id: string; sourceTarget?: SourceTarget }
   | { kind: "replace"; snapshot: NoteSnapshot };
-type ReadFailure = { id: string; compare: boolean; kind: RequestFailure };
+type ReadFailure = {
+  id: string;
+  compare: boolean;
+  kind: RequestFailure;
+  sourceTarget?: SourceTarget;
+};
 type SaveState = "idle" | "saving" | RequestFailure;
 const BlockNoteEditor = lazy(() =>
   import("./BlockNoteEditor").then((module) => ({ default: module.BlockNoteEditor })),
@@ -43,11 +57,13 @@ const BlockNoteEditor = lazy(() =>
 export function NotesWorkspace({
   store,
   organizer,
+  search,
   example = false,
   requestsEnabled = true,
 }: {
   store: NotesStore;
   organizer?: OrganizeClient;
+  search?: NoteSearchClient;
   example?: boolean;
   requestsEnabled?: boolean;
 }) {
@@ -74,6 +90,9 @@ export function NotesWorkspace({
   const [deleteFailure, setDeleteFailure] = useState<RequestFailure | null>(null);
   const [deleteNotice, setDeleteNotice] = useState<string | null>(null);
   const [deleteOpen, setDeleteOpen] = useState(false);
+  const [activeSourceTarget, setActiveSourceTarget] = useState<SourceTarget | null>(null);
+  const [unavailableSourceTarget, setUnavailableSourceTarget] = useState<SourceTarget | null>(null);
+  const [searchResetToken, setSearchResetToken] = useState(0);
   const busyRef = useRef(false);
   const titleRef = useRef<HTMLInputElement>(null);
   const cancelRef = useRef<HTMLButtonElement>(null);
@@ -120,11 +139,31 @@ export function NotesWorkspace({
     deleteFailure === "conflict" ||
     deleteFailure === "failed";
 
+  const resolvedSource = useMemo(() => {
+    if (unavailableSourceTarget) {
+      return unavailableSourceTarget.deleted
+        ? resolveDeletedSource(unavailableSourceTarget)
+        : resolveUnavailableSource(unavailableSourceTarget);
+    }
+    if (!activeSourceTarget) return null;
+    if (activeSourceTarget.deleted) return resolveDeletedSource(activeSourceTarget);
+    if (!saved || saved.note.id !== activeSourceTarget.source.noteId) return null;
+    return resolveSourceInNote(activeSourceTarget, saved);
+  }, [activeSourceTarget, unavailableSourceTarget, saved]);
+
   const clearPrivateCache = useCallback(() => {
     setNotes([]);
     setSaved(null);
     setComparison(null);
+    setActiveSourceTarget(null);
+    setUnavailableSourceTarget(null);
+    setSearchResetToken((value) => value + 1);
   }, []);
+
+  const handleSearchUnauthenticated = useCallback(() => {
+    setLoadState("unauthenticated");
+    clearPrivateCache();
+  }, [clearPrivateCache]);
 
   /** The request state every selection change clears. Paths that keep a part say so. */
   const resetSelectionState = useCallback(
@@ -234,24 +273,36 @@ export function NotesWorkspace({
     return () => cancelAnimationFrame(frame);
   }, [deleteFailure, deleteNotice]);
 
-  async function openNote(id: string, compare = false) {
+  async function openNote(id: string, compare = false, sourceTarget?: SourceTarget) {
     if (!requestsEnabled || busyRef.current) return;
     busyRef.current = true;
     setOpeningId(id);
     setReadFailure(null);
     setDeleteNotice(null);
+    if (sourceTarget) {
+      setActiveSourceTarget(null);
+      setUnavailableSourceTarget(null);
+    }
     try {
       const snapshot = await store.read(id);
       if (compare) setComparison(snapshot);
       else {
+        setUnavailableSourceTarget(null);
+        setActiveSourceTarget(sourceTarget ?? null);
         applySnapshot(snapshot);
-        requestAnimationFrame(() => titleRef.current?.focus());
+        if (!sourceTarget) requestAnimationFrame(() => titleRef.current?.focus());
       }
     } catch (error) {
       const kind = classifyFailure(error);
-      setReadFailure({ id, compare, kind });
+      setReadFailure({ id, compare, kind, sourceTarget });
       if (kind === "unauthenticated") clearPrivateCache();
-      if (kind === "missing") setNotes((current) => current.filter((note) => note.id !== id));
+      if (kind === "missing") {
+        setNotes((current) => current.filter((note) => note.id !== id));
+        if (sourceTarget) {
+          setActiveSourceTarget(null);
+          setUnavailableSourceTarget(sourceTarget);
+        }
+      }
     } finally {
       busyRef.current = false;
       setOpeningId(null);
@@ -355,11 +406,14 @@ export function NotesWorkspace({
     if (!requestsEnabled) return;
     setPending(null);
     if (selection.kind === "read") {
-      void openNote(selection.id);
+      void openNote(selection.id, false, selection.sourceTarget);
       return;
     }
-    if (selection.kind === "replace") applySnapshot(selection.snapshot);
-    else {
+    setUnavailableSourceTarget(null);
+    if (selection.kind === "replace") {
+      applySnapshot(selection.snapshot);
+    } else {
+      setActiveSourceTarget(null);
       setEditorKey((key) => key + 1);
       setEditorMode("loading");
       setEditorValid(true);
@@ -369,15 +423,32 @@ export function NotesWorkspace({
     }
     requestAnimationFrame(() => titleRef.current?.focus());
   }
+
   function requestSelection(selection: Selection) {
     if (
       busyRef.current ||
       blocked ||
-      (selection.kind === "read" && selection.id === saved?.note.id)
+      (selection.kind === "read" &&
+        selection.id === saved?.note.id &&
+        selection.sourceTarget === undefined)
     )
       return;
     if (dirty || pendingCreation !== null) setPending(selection);
     else select(selection);
+  }
+
+  function requestOpenSource(target: SourceTarget) {
+    if (!requestsEnabled || busyRef.current || blocked) return;
+    if (target.deleted) {
+      setActiveSourceTarget(null);
+      setUnavailableSourceTarget(target);
+      return;
+    }
+    requestSelection({
+      kind: "read",
+      id: target.source.noteId,
+      sourceTarget: target,
+    });
   }
 
   async function refreshNotes() {
@@ -411,6 +482,8 @@ export function NotesWorkspace({
   function keepAsNew() {
     if (!draft) return;
     setSaved(null);
+    setActiveSourceTarget(null);
+    setUnavailableSourceTarget(null);
     resetSelectionState();
     setDraft({ ...draft, createdAt: new Date().toISOString() });
     requestAnimationFrame(() => titleRef.current?.focus());
@@ -420,6 +493,9 @@ export function NotesWorkspace({
     setNotes(remaining);
     setDraft(null);
     setSaved(null);
+    if (activeSourceTarget?.source.noteId === removedId) {
+      setActiveSourceTarget(null);
+    }
     // deleteNote already cleared the delete fields; the empty state below sets its notice.
     resetSelectionState({ deletion: false });
     const removedIndex = notes.findIndex((note) => note.id === removedId);
@@ -481,13 +557,28 @@ export function NotesWorkspace({
   const failed =
     !busy && ((recoveryKind !== null && recoveryKind !== "unavailable") || writesForbidden);
   const unsavedNotice = readFailure && dirty ? "Unsaved changes" : null;
+  const fallbackSourceTitle = useMemo(() => {
+    const targetId = resolvedSource?.noteId;
+    if (!targetId) return null;
+    const found = notes.find((item) => item.id === targetId);
+    return found ? found.title || "Untitled note" : (resolvedSource?.target.noteTitle ?? null);
+  }, [notes, resolvedSource]);
+
+  function dismissSource() {
+    setActiveSourceTarget(null);
+    setUnavailableSourceTarget(null);
+    setReadFailure((current) => (current?.sourceTarget ? null : current));
+  }
 
   return (
-    <main className="notes-workspace space-y-5 p-4 sm:p-6">
+    <main className="notes-workspace workspace-shell">
       <header className="workspace-header">
-        <h1 className="text-2xl font-semibold">Atlas notes</h1>
+        <h1 className="workspace-brand" aria-label="Atlas notes">
+          atlas
+        </h1>
         <Button
           ref={newNoteRef}
+          variant="ghost"
           disabled={loadState !== "ready" || busy || blocked}
           onClick={() => requestSelection({ kind: "new" })}
         >
@@ -561,7 +652,12 @@ export function NotesWorkspace({
                 disabled={busy}
                 onClick={() => {
                   if (readFailure.compare) void openNote(readFailure.id, true);
-                  else requestSelection({ kind: "read", id: readFailure.id });
+                  else
+                    requestSelection({
+                      kind: "read",
+                      id: readFailure.id,
+                      sourceTarget: readFailure.sourceTarget,
+                    });
                 }}
               >
                 Retry opening
@@ -607,9 +703,21 @@ export function NotesWorkspace({
       )}
       <div className="notes-body">
         {(loadState === "ready" || draft !== null) && (
-          <>
-            <nav aria-label="Notes" className="space-y-3">
-              <h2 className="font-semibold">Your notes</h2>
+          <aside className="workspace-sidebar">
+            {search && (loadState === "ready" || draft !== null) && (
+              <NoteSearchWorkspace
+                key={searchResetToken}
+                client={search}
+                notes={notes}
+                enabled={requestsEnabled && !blocked}
+                canOpenSource={!busy}
+                activeSourceTarget={unavailableSourceTarget ?? activeSourceTarget}
+                onOpenSource={requestOpenSource}
+                onUnauthenticated={handleSearchUnauthenticated}
+              />
+            )}
+            <nav aria-label="Notes" className="workspace-note-list">
+              <h2>Your notes</h2>
               {notes.length === 0 ? (
                 <p>
                   {blocked
@@ -617,12 +725,12 @@ export function NotesWorkspace({
                     : "No notes yet. Create a new note to get started."}
                 </p>
               ) : (
-                <ul className="flex flex-wrap gap-2 lg:flex-col">
+                <ul>
                   {notes.map((note) => (
                     // A grid item stretches, so the button keeps its full column width.
                     <li key={note.id} className="grid">
                       <Button
-                        variant={saved?.note.id === note.id ? "secondary" : "outline"}
+                        variant={saved?.note.id === note.id ? "secondary" : "ghost"}
                         aria-current={saved?.note.id === note.id ? "true" : undefined}
                         disabled={busy || blocked}
                         className="note-list-button"
@@ -635,113 +743,152 @@ export function NotesWorkspace({
                 </ul>
               )}
             </nav>
-            {draft && (
-              <div className="note-detail" data-editor-mode={editorMode}>
-                <section aria-label="Original note" className="note-editor-plane space-y-3">
-                  <Label htmlFor="note-title">Title</Label>
-                  <Input
-                    ref={titleRef}
-                    id="note-title"
-                    value={draft.title}
-                    maxLength={256}
-                    disabled={openingId !== null || deleting}
-                    onChange={(event) => setDraft({ ...draft, title: event.target.value })}
-                  />
-                  <Suspense fallback={<p>Opening editor...</p>}>
-                    <BlockNoteEditor
-                      key={editorKey}
-                      initialContent={draft.content}
-                      disabled={openingId !== null || deleting}
-                      onChange={(content) =>
-                        setDraft((current) => (current ? { ...current, content } : current))
-                      }
-                      onModeChange={setEditorMode}
-                      onValidityChange={setEditorValid}
+          </aside>
+        )}
+        <div className="workspace-content">
+          {(loadState === "ready" || draft !== null) && (
+            <>
+              {!draft && resolvedSource && (
+                <OpenedSourcePanel
+                  resolved={resolvedSource}
+                  fallbackTitle={fallbackSourceTitle}
+                  onDismiss={dismissSource}
+                />
+              )}
+              {draft && (
+                <div className="note-detail" data-editor-mode={editorMode}>
+                  {resolvedSource && (
+                    <OpenedSourcePanel
+                      resolved={resolvedSource}
+                      hasLocalChanges={dirty}
+                      fallbackTitle={fallbackSourceTitle}
+                      onDismiss={dismissSource}
                     />
-                  </Suspense>
-                  {!valid && (
-                    <p role="alert">
-                      The text contains unsupported characters or is too long. Use up to 256
-                      characters for the title and 100,000 for the content. Your text is preserved.
-                    </p>
                   )}
-                  <div className="flex flex-wrap items-center gap-3">
-                    {saved && (
-                      <Button
-                        ref={deleteButtonRef}
-                        variant="destructive"
-                        disabled={busy || writeBlocked || deleteBlocked}
-                        onClick={() => setDeleteOpen(true)}
-                      >
-                        Delete note
-                      </Button>
+                  <section aria-label="Original note" className="note-editor-plane space-y-3">
+                    <Label htmlFor="note-title" className="sr-only">
+                      Title
+                    </Label>
+                    <Input
+                      ref={titleRef}
+                      id="note-title"
+                      className="document-title"
+                      placeholder="Untitled note"
+                      value={draft.title}
+                      maxLength={256}
+                      disabled={openingId !== null || deleting}
+                      onChange={(event) => setDraft({ ...draft, title: event.target.value })}
+                    />
+                    <Suspense fallback={<p>Opening editor...</p>}>
+                      <BlockNoteEditor
+                        key={editorKey}
+                        initialContent={draft.content}
+                        disabled={openingId !== null || deleting}
+                        highlightedBlockId={
+                          !dirty && resolvedSource?.status === "matched"
+                            ? resolvedSource.blockId
+                            : undefined
+                        }
+                        highlightedRange={
+                          !dirty && resolvedSource?.status === "matched"
+                            ? resolvedSource.markdownRange
+                            : undefined
+                        }
+                        onChange={(content) =>
+                          setDraft((current) => (current ? { ...current, content } : current))
+                        }
+                        onModeChange={setEditorMode}
+                        onValidityChange={setEditorValid}
+                      />
+                    </Suspense>
+                    {!valid && (
+                      <p role="alert">
+                        The text contains unsupported characters or is too long. Use up to 256
+                        characters for the title and 100,000 for the content. Your text is
+                        preserved.
+                      </p>
                     )}
-                  </div>
-                </section>
-                {editorMode === "source" && typeof draft.content === "string" && (
-                  <Card>
-                    <CardHeader>
-                      <CardTitle>
-                        <h2>Preview</h2>
-                      </CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                      {draft.content ? (
-                        <MarkdownPreview content={draft.content} />
-                      ) : (
-                        <p>Write Markdown to see a preview.</p>
+                    <div className="note-document-actions">
+                      {saved && (
+                        <Button
+                          ref={deleteButtonRef}
+                          variant="ghost"
+                          className="text-destructive"
+                          disabled={busy || writeBlocked || deleteBlocked}
+                          onClick={() => setDeleteOpen(true)}
+                        >
+                          Delete note
+                        </Button>
                       )}
-                    </CardContent>
-                  </Card>
-                )}
-                {comparison && (
-                  <Card className="note-comparison">
-                    <CardHeader>
-                      <CardTitle>
-                        <h2>Latest saved version</h2>
-                      </CardTitle>
-                    </CardHeader>
-                    <CardContent className="space-y-3">
-                      <p>{comparison.note.title || "Untitled note"}</p>
-                      <NoteContentView content={comparison.note.content} />
-                      <Button
-                        variant="outline"
-                        disabled={busy || blocked}
-                        onClick={() => requestSelection({ kind: "replace", snapshot: comparison })}
-                      >
-                        Use latest version
-                      </Button>
-                    </CardContent>
-                  </Card>
-                )}
-              </div>
-            )}
-          </>
-        )}
-        {!example && organizer && (
-          <OrganizeWorkspace
-            client={organizer}
-            source={saved}
-            sourceDirty={dirty}
-            enabled={requestsEnabled && !blocked}
-            canStart={
-              draft !== null &&
-              valid &&
-              !busy &&
-              !writeBlocked &&
-              deleteFailure === null &&
-              !["creation-conflict", "conflict", "missing"].includes(saveState)
-            }
-            prepareSource={save}
-            onCheckNotes={refreshNotes}
-            onSaved={(snapshot) =>
-              setNotes((current) => [
-                toSummary(snapshot.note),
-                ...current.filter((note) => note.id !== snapshot.note.id),
-              ])
-            }
-          />
-        )}
+                    </div>
+                  </section>
+                  {editorMode === "source" && typeof draft.content === "string" && (
+                    <Card>
+                      <CardHeader>
+                        <CardTitle>
+                          <h2>Preview</h2>
+                        </CardTitle>
+                      </CardHeader>
+                      <CardContent>
+                        {draft.content ? (
+                          <MarkdownPreview content={draft.content} />
+                        ) : (
+                          <p>Write Markdown to see a preview.</p>
+                        )}
+                      </CardContent>
+                    </Card>
+                  )}
+                  {comparison && (
+                    <Card className="note-comparison">
+                      <CardHeader>
+                        <CardTitle>
+                          <h2>Latest saved version</h2>
+                        </CardTitle>
+                      </CardHeader>
+                      <CardContent className="space-y-3">
+                        <p>{comparison.note.title || "Untitled note"}</p>
+                        <NoteContentView content={comparison.note.content} />
+                        <Button
+                          variant="outline"
+                          disabled={busy || blocked}
+                          onClick={() =>
+                            requestSelection({ kind: "replace", snapshot: comparison })
+                          }
+                        >
+                          Use latest version
+                        </Button>
+                      </CardContent>
+                    </Card>
+                  )}
+                </div>
+              )}
+            </>
+          )}
+          {!example && organizer && (
+            <OrganizeWorkspace
+              client={organizer}
+              source={saved}
+              sourceDirty={dirty}
+              enabled={requestsEnabled && !blocked}
+              canStart={
+                draft !== null &&
+                valid &&
+                !busy &&
+                !writeBlocked &&
+                deleteFailure === null &&
+                !["creation-conflict", "conflict", "missing"].includes(saveState)
+              }
+              prepareSource={save}
+              onCheckNotes={refreshNotes}
+              onSaved={(snapshot) =>
+                setNotes((current) => [
+                  toSummary(snapshot.note),
+                  ...current.filter((note) => note.id !== snapshot.note.id),
+                ])
+              }
+            />
+          )}
+        </div>
       </div>
       <AlertDialog
         open={pending !== null}

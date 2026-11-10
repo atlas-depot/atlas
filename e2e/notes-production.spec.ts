@@ -1107,3 +1107,657 @@ test.describe("recovery and auth", () => {
     );
   });
 });
+
+test.describe("search and source opening", () => {
+  test("disables source opening during a save without erasing the search", async ({ page }) => {
+    await serveNotes(page, [[serverNote, `"${firstId}:1"`]]);
+    let releaseSave!: () => void;
+    const saved = new Promise<void>((resolve) => {
+      releaseSave = resolve;
+    });
+    await page.route(`**/api/notes/${firstId}`, async (route) => {
+      if (route.request().method() !== "PUT") return route.fallback();
+      await saved;
+      return route.fulfill({
+        json: { ...serverNote, ...updateNoteSchema.parse(route.request().postDataJSON()) },
+        headers: { ETag: `"${firstId}:2"` },
+      });
+    });
+    await page.route("**/api/note-search", (route) =>
+      route.fulfill({
+        json: {
+          candidates: [
+            {
+              text: "Original text",
+              score: 0.9,
+              source: {
+                kind: "markdown",
+                noteId: firstId,
+                version: `"${firstId}:1"`,
+                startOffset: 0,
+                endOffset: 13,
+                headingPath: [],
+              },
+            },
+          ],
+          coverage: { ready: 1, pending: 0, failed: 0 },
+        },
+      }),
+    );
+    await page.goto("/");
+    const search = page.getByRole("region", { name: "Search notes" });
+    const query = search.getByLabel("Search saved notes");
+    await query.fill("saved evidence");
+    await query.press("Enter");
+    const open = search.getByRole("button", { name: "Open source", exact: true });
+    await expect(open).toBeEnabled();
+    await page
+      .getByRole("textbox", { name: /^(Markdown source|Note content)$/ })
+      .fill("Updated text");
+    const request = page.waitForRequest((request) => request.method() === "PUT");
+    await page.getByRole("button", { name: "Save", exact: true }).click();
+    await request;
+    await expect(open).toBeDisabled();
+    await expect(query).toHaveValue("saved evidence");
+    releaseSave();
+    await expect(page.getByRole("status")).toHaveText("Saved");
+    await expect(open).toBeEnabled();
+    await expect(query).toHaveValue("saved evidence");
+  });
+
+  test("retains a missing source title and clears stale source errors on dismiss or another failure", async ({
+    page,
+  }) => {
+    const thirdId = "fa100001-1234-4000-8000-000000000003";
+    const missing = { ...serverNote, id: secondId, title: "Missing evidence" };
+    const denied = { ...serverNote, id: thirdId, title: "Other evidence" };
+    await serveNotes(page, [[serverNote, `"${firstId}:1"`], [missing], [denied]]);
+    await page.route(`**/api/notes/${secondId}`, (route) =>
+      route.fulfill({ status: 404, json: { error: { code: "NOT_FOUND", message: "Missing" } } }),
+    );
+    let failureStatus = 403;
+    await page.route(`**/api/notes/${thirdId}`, (route) =>
+      route.fulfill({
+        status: failureStatus,
+        json: { error: { code: "FORBIDDEN", message: "Denied" } },
+      }),
+    );
+    await page.route("**/api/note-search", (route) =>
+      route.fulfill({
+        json: {
+          candidates: [missing, denied].map((note) => ({
+            text: "Original text",
+            score: 0.9,
+            source: {
+              kind: "markdown",
+              noteId: note.id,
+              version: `"${note.id}:1"`,
+              startOffset: 0,
+              endOffset: 13,
+              headingPath: [],
+            },
+          })),
+          coverage: { ready: 3, pending: 0, failed: 0 },
+        },
+      }),
+    );
+    await page.goto("/");
+    const search = page.getByRole("region", { name: "Search notes" });
+    await search.getByLabel("Search saved notes").fill("evidence");
+    await search.getByLabel("Search saved notes").press("Enter");
+    const openMissing = search
+      .locator(".note-search-card")
+      .filter({ hasText: "Missing evidence" })
+      .getByRole("button", { name: "Open source", exact: true });
+    const openOther = search
+      .locator(".note-search-card")
+      .filter({ hasText: "Other evidence" })
+      .getByRole("button", { name: "Open source", exact: true });
+    const panel = page.getByRole("region", { name: "Opened source" });
+    await openMissing.click();
+    await expect(panel).toContainText("Missing evidence");
+    await expect(openMissing).toBeEnabled();
+    await page.getByRole("button", { name: "Dismiss source", exact: true }).click();
+    await expect(panel).toHaveCount(0);
+    await expect(page.getByRole("alert")).toBeEmpty();
+    await expect(page.getByRole("button", { name: "Refresh notes", exact: true })).toHaveCount(0);
+    for (const status of [403, 500]) {
+      failureStatus = status;
+      await openMissing.click();
+      await expect(panel).toContainText("Missing evidence");
+      await openOther.click();
+      await expect(page.getByRole("alert")).not.toBeEmpty();
+      await expect(panel).toHaveCount(0);
+      await expect(page.getByRole("textbox", { name: "Title", exact: true })).toHaveValue("A");
+      await expectEditorContent(
+        page.getByRole("textbox", { name: /^(Markdown source|Note content)$/ }),
+        "Original text",
+      );
+    }
+  });
+
+  test("never displays a delayed search from the previous account", async ({ page }) => {
+    let bob = false;
+    let releaseAlice!: () => void;
+    const aliceResponse = new Promise<void>((resolve) => {
+      releaseAlice = resolve;
+    });
+    await page.route("**/api/auth/session", (route) =>
+      route.fulfill({
+        json: {
+          user: bob ? { ...browserUser, id: "user_bob", email: "bob@example.test" } : browserUser,
+        },
+      }),
+    );
+    await serveNotes(page, [[serverNote, `"${firstId}:1"`]]);
+    await page.route("**/api/notes", (route) =>
+      route.fulfill({ json: { notes: bob ? [] : [toListRow(serverNote)] } }),
+    );
+    await page.route("**/api/note-search", async (route) => {
+      const alice = route.request().postDataJSON().query === "Alice private query";
+      if (alice) await aliceResponse;
+      return route.fulfill({
+        json: {
+          candidates: [
+            {
+              text: alice ? "Alice private search evidence" : "Bob separate search evidence",
+              score: 0.9,
+              source: {
+                kind: "markdown",
+                noteId: alice ? firstId : secondId,
+                version: `"${alice ? firstId : secondId}:1"`,
+                startOffset: 0,
+                endOffset: 13,
+                headingPath: [],
+              },
+            },
+          ],
+          coverage: { ready: 1, pending: 0, failed: 0 },
+        },
+      });
+    });
+    await page.goto("/");
+    const search = page.getByRole("region", { name: "Search notes" });
+    const query = search.getByLabel("Search saved notes");
+    await query.fill("Alice private query");
+    const started = page.waitForRequest((request) => request.url().endsWith("/api/note-search"));
+    await query.press("Enter");
+    await started;
+    bob = true;
+    await page.evaluate("window.dispatchEvent(new Event('focus'))");
+    await expect(page.getByText("Signed in as bob@example.test")).toBeVisible();
+    await expect(query).toHaveValue("");
+    await query.fill("Bob query");
+    await query.press("Enter");
+    await expect(search.getByText("Bob separate search evidence")).toBeVisible();
+    const completed = page.waitForResponse(
+      (response) =>
+        response.url().endsWith("/api/note-search") &&
+        response.request().postDataJSON().query === "Alice private query",
+    );
+    releaseAlice();
+    await (await completed).finished();
+    await page.evaluate(
+      "new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))",
+    );
+    await expect(page.getByText("Alice private search evidence")).toHaveCount(0);
+    await expect(search.getByText("Bob separate search evidence")).toBeVisible();
+    await expect(query).toHaveValue("Bob query");
+  });
+
+  for (const width of [375, 1280]) {
+    for (const syntax of ["plain", "source-only"]) {
+      test(`reveals the exact ${syntax} Markdown match at ${width}px without reselecting edits`, async ({
+        page,
+      }, testInfo) => {
+        const prefix = (
+          syntax === "plain" ? "A saved paragraph.\n\n" : "<aside>Keep exact HTML.</aside>\n\n"
+        ).repeat(80);
+        const evidence = "Matched 🧭 evidence near the end.";
+        const content = `${prefix}${evidence}\n\nTrailing context.`;
+        const note = { ...serverNote, content };
+        await serveNotes(page, [[note, `"${firstId}:1"`]]);
+        await page.route("**/api/note-search", (route) =>
+          route.fulfill({
+            json: {
+              candidates: [
+                {
+                  text: evidence,
+                  score: 0.9,
+                  source: {
+                    kind: "markdown",
+                    noteId: firstId,
+                    version: `"${firstId}:1"`,
+                    headingPath: [],
+                    startOffset: prefix.length,
+                    endOffset: prefix.length + evidence.length,
+                  },
+                },
+              ],
+              coverage: { ready: 1, pending: 0, failed: 0 },
+            },
+          }),
+        );
+        await page.setViewportSize({ width, height: 812 });
+        await page.goto("/");
+        const search = page.getByRole("region", { name: "Search notes" });
+        await search.getByLabel("Search saved notes").fill("matched evidence");
+        await search.getByLabel("Search saved notes").press("Enter");
+        await search.getByRole("button", { name: "Open source", exact: true }).press("Enter");
+        const source = page.getByRole("textbox", { name: "Markdown source", exact: true });
+        if (syntax === "plain") {
+          await expect(source).toHaveCount(0);
+          const block = page.locator('[data-cited-block="true"]');
+          await expect(block).toContainText(evidence);
+          await expect(block).toBeFocused();
+          await expect(block).toBeInViewport();
+        } else {
+          await expect(source).toBeFocused();
+          await expect
+            .poll(() =>
+              source.evaluate((element: { selectionStart: number; selectionEnd: number }) => ({
+                start: element.selectionStart,
+                end: element.selectionEnd,
+              })),
+            )
+            .toEqual({ start: prefix.length, end: prefix.length + evidence.length });
+          expect(await source.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
+          await expect(source).toBeInViewport();
+        }
+        await expect(page.getByRole("button", { name: "Save", exact: true })).toBeDisabled();
+        expect(
+          await page.evaluate("document.documentElement.scrollWidth <= window.innerWidth"),
+        ).toBe(true);
+        await page.screenshot({
+          path: testInfo.outputPath(`markdown-source-${syntax}-${width}.png`),
+        });
+        if (syntax === "plain") {
+          await page
+            .getByRole("textbox", { name: "Note content", exact: true })
+            .fill("Locally rewritten evidence");
+          await expect(page.locator('[data-cited-block="true"]')).toHaveCount(0);
+        } else {
+          await source.press("ArrowRight");
+          await source.pressSequentially(" More context");
+          await expect(source).toHaveValue(
+            `${prefix}${evidence} More context\n\nTrailing context.`,
+          );
+        }
+        await expect(page.locator("[data-cited-range]")).toHaveCount(0);
+        await expect(page.getByRole("region", { name: "Opened source" })).toContainText(
+          "unsaved changes",
+        );
+        await expect(page.getByRole("button", { name: "Save", exact: true })).toBeEnabled();
+      });
+    }
+  }
+
+  test("opens a matching block source, warns when the note revision changed, and reports missing blocks explicitly", async ({
+    page,
+  }) => {
+    const firstBlockNote: Note = {
+      ...serverNote,
+      id: firstId,
+      title: "Incident Overview",
+      content: "First note overview",
+    };
+    let secondEtag = `"${secondId}:2"`;
+    let secondBlockNote: Note = {
+      ...serverNote,
+      id: secondId,
+      title: "Database Runbook",
+      content: {
+        format: "blocknote",
+        schemaVersion: 1,
+        blocks: [
+          {
+            id: "heading-storage",
+            type: "heading",
+            props: {
+              backgroundColor: "default",
+              textColor: "default",
+              textAlignment: "left",
+              level: 2,
+            },
+            content: [{ type: "text", text: "Storage Recovery", styles: {} }],
+            children: [],
+          },
+          {
+            id: "block-pgvector",
+            type: "paragraph",
+            props: {
+              backgroundColor: "default",
+              textColor: "default",
+              textAlignment: "left",
+            },
+            content: [
+              {
+                type: "text",
+                text: "Verify pgvector index coverage after failover.",
+                styles: {},
+              },
+            ],
+            children: [],
+          },
+        ],
+      },
+    };
+
+    await page.route("**/api/notes", (route) =>
+      route.fulfill({ json: { notes: [toListRow(firstBlockNote), toListRow(secondBlockNote)] } }),
+    );
+    await page.route(`**/api/notes/${firstId}`, (route) =>
+      route.fulfill({ json: firstBlockNote, headers: { ETag: `"${firstId}:1"` } }),
+    );
+    await page.route(`**/api/notes/${secondId}`, (route) =>
+      route.fulfill({ json: secondBlockNote, headers: { ETag: secondEtag } }),
+    );
+    await page.route("**/api/note-search", (route) =>
+      route.fulfill({
+        json: {
+          candidates: [
+            {
+              text: "Verify pgvector index coverage after failover.",
+              score: 0.94,
+              source: {
+                kind: "block",
+                noteId: secondId,
+                version: `"${secondId}:2"`,
+                blockId: "block-pgvector",
+                headingPath: ["Storage Recovery"],
+              },
+            },
+          ],
+          coverage: { ready: 2, pending: 0, failed: 0 },
+        },
+      }),
+    );
+
+    await page.goto("/");
+    const searchRegion = page.getByRole("region", { name: "Search notes" });
+    await searchRegion.getByLabel("Search saved notes").fill("pgvector failover");
+    await searchRegion.getByRole("button", { name: "Search", exact: true }).click();
+
+    await expect(searchRegion.getByText('Query: "pgvector failover"')).toBeVisible();
+    await expect(searchRegion.getByText("Database Runbook")).toBeVisible();
+    await expect(
+      searchRegion.getByText("Storage Recovery - Block block-pgvector - Revision 2"),
+    ).toBeVisible();
+    await expect(
+      searchRegion.getByText("Verify pgvector index coverage after failover."),
+    ).toBeVisible();
+
+    await searchRegion.getByRole("button", { name: "Open source", exact: true }).click();
+    const openedSource = page.getByRole("region", { name: "Opened source" });
+    await expect(openedSource).toContainText("Database Runbook");
+    await expect(openedSource).toContainText("Revision 2");
+    await expect(openedSource).toContainText("Block block-pgvector");
+    await expect(
+      page.locator('[data-node-type="blockContainer"][data-id="block-pgvector"]'),
+    ).toHaveAttribute("data-cited-block", "true");
+
+    await page
+      .getByRole("textbox", { name: "Note content", exact: true })
+      .fill("Locally replaced evidence");
+    await expect(page.locator("[data-cited-block='true']")).toHaveCount(0);
+    await expect(openedSource).toContainText("unsaved changes");
+
+    secondEtag = `"${secondId}:3"`;
+    await searchRegion.getByRole("button", { name: "Open source", exact: true }).click();
+    await page.getByRole("button", { name: "Discard changes", exact: true }).click();
+    await expect(openedSource).toContainText(
+      "This note changed since Revision 2 (now Revision 3).",
+    );
+
+    secondEtag = `"${secondId}:4"`;
+    secondBlockNote = {
+      ...secondBlockNote,
+      content: {
+        format: "blocknote",
+        schemaVersion: 1,
+        blocks: [
+          {
+            id: "different-block",
+            type: "paragraph",
+            props: {
+              backgroundColor: "default",
+              textColor: "default",
+              textAlignment: "left",
+            },
+            content: [{ type: "text", text: "Replacement paragraph only.", styles: {} }],
+            children: [],
+          },
+        ],
+      },
+    };
+    await searchRegion.getByRole("button", { name: "Open source", exact: true }).click();
+    await expect(openedSource).toContainText(
+      "Cited block block-pgvector from Revision 2 no longer exists in the current note (Revision 4).",
+    );
+    await expect(page.locator("[data-cited-block='true']")).toHaveCount(0);
+  });
+
+  test("preserves unsaved-edit safeguards, never applies stale Markdown UTF-16 ranges, and reports unavailable sources", async ({
+    page,
+  }) => {
+    const markdownContent = "| Col |\n| --- |\n| UTF-16 exact evidence |";
+    let secondMissing = false;
+    let secondEtag = `"${secondId}:1"`;
+    const firstNote: Note = { ...serverNote, id: firstId, title: "Draft Note", content: "Initial" };
+    const legacyNote: Note = {
+      ...serverNote,
+      id: secondId,
+      title: "Legacy Table Note",
+      content: markdownContent,
+    };
+
+    await page.route("**/api/notes", (route) =>
+      route.fulfill({ json: { notes: [toListRow(firstNote), toListRow(legacyNote)] } }),
+    );
+    await page.route(`**/api/notes/${firstId}`, (route) =>
+      route.fulfill({ json: firstNote, headers: { ETag: `"${firstId}:1"` } }),
+    );
+    await page.route(`**/api/notes/${secondId}`, (route) => {
+      if (secondMissing) {
+        return route.fulfill({
+          status: 404,
+          json: { error: { code: "NOT_FOUND", message: "Missing" } },
+        });
+      }
+      return route.fulfill({ json: legacyNote, headers: { ETag: secondEtag } });
+    });
+    await page.route("**/api/note-search", (route) =>
+      route.fulfill({
+        json: {
+          candidates: [
+            {
+              text: "UTF-16 exact evidence",
+              score: 0.89,
+              source: {
+                kind: "markdown",
+                noteId: secondId,
+                version: `"${secondId}:1"`,
+                headingPath: [],
+                startOffset: 18,
+                endOffset: 39,
+              },
+            },
+          ],
+          coverage: { ready: 2, pending: 0, failed: 0 },
+        },
+      }),
+    );
+
+    await page.goto("/");
+    const editor = page.getByRole("textbox", { name: /^(Markdown source|Note content)$/ });
+    await expectEditorContent(editor, "Initial");
+    await editor.fill("Unsaved local edit");
+
+    const searchRegion = page.getByRole("region", { name: "Search notes" });
+    await searchRegion.getByLabel("Search saved notes").fill("UTF-16");
+    await searchRegion.getByRole("button", { name: "Search", exact: true }).click();
+
+    secondEtag = `"${secondId}:2"`;
+    await searchRegion.getByRole("button", { name: "Open source", exact: true }).click();
+    await expect(
+      page.getByRole("heading", { name: "Discard unsaved changes?", exact: true }),
+    ).toBeVisible();
+    await page.getByRole("button", { name: "Keep editing", exact: true }).click();
+    await expectEditorContent(editor, "Unsaved local edit");
+
+    await searchRegion.getByRole("button", { name: "Open source", exact: true }).click();
+    await page.getByRole("button", { name: "Discard changes", exact: true }).click();
+
+    const openedSource = page.getByRole("region", { name: "Opened source" });
+    await expect(openedSource).toContainText(
+      "Legacy Markdown UTF-16 range 18-39 cannot be applied to the modified note.",
+    );
+    await expect(page.locator("[data-cited-range]")).toHaveCount(0);
+
+    secondMissing = true;
+    await searchRegion.getByRole("button", { name: "Open source", exact: true }).click();
+    await expect(openedSource).toContainText("This source note is no longer available.");
+  });
+
+  test("distinguishes no-match, index-updating, index-failed, and request failure with retry and race protection", async ({
+    page,
+  }) => {
+    await serveNotes(page, [[serverNote, '"v1"']]);
+
+    let mode: "updating" | "index-failed" | "request-error" | "no-match" | "race" = "updating";
+    let resolveSlowQuery!: () => void;
+    const slowQueryGate = new Promise<void>((resolve) => {
+      resolveSlowQuery = resolve;
+    });
+
+    await page.route("**/api/note-search", async (route) => {
+      const body = route.request().postDataJSON() as { query: string };
+      if (mode === "updating") {
+        return route.fulfill({
+          json: {
+            candidates: [],
+            coverage: { ready: 0, pending: 2, failed: 0 },
+          },
+        });
+      }
+      if (mode === "index-failed") {
+        return route.fulfill({
+          json: {
+            candidates: [],
+            coverage: { ready: 1, pending: 0, failed: 1 },
+          },
+        });
+      }
+      if (mode === "request-error") {
+        return route.fulfill({
+          status: 503,
+          json: {
+            error: {
+              code: "SERVICE_UNAVAILABLE",
+              message: "Search temporarily unavailable",
+            },
+          },
+        });
+      }
+      if (mode === "no-match") {
+        return route.fulfill({
+          json: {
+            candidates: [],
+            coverage: { ready: 2, pending: 0, failed: 0 },
+          },
+        });
+      }
+      if (body.query === "older query") {
+        await slowQueryGate;
+        return route.fulfill({
+          json: {
+            candidates: [
+              {
+                text: "Stale older query passage that must never replace newer results.",
+                score: 0.95,
+                source: {
+                  kind: "block",
+                  noteId: firstId,
+                  version: '"v1"',
+                  blockId: "old-block",
+                  headingPath: [],
+                },
+              },
+            ],
+            coverage: { ready: 1, pending: 0, failed: 0 },
+          },
+        });
+      }
+      return route.fulfill({
+        json: {
+          candidates: [
+            {
+              text: "Current query passage wins over older in-flight response.",
+              score: 0.91,
+              source: {
+                kind: "block",
+                noteId: firstId,
+                version: '"v1"',
+                blockId: "current-block",
+                headingPath: [],
+              },
+            },
+          ],
+          coverage: { ready: 1, pending: 0, failed: 0 },
+        },
+      });
+    });
+
+    await page.goto("/");
+    const searchRegion = page.getByRole("region", { name: "Search notes" });
+    const searchInput = searchRegion.getByLabel("Search saved notes");
+
+    await searchInput.fill("preserved query");
+    await searchRegion.getByRole("button", { name: "Search", exact: true }).click();
+    await expect(
+      searchRegion.getByText("Search index is still updating (2 notes pending)."),
+    ).toBeVisible();
+    await expect(searchInput).toHaveValue("preserved query");
+
+    mode = "index-failed";
+    await searchRegion.getByRole("button", { name: "Retry search", exact: true }).click();
+    await expect(searchRegion.getByText(/Search index failed for 1 note/)).toBeVisible();
+    await expect(searchInput).toHaveValue("preserved query");
+
+    mode = "request-error";
+    await searchRegion.getByRole("button", { name: "Retry search", exact: true }).click();
+    await expect(searchRegion.getByRole("alert")).toContainText(
+      "Search could not be completed. Your query is preserved so you can retry.",
+    );
+    await expect(searchInput).toHaveValue("preserved query");
+
+    mode = "no-match";
+    await searchRegion.getByRole("button", { name: "Retry search", exact: true }).click();
+    await expect(searchRegion.getByText('No saved notes matched "preserved query".')).toBeVisible();
+
+    mode = "race";
+    await searchInput.fill("older query");
+    await searchRegion.getByRole("button", { name: "Search", exact: true }).click();
+    await searchInput.fill("newer query");
+    await searchRegion.getByRole("button", { name: "Search", exact: true }).click();
+    await expect(
+      searchRegion.getByText("Current query passage wins over older in-flight response."),
+    ).toBeVisible();
+    const oldResponse = page.waitForResponse(
+      (response) =>
+        response.url().endsWith("/api/note-search") &&
+        response.request().postDataJSON().query === "older query",
+    );
+    resolveSlowQuery();
+    await (await oldResponse).finished();
+    await page.evaluate(
+      "new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))",
+    );
+    await expect(
+      searchRegion.getByText("Current query passage wins over older in-flight response."),
+    ).toBeVisible();
+    await expect(
+      searchRegion.getByText("Stale older query passage that must never replace newer results."),
+    ).toHaveCount(0);
+  });
+});

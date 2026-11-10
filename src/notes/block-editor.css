@@ -134,3 +134,17 @@
     padding: 60px 14px 16px;
   }
 }
+
+.workspace-shell .note-editor-plane .rich-note-editor .bn-editor {
+  min-height: max(24rem, calc(100dvh - 22rem));
+  padding-block: 1.5rem 3rem;
+}
+.workspace-shell .note-editor-plane .editor-history {
+  padding-right: 0.5rem;
+}
+@media (max-width: 600px) {
+  .workspace-shell .note-editor-plane .rich-note-editor .bn-editor {
+    min-height: 55dvh;
+    padding-block: 1rem 2rem;
+  }
+}
