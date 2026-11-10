@@ -14,6 +14,7 @@ import {
 import type { openDatabase } from "./connection.ts";
 import { noteCreateRequests, notes } from "./schema.ts";
 import { requestNoteIndex } from "./note-index-intents.ts";
+import { conversationCitations } from "./conversation-schema.ts";
 
 type Database = ReturnType<typeof openDatabase>["db"];
 type Row = typeof notes.$inferSelect;
@@ -201,6 +202,11 @@ export function createNoteStore(db: Database) {
         const [current] = await tx.select().from(notes).where(scope).for("update");
         if (!current) return { status: "not_found" };
         if (current.revision !== expected) return { status: "conflict" };
+        // Citation publication locks source notes first, so no late writer can restore this copy.
+        await tx
+          .update(conversationCitations)
+          .set({ excerpt: null, deleted: true })
+          .where(eq(conversationCitations.noteId, noteId));
         await tx.delete(notes).where(and(scope, eq(notes.revision, expected)));
         return { status: "deleted" };
       });

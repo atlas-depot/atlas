@@ -7,6 +7,7 @@ import { createRequestAuthenticator } from "./auth.ts";
 import { createBrowserAuth } from "./browser-auth.ts";
 import { openDatabase } from "./db/connection.ts";
 import { createNoteStore } from "./db/notes.ts";
+import { createConversationStore } from "./db/conversations.ts";
 import { createNoteSearchStore } from "./db/note-search.ts";
 import { createSearchAdmission } from "./db/note-search-admission.ts";
 import { createSearchEmbeddingClient } from "./search-embedding-client.ts";
@@ -61,6 +62,7 @@ async function main() {
   };
   const app = createApp(authenticateRequest, {
     notes: database ? createNoteStore(database.db) : undefined,
+    conversations: database ? createConversationStore(database.db) : undefined,
     organizer,
     indexing: database ? createNoteIndexJobs(database.db) : undefined,
     search: database ? createNoteSearchStore(database.db) : undefined,

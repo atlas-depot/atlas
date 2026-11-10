@@ -44,9 +44,12 @@ const database = setupIndexTestDatabase(async (connection) => {
     revision: 7,
     updatedAt: input.createdAt,
   });
-  await connection.db.execute(
-    sql.raw(await readFile(new URL("../../drizzle/0006_note-index.sql", import.meta.url), "utf8")),
-  );
+  // Exercise backfill while bringing storage up to the schema required by current note writes.
+  for (const name of ["0006_note-index", "0007_search-admission", "0008_conversation-records"]) {
+    await connection.db.execute(
+      sql.raw(await readFile(new URL(`../../drizzle/${name}.sql`, import.meta.url), "utf8")),
+    );
+  }
 });
 
 const intents = (id: string) =>
