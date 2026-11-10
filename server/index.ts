@@ -8,6 +8,10 @@ import { createBrowserAuth } from "./browser-auth.ts";
 import { openDatabase } from "./db/connection.ts";
 import { createNoteStore } from "./db/notes.ts";
 import { createConversationStore } from "./db/conversations.ts";
+import { createConversationAdmission } from "./db/conversation-admission.ts";
+import { createConversationCleanupStore } from "./db/conversation-cleanup.ts";
+import { createConversationTurns } from "./db/conversation-turns.ts";
+import { createConversationAnswers } from "./conversation-answers.ts";
 import { createNoteSearchStore } from "./db/note-search.ts";
 import { createSearchAdmission } from "./db/note-search-admission.ts";
 import { createSearchEmbeddingClient } from "./search-embedding-client.ts";
@@ -53,6 +57,25 @@ async function main() {
         deploymentProtectionSecret: configuration.organizer.deploymentProtectionSecret,
       })
     : undefined;
+  const organizerSettings = configuration.organizer;
+  const answerRuntime = organizerSettings
+    ? (await import("../agents/organizer/answer-client.ts")).createDurableEveAnswerer
+    : undefined;
+  const answers =
+    database && organizerSettings && answerRuntime
+      ? createConversationAnswers({
+          turns: createConversationTurns(database.db),
+          cleanup: createConversationCleanupStore(database.db),
+          admit: createConversationAdmission(database.db),
+          runtimeUrl: organizerSettings.runtimeUrl,
+          runtimeFor: (baseUrl) =>
+            answerRuntime({
+              baseUrl,
+              serviceToken: organizerSettings.serviceToken,
+              deploymentProtectionSecret: organizerSettings.deploymentProtectionSecret,
+            }),
+        })
+      : undefined;
   // Memoized: the shutdown deadline and the normal close path can both reach this, and a pg
   // pool rejects a second end().
   let databasesClosing: Promise<void> | undefined;
@@ -63,6 +86,7 @@ async function main() {
   const app = createApp(authenticateRequest, {
     notes: database ? createNoteStore(database.db) : undefined,
     conversations: database ? createConversationStore(database.db) : undefined,
+    answers,
     organizer,
     indexing: database ? createNoteIndexJobs(database.db) : undefined,
     search: database ? createNoteSearchStore(database.db) : undefined,

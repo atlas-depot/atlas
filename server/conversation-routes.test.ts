@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vite-plus/test";
 import { createApp } from "./app.ts";
+import type { ConversationAnswerService } from "./conversation-answers.ts";
 import type { ConversationService } from "./conversation-routes.ts";
 
 const id = "130c3220-dc86-4fb0-828d-0338cae029d3";
@@ -117,9 +118,107 @@ describe("conversation HTTP boundary", () => {
       activeTurn: null,
     } as never);
     expect((await app.request(`/api/conversations/${id}`)).status).toBe(503);
+  });
+});
+
+describe("conversation answer HTTP boundary", () => {
+  const message = {
+    id: "9d0f6a55-6f0e-4d0c-9a53-6f6b3a4c2b11",
+    sequence: 1,
+    text: "When is the meeting?",
+    createdAt: "2026-11-10T12:00:00.000Z",
+    role: "user" as const,
+    deliveryPolicy: "steer" as const,
+  };
+  function answering(authenticated = true) {
+    const base = fixture(authenticated);
+    const answers = {
+      send: vi
+        .fn<ConversationAnswerService["send"]>()
+        .mockResolvedValue({ status: "saved", value: message }),
+      refresh: vi.fn<ConversationAnswerService["refresh"]>().mockResolvedValue(undefined),
+      stop: vi.fn<ConversationAnswerService["stop"]>().mockResolvedValue({ status: "not_found" }),
+      resume: vi.fn<ConversationAnswerService["resume"]>().mockResolvedValue({ status: "resumed" }),
+      retry: vi.fn<ConversationAnswerService["retry"]>().mockResolvedValue({ status: "paused" }),
+      sweep: vi.fn<ConversationAnswerService["sweep"]>(),
+    };
+    return {
+      ...base,
+      answers,
+      app: createApp(async () => (authenticated ? { userId: "verified-owner" } : null), {
+        conversations: base.store,
+        answers,
+      }),
+    };
+  }
+  const send = (body: unknown, headers: Record<string, string> = { "Idempotency-Key": key }) => ({
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...headers },
+    body: JSON.stringify(body),
+  });
+
+  it("authorizes before any answer work and passes only the verified owner and the caller's policy", async () => {
+    const denied = answering(false);
+    for (const path of ["messages", "stop", "resume", `turns/${id}/retry`])
+      expect(
+        (await denied.app.request(`/api/conversations/${id}/${path}`, send({ text: "x" }))).status,
+      ).toBe(401);
+    expect(denied.answers.send).not.toHaveBeenCalled();
+
+    const { app, answers } = answering();
+    const response = await app.request(
+      `/api/conversations/${id}/messages`,
+      send({ text: "When is the meeting?", policy: "steer" }),
+    );
+    expect(response.status).toBe(202);
+    expect(await response.json()).toEqual({ message, conversation, activeTurn: null });
+    expect(answers.send).toHaveBeenCalledExactlyOnceWith("verified-owner", id, key, {
+      text: "When is the meeting?",
+      policy: "steer",
+    });
+    for (const body of [
+      { text: " " },
+      { text: "x", policy: "interrupt" },
+      { text: "x", ownerId: "o" },
+    ])
+      expect((await app.request(`/api/conversations/${id}/messages`, send(body))).status).toBe(400);
     expect(
-      (await app.request(`/api/conversations/${id}/messages`, { method: "POST", body: "{}" }))
+      (await app.request(`/api/conversations/${id}/messages`, send({ text: "x" }, {}))).status,
+    ).toBe(400);
+    expect(answers.send).toHaveBeenCalledOnce();
+  });
+
+  it("reports a refused steer, a rate limit and missing service instead of accepting silently", async () => {
+    const { app, answers } = answering();
+    const post = () => app.request(`/api/conversations/${id}/messages`, send({ text: "x" }));
+    answers.send.mockResolvedValueOnce({ status: "policy_unsupported" });
+    expect((await post()).status).toBe(409);
+    answers.send.mockResolvedValueOnce({ status: "rate_limited", retryAfterSeconds: 7 });
+    const limited = await post();
+    expect([limited.status, limited.headers.get("Retry-After")]).toEqual([429, "7"]);
+    answers.send.mockResolvedValueOnce({ status: "not_found" });
+    expect((await post()).status).toBe(404);
+    expect((await app.request(`/api/conversations/${id}/stop`, { method: "POST" })).status).toBe(
+      404,
+    );
+    expect(
+      (
+        await app.request(`/api/conversations/${id}/turns/${id}/retry`, {
+          method: "POST",
+          headers: { "Idempotency-Key": key },
+        })
+      ).status,
+    ).toBe(409);
+    expect(
+      (await fixture().app.request(`/api/conversations/${id}/messages`, send({ text: "x" })))
         .status,
-    ).toBe(404);
+    ).toBe(503);
+  });
+
+  it("continues existing work on a read instead of starting more", async () => {
+    const { app, answers } = answering();
+    expect((await app.request(`/api/conversations/${id}`)).status).toBe(200);
+    expect(answers.refresh).toHaveBeenCalledExactlyOnceWith("verified-owner", id);
+    expect(answers.send).not.toHaveBeenCalled();
   });
 });
