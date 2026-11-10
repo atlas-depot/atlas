@@ -1,0 +1,235 @@
+import { sql } from "drizzle-orm";
+import {
+  boolean,
+  check,
+  foreignKey,
+  index,
+  integer,
+  jsonb,
+  pgTable,
+  primaryKey,
+  text,
+  timestamp,
+  unique,
+  uniqueIndex,
+  uuid,
+} from "drizzle-orm/pg-core";
+import type { NotePassageSource } from "../../shared/passages.ts";
+
+export type ConversationTurnStatus =
+  | "queued"
+  | "running"
+  | "completed"
+  | "no-support"
+  | "incomplete";
+
+export const conversations = pgTable(
+  "conversations",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    ownerId: text("owner_id").notNull(),
+    queuePaused: boolean("queue_paused").notNull().default(false),
+    nextSequence: integer("next_sequence").notNull().default(1),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "string" })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true, mode: "string" })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    index("conversations_owner_created_idx").on(table.ownerId, table.createdAt, table.id),
+    check("conversations_sequence_positive", sql`${table.nextSequence} > 0`),
+  ],
+);
+
+/** Content-free receipts survive conversation deletion until account deletion. */
+export const conversationCreateRequests = pgTable(
+  "conversation_create_requests",
+  {
+    ownerId: text("owner_id").notNull(),
+    key: uuid("key").notNull(),
+    payloadHash: text("payload_hash").notNull(),
+    conversationId: uuid("conversation_id").notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.ownerId, table.key] })],
+);
+
+export const conversationTurns = pgTable(
+  "conversation_turns",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    conversationId: uuid("conversation_id")
+      .notNull()
+      .references(() => conversations.id, { onDelete: "cascade" }),
+    operationId: uuid("operation_id").notNull(),
+    payloadHash: text("payload_hash").notNull(),
+    status: text("status").$type<ConversationTurnStatus>().notNull().default("queued"),
+    reason: text("reason").$type<"failed" | "cancelled">(),
+    runningText: text("running_text"),
+    checkpointVersion: integer("checkpoint_version").notNull().default(0),
+    retryOfId: uuid("retry_of_id"),
+    allocationOperationId: uuid("allocation_operation_id"),
+    runtimeUrl: text("runtime_url"),
+    sessionId: text("session_id"),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "string" })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true, mode: "string" })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    unique("conversation_turns_parent_id_unique").on(table.conversationId, table.id),
+    uniqueIndex("conversation_turns_operation_idx").on(table.conversationId, table.operationId),
+    uniqueIndex("conversation_turns_running_idx")
+      .on(table.conversationId)
+      .where(sql`${table.status} = 'running'`),
+    uniqueIndex("conversation_turns_allocation_idx").on(table.allocationOperationId),
+    foreignKey({
+      name: "conversation_turns_retry_parent_fk",
+      columns: [table.conversationId, table.retryOfId],
+      foreignColumns: [table.conversationId, table.id],
+    }),
+    check(
+      "conversation_turns_status_valid",
+      sql`${table.status} IN ('queued', 'running', 'completed', 'no-support', 'incomplete')`,
+    ),
+    check(
+      "conversation_turns_reason_valid",
+      sql`(${table.status} = 'incomplete' AND ${table.reason} IN ('failed', 'cancelled') AND ${table.reason} IS NOT NULL) OR (${table.status} <> 'incomplete' AND ${table.reason} IS NULL)`,
+    ),
+    check(
+      "conversation_turns_checkpoint_valid",
+      sql`${table.checkpointVersion} >= 0 AND (${table.status} = 'running' OR ${table.runningText} IS NULL)`,
+    ),
+    check(
+      "conversation_turns_retry_distinct",
+      sql`${table.retryOfId} IS NULL OR ${table.retryOfId} <> ${table.id}`,
+    ),
+    check(
+      "conversation_turns_runtime_complete",
+      sql`(${table.allocationOperationId} IS NULL AND ${table.runtimeUrl} IS NULL AND ${table.sessionId} IS NULL) OR (${table.allocationOperationId} IS NOT NULL AND ${table.runtimeUrl} IS NOT NULL)`,
+    ),
+  ],
+);
+
+/** Accepted inputs and finalized outputs are immutable; checkpoints belong to the turn. */
+export const conversationMessages = pgTable(
+  "conversation_messages",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    conversationId: uuid("conversation_id")
+      .notNull()
+      .references(() => conversations.id, { onDelete: "cascade" }),
+    operationId: uuid("operation_id").notNull(),
+    payloadHash: text("payload_hash").notNull(),
+    sequence: integer("sequence").notNull(),
+    role: text("role").$type<"user" | "assistant">().notNull(),
+    deliveryPolicy: text("delivery_policy").$type<"queue" | "steer">(),
+    text: text("text").notNull(),
+    turnId: uuid("turn_id"),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "string" })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    unique("conversation_messages_parent_id_unique").on(table.conversationId, table.id),
+    uniqueIndex("conversation_messages_sequence_idx").on(table.conversationId, table.sequence),
+    uniqueIndex("conversation_messages_operation_idx").on(table.conversationId, table.operationId),
+    uniqueIndex("conversation_messages_turn_idx").on(table.turnId),
+    foreignKey({
+      name: "conversation_messages_turn_parent_fk",
+      columns: [table.conversationId, table.turnId],
+      foreignColumns: [conversationTurns.conversationId, conversationTurns.id],
+    }).onDelete("cascade"),
+    check("conversation_messages_sequence_positive", sql`${table.sequence} > 0`),
+    check(
+      "conversation_messages_role_valid",
+      sql`(${table.role} = 'user' AND ${table.turnId} IS NULL) OR (${table.role} = 'assistant' AND ${table.turnId} IS NOT NULL)`,
+    ),
+    check(
+      "conversation_messages_policy_valid",
+      sql`(${table.role} = 'user' AND ${table.deliveryPolicy} IS NOT NULL AND ${table.deliveryPolicy} IN ('queue', 'steer')) OR (${table.role} = 'assistant' AND ${table.deliveryPolicy} IS NULL)`,
+    ),
+  ],
+);
+
+export const conversationTurnInputs = pgTable(
+  "conversation_turn_inputs",
+  {
+    conversationId: uuid("conversation_id").notNull(),
+    turnId: uuid("turn_id").notNull(),
+    messageId: uuid("message_id").notNull(),
+    ordinal: integer("ordinal").notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.turnId, table.messageId] }),
+    uniqueIndex("conversation_turn_inputs_order_idx").on(table.turnId, table.ordinal),
+    foreignKey({
+      name: "conversation_turn_inputs_turn_parent_fk",
+      columns: [table.conversationId, table.turnId],
+      foreignColumns: [conversationTurns.conversationId, conversationTurns.id],
+    }).onDelete("cascade"),
+    foreignKey({
+      name: "conversation_turn_inputs_message_parent_fk",
+      columns: [table.conversationId, table.messageId],
+      foreignColumns: [conversationMessages.conversationId, conversationMessages.id],
+    }).onDelete("cascade"),
+    check("conversation_turn_inputs_ordinal_nonnegative", sql`${table.ordinal} >= 0`),
+  ],
+);
+
+/** No note foreign key: deleting a source removes its excerpt, not the delivered answer. */
+export const conversationCitations = pgTable(
+  "conversation_citations",
+  {
+    conversationId: uuid("conversation_id").notNull(),
+    messageId: uuid("message_id").notNull(),
+    ordinal: integer("ordinal").notNull(),
+    noteId: uuid("note_id").notNull(),
+    source: jsonb("source").$type<NotePassageSource>().notNull(),
+    excerpt: text("excerpt"),
+    deleted: boolean("deleted").notNull().default(false),
+  },
+  (table) => [
+    primaryKey({ columns: [table.messageId, table.ordinal] }),
+    index("conversation_citations_note_idx").on(table.noteId),
+    foreignKey({
+      name: "conversation_citations_message_parent_fk",
+      columns: [table.conversationId, table.messageId],
+      foreignColumns: [conversationMessages.conversationId, conversationMessages.id],
+    }).onDelete("cascade"),
+    check("conversation_citations_ordinal_nonnegative", sql`${table.ordinal} >= 0`),
+    check(
+      "conversation_citations_redaction_valid",
+      sql`(${table.deleted} AND ${table.excerpt} IS NULL) OR (NOT ${table.deleted} AND ${table.excerpt} IS NOT NULL AND length(${table.excerpt}) > 0)`,
+    ),
+  ],
+);
+
+/** Persist even when allocation has not returned a session ID. Never expire an unknown outcome. */
+export const conversationCleanupIntents = pgTable(
+  "conversation_cleanup_intents",
+  {
+    allocationOperationId: uuid("allocation_operation_id").primaryKey(),
+    ownerId: text("owner_id").notNull(),
+    conversationId: uuid("conversation_id").notNull(),
+    runtimeUrl: text("runtime_url").notNull(),
+    sessionId: text("session_id"),
+    attempts: integer("attempts").notNull().default(0),
+    retryAt: timestamp("retry_at", { withTimezone: true, mode: "string" }).notNull().defaultNow(),
+    lastFailureCode: text("last_failure_code").$type<"allocation_unknown" | "cleanup_failed">(),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "string" })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    index("conversation_cleanup_retry_idx").on(table.retryAt),
+    check("conversation_cleanup_attempts_nonnegative", sql`${table.attempts} >= 0`),
+    check(
+      "conversation_cleanup_failure_code_valid",
+      sql`${table.lastFailureCode} IS NULL OR ${table.lastFailureCode} IN ('allocation_unknown', 'cleanup_failed')`,
+    ),
+  ],
+);
