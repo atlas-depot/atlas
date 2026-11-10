@@ -53,8 +53,8 @@ it("searches only owned, current passages and removes edited or deleted evidence
   const first = await search.candidates(owner, vector());
   expect(first.passages.map((item) => item.text)).toEqual(["My private search evidence."]);
   expect(first.passages[0].source.noteId).toBe(own.note.id);
-  expect(first.pendingCoverage).toBe(false);
-  expect(first.failedCoverage).toBe(false);
+  expect(first.passages[0].score).toBeCloseTo(1);
+  expect(first.coverage).toEqual({ ready: 1, pending: 0, failed: 0 });
 
   expect(
     (
@@ -66,16 +66,14 @@ it("searches only owned, current passages and removes edited or deleted evidence
   ).toBe("saved");
   expect(await search.candidates(owner, vector())).toEqual({
     passages: [],
-    pendingCoverage: true,
-    failedCoverage: false,
+    coverage: { ready: 0, pending: 1, failed: 0 },
   });
   expect(await createNoteStore(database.other).delete(owner, own.note.id, 2)).toEqual({
     status: "deleted",
   });
   expect(await search.candidates(owner, vector())).toEqual({
     passages: [],
-    pendingCoverage: false,
-    failedCoverage: false,
+    coverage: { ready: 0, pending: 0, failed: 0 },
   });
 });
 
@@ -103,8 +101,7 @@ it("rejects mismatched index profile and tampered source references", async () =
     .where(eq(noteIndexes.noteId, note.note.id));
   expect(await search.candidates(owner, vector())).toEqual({
     passages: [],
-    pendingCoverage: true,
-    failedCoverage: false,
+    coverage: { ready: 0, pending: 1, failed: 0 },
   });
 });
 
@@ -117,8 +114,7 @@ it("revalidates the live source even when a stored revision was not advanced", a
     .where(eq(notes.id, note.note.id));
   expect(await createNoteSearchStore(database.db).candidates(owner, vector())).toEqual({
     passages: [],
-    pendingCoverage: false,
-    failedCoverage: false,
+    coverage: { ready: 1, pending: 0, failed: 0 },
   });
 });
 
@@ -141,8 +137,7 @@ it("ranks bounded candidates and reports failed indexing separately", async () =
     .where(eq(noteIndexIntents.noteId, failed.note.id));
   const result = await createNoteSearchStore(database.db).candidates(owner, vector(), 1);
   expect(result.passages.map((item) => item.text)).toEqual(["Closest evidence."]);
-  expect(result.pendingCoverage).toBe(false);
-  expect(result.failedCoverage).toBe(true);
+  expect(result.coverage).toEqual({ ready: 2, pending: 0, failed: 1 });
 });
 
 it("distinguishes a complete empty index from unfinished coverage", async () => {
@@ -150,14 +145,12 @@ it("distinguishes a complete empty index from unfinished coverage", async () => 
   const search = createNoteSearchStore(database.db);
   expect(await search.candidates(owner, vector())).toEqual({
     passages: [],
-    pendingCoverage: false,
-    failedCoverage: false,
+    coverage: { ready: 0, pending: 0, failed: 0 },
   });
   await published(owner, "");
   expect(await search.candidates(owner, vector())).toEqual({
     passages: [],
-    pendingCoverage: false,
-    failedCoverage: false,
+    coverage: { ready: 1, pending: 0, failed: 0 },
   });
   await createNoteStore(database.db).create(owner, {
     title: "Awaiting indexing",
@@ -166,9 +159,48 @@ it("distinguishes a complete empty index from unfinished coverage", async () => 
   });
   expect(await search.candidates(owner, vector())).toEqual({
     passages: [],
-    pendingCoverage: true,
-    failedCoverage: false,
+    coverage: { ready: 1, pending: 1, failed: 0 },
   });
+});
+
+it("counts current processing and failed revisions without counting another owner", async () => {
+  const owner = randomUUID();
+  const processing = await createNoteStore(database.db).create(owner, {
+    title: "Processing",
+    content: "Awaiting a worker.",
+    createdAt: "2026-11-09T10:00:00.000Z",
+  });
+  const failed = await createNoteStore(database.db).create(owner, {
+    title: "Failed",
+    content: "Worker failed.",
+    createdAt: "2026-11-09T10:00:00.000Z",
+  });
+  await published(owner, "");
+  await published(randomUUID(), "Foreign evidence.");
+  await createNoteIndexJobs(database.db).claim(processing.note.id, "https://index.test");
+  await database.db
+    .update(noteIndexIntents)
+    .set({ failureCode: "provider_unavailable" })
+    .where(eq(noteIndexIntents.noteId, failed.note.id));
+  expect((await createNoteSearchStore(database.db).candidates(owner, vector())).coverage).toEqual({
+    ready: 1,
+    pending: 1,
+    failed: 1,
+  });
+});
+
+it("overfetches and skips invalid top passages while retaining a later safe candidate", async () => {
+  const owner = randomUUID();
+  const invalid = await published(owner, "Tampered top-ranked passage.");
+  const valid = await published(owner, "Still safe to return.");
+  await database.db
+    .update(notePassages)
+    .set({ text: "Tampered private text." })
+    .where(eq(notePassages.noteId, invalid.note.id));
+  const result = await createNoteSearchStore(database.db).candidates(owner, vector(), 1);
+  expect(result.passages.map((item) => item.text)).toEqual(["Still safe to return."]);
+  expect(result.passages[0].source.noteId).toBe(valid.note.id);
+  expect(result.coverage).toEqual({ ready: 2, pending: 0, failed: 0 });
 });
 
 it("suppresses a candidate when a source edit commits while search waits on its lock", async () => {

@@ -15,6 +15,7 @@ import {
 } from "./auth.ts";
 import { createNoteRoutes, type NoteService } from "./notes.ts";
 import { createOrganizeRoutes, type OrganizeService } from "./organize-routes.ts";
+import { createNoteSearchRoutes, type NoteSearchService } from "./note-search-routes.ts";
 
 export type AppOptions = Readonly<{
   authRoutes?: Hono;
@@ -23,6 +24,8 @@ export type AppOptions = Readonly<{
   organizer?: OrganizeService;
   notes?: NoteService;
   indexing?: NoteIndexService;
+  search?: NoteSearchService;
+  embedSearch?: (query: string) => Promise<number[]>;
   onNoteSaved?: NoteSaved;
 }>;
 
@@ -43,6 +46,7 @@ export function createApp(authenticateRequest: AuthenticateRequest, options: App
   api.use("*", requireAuth(authenticateRequest));
   api.route("/notes", createNoteRoutes(options.notes, options.onNoteSaved));
   api.route("/notes", createNoteIndexRoutes(options.indexing));
+  api.route("/note-search", createNoteSearchRoutes(options.search, options.embedSearch));
   api.route("/", createOrganizeRoutes(options.organizer, options.onNoteSaved));
   if (options.protectedRoutes) api.route("/", options.protectedRoutes);
   app.route("/api", api);

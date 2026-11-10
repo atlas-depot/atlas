@@ -1,5 +1,5 @@
 import { isDeepStrictEqual } from "node:util";
-import { and, asc, cosineDistance, eq, isNotNull, isNull } from "drizzle-orm";
+import { and, asc, cosineDistance, eq, sql } from "drizzle-orm";
 import { z } from "zod";
 import { EMBEDDING_FINGERPRINT, embeddingVectorSchema } from "../../shared/embedding.ts";
 import { notePassageSourceSchema, type NotePassage } from "../../shared/passages.ts";
@@ -19,9 +19,8 @@ export function createNoteSearchStore(db: Database) {
       vector: number[],
       limit = 5,
     ): Promise<{
-      passages: Array<NotePassage & { distance: number }>;
-      pendingCoverage: boolean;
-      failedCoverage: boolean;
+      passages: Array<NotePassage & { score: number }>;
+      coverage: { ready: number; pending: number; failed: number };
     }> {
       const owner = ownerSchema.parse(ownerId);
       const queryVector = embeddingVectorSchema.parse(vector);
@@ -50,7 +49,7 @@ export function createNoteSearchStore(db: Database) {
           .orderBy(asc(distance), notePassages.noteId, notePassages.ordinal)
           .limit(size * 10);
 
-        const passages: Array<NotePassage & { distance: number }> = [];
+        const passages: Array<NotePassage & { score: number }> = [];
         for (const row of rows) {
           if (passages.length === size) break;
           // A source writer locks the same note before edit/deletion. This shared lock
@@ -81,44 +80,39 @@ export function createNoteSearchStore(db: Database) {
             )
           )
             continue;
-          passages.push({ text: row.text, source: source.data, distance: measuredDistance });
+          passages.push({ text: row.text, source: source.data, score: 1 - measuredDistance });
         }
-        const coverage = (failed: boolean) =>
-          tx
-            .select({ noteId: notes.id })
-            .from(notes)
-            .leftJoin(
-              noteIndexes,
-              and(
-                eq(noteIndexes.noteId, notes.id),
-                eq(noteIndexes.revision, notes.revision),
-                eq(noteIndexes.fingerprint, EMBEDDING_FINGERPRINT),
-              ),
-            )
-            .leftJoin(
-              noteIndexIntents,
-              and(
-                eq(noteIndexIntents.noteId, notes.id),
-                eq(noteIndexIntents.revision, notes.revision),
-                eq(noteIndexIntents.fingerprint, EMBEDDING_FINGERPRINT),
-              ),
-            )
-            .where(
-              and(
-                eq(notes.ownerId, owner),
-                isNull(noteIndexes.noteId),
-                failed
-                  ? isNotNull(noteIndexIntents.failureCode)
-                  : isNull(noteIndexIntents.failureCode),
-              ),
-            )
-            .limit(1);
-        const pending = await coverage(false);
-        const failed = await coverage(true);
+        const [counts] = await tx
+          .select({
+            ready: sql<number>`count(*) filter (where ${noteIndexes.noteId} is not null)`,
+            failed: sql<number>`count(*) filter (where ${noteIndexes.noteId} is null and ${noteIndexIntents.failureCode} is not null)`,
+            pending: sql<number>`count(*) filter (where ${noteIndexes.noteId} is null and ${noteIndexIntents.failureCode} is null)`,
+          })
+          .from(notes)
+          .leftJoin(
+            noteIndexes,
+            and(
+              eq(noteIndexes.noteId, notes.id),
+              eq(noteIndexes.revision, notes.revision),
+              eq(noteIndexes.fingerprint, EMBEDDING_FINGERPRINT),
+            ),
+          )
+          .leftJoin(
+            noteIndexIntents,
+            and(
+              eq(noteIndexIntents.noteId, notes.id),
+              eq(noteIndexIntents.revision, notes.revision),
+              eq(noteIndexIntents.fingerprint, EMBEDDING_FINGERPRINT),
+            ),
+          )
+          .where(eq(notes.ownerId, owner));
         return {
           passages,
-          pendingCoverage: pending.length > 0,
-          failedCoverage: failed.length > 0,
+          coverage: {
+            ready: Number(counts.ready),
+            pending: Number(counts.pending),
+            failed: Number(counts.failed),
+          },
         };
       });
     },
