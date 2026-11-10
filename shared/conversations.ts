@@ -4,6 +4,11 @@ import { notePassageSourceSchema } from "./passages.ts";
 
 export const conversationIdSchema = z.uuid().transform((value) => value.toLowerCase());
 export const conversationOperationKeySchema = conversationIdSchema;
+export const conversationInputIdsSchema = z
+  .array(conversationIdSchema)
+  .min(1)
+  .max(100)
+  .refine((ids) => new Set(ids).size === ids.length);
 export const createConversationSchema = z.strictObject({});
 /** All conversation text bounds use UTF-16 code units, preserving valid source text. */
 export const conversationTextSchema = noteTextSchema.refine((value) => value.length <= 100_000);
@@ -17,6 +22,11 @@ export const conversationCitationInputSchema = z
 export const conversationCitationSchema = conversationCitationInputSchema.safeExtend({
   stale: z.boolean(),
 });
+const maximumCitations = 100;
+export const conversationCitationInputsSchema = z
+  .array(conversationCitationInputSchema)
+  .max(maximumCitations);
+const conversationCitationsSchema = z.array(conversationCitationSchema).max(maximumCitations);
 export const conversationSchema = z.strictObject({
   id: conversationIdSchema,
   queuePaused: z.boolean(),
@@ -42,8 +52,8 @@ export const conversationMessageSchema = z.discriminatedUnion("role", [
       turnId: conversationIdSchema,
       status: z.enum(["completed", "no-support", "incomplete"]),
       reason: z.enum(["failed", "cancelled"]).nullable(),
-      inputIds: z.array(conversationIdSchema),
-      citations: z.array(conversationCitationSchema),
+      inputIds: conversationInputIdsSchema,
+      citations: conversationCitationsSchema,
     })
     .refine((message) => (message.status === "incomplete") === (message.reason !== null)),
 ]);
@@ -52,7 +62,7 @@ export const activeConversationTurnSchema = z.strictObject({
   status: z.literal("running"),
   text: conversationTextSchema,
   checkpointVersion: z.number().int().nonnegative(),
-  inputIds: z.array(conversationIdSchema),
+  inputIds: conversationInputIdsSchema,
 });
 export const conversationReadSchema = z.strictObject({
   conversation: conversationSchema,

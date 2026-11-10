@@ -18,6 +18,8 @@ Status: Efe accepted the decisions below, including create-receipt retention, in
 - Creation accepts `{}` with a UUID `Idempotency-Key` header and a server-generated ID. No title
   or rename operation is included. Message text is bounded to 100,000 UTF-16 code units and
   citation excerpts to 1,000, matching JavaScript string and existing note limits.
+- One answer may consume at most 100 accepted inputs and retain at most 100 citations.
+  Additional queued messages remain available for later answers. Model context bounds belong to #71.
 
 - Every list, read, append and delete derives the owner from verified authentication. A direct
   conversation ID never grants access. Limit both conversation lists and message pages.

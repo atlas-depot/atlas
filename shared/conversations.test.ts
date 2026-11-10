@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vite-plus/test";
+import { randomUUID } from "node:crypto";
 import {
+  activeConversationTurnSchema,
   conversationCitationSchema,
   conversationMessageSchema,
   conversationTextSchema,
@@ -53,7 +55,7 @@ describe("conversation public contracts", () => {
       turnId: id,
       status: "incomplete",
       reason: "cancelled",
-      inputIds: [],
+      inputIds: [id],
       citations: [],
     };
     expect(conversationMessageSchema.safeParse(message).success).toBe(true);
@@ -61,5 +63,38 @@ describe("conversation public contracts", () => {
     expect(conversationMessageSchema.safeParse({ ...message, status: "completed" }).success).toBe(
       false,
     );
+  });
+  it("bounds public completed and active turn input IDs and citations", () => {
+    const inputIds = Array.from({ length: 100 }, () => randomUUID());
+    const citation = { source, excerpt: "x", deleted: false, stale: false };
+    const message = {
+      id,
+      sequence: 1,
+      text: "Answer",
+      createdAt: "2026-11-10T00:00:00Z",
+      role: "assistant",
+      turnId: id,
+      status: "completed",
+      reason: null,
+      inputIds,
+      citations: Array.from({ length: 100 }, () => citation),
+    };
+    const active = { id, status: "running", text: "", checkpointVersion: 0, inputIds };
+    expect(conversationMessageSchema.safeParse(message).success).toBe(true);
+    expect(activeConversationTurnSchema.safeParse(active).success).toBe(true);
+    for (const invalidIds of [[], [...inputIds, randomUUID()]]) {
+      expect(
+        conversationMessageSchema.safeParse({ ...message, inputIds: invalidIds }).success,
+      ).toBe(false);
+      expect(
+        activeConversationTurnSchema.safeParse({ ...active, inputIds: invalidIds }).success,
+      ).toBe(false);
+    }
+    expect(
+      conversationMessageSchema.safeParse({
+        ...message,
+        citations: [...message.citations, citation],
+      }).success,
+    ).toBe(false);
   });
 });

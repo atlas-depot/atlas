@@ -79,7 +79,9 @@ Message and checkpoint text is bounded to 100,000 UTF-16 code units, with NUL an
 Unicode rejected. Accepted inputs remain separate and ordered. Final answers carry the IDs
 of all consumed inputs and distinguish `completed`, `no-support`, and `incomplete` with a
 `failed` or `cancelled` reason. Partial history is not verified context for later answers.
-Citation excerpts are at most 1,000 UTF-16 code units. Note deletion clears their stored
+Each answer may reference at most 100 accepted inputs and 100 citations. Additional queued
+inputs stay available for later answers. Citation excerpts are at most 1,000 UTF-16 code units.
+Note deletion clears their stored
 excerpts, retaining delivered answer text and deleted-source references. Changed source
 versions are marked stale. No previous full note revision is archived.
 

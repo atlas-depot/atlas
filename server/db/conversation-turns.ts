@@ -1,6 +1,10 @@
 import { and, asc, eq, inArray } from "drizzle-orm";
 import { z } from "zod";
-import { conversationIdSchema, conversationTextSchema } from "../../shared/conversations.ts";
+import {
+  conversationIdSchema,
+  conversationInputIdsSchema,
+  conversationTextSchema,
+} from "../../shared/conversations.ts";
 import type { openDatabase } from "./connection.ts";
 import { enqueueTurnCleanup } from "./conversation-cleanup.ts";
 import { readConversationMessage } from "./conversation-messages.ts";
@@ -23,12 +27,10 @@ const inputSchema = z.strictObject({
   text: conversationTextSchema.refine((text) => text.trim().length > 0),
   policy: z.enum(["queue", "steer"]).default("queue"),
 });
-const attemptSchema = z
-  .strictObject({
-    inputIds: z.array(conversationIdSchema).min(1),
-    retryOfId: conversationIdSchema.optional(),
-  })
-  .refine((value) => new Set(value.inputIds).size === value.inputIds.length);
+const attemptSchema = z.strictObject({
+  inputIds: conversationInputIdsSchema,
+  retryOfId: conversationIdSchema.optional(),
+});
 
 async function turnInputs(tx: ConversationTransaction, turnId: string) {
   return (

@@ -2,7 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { and, eq } from "drizzle-orm";
 import { z } from "zod";
 import {
-  conversationCitationInputSchema,
+  conversationCitationInputsSchema,
   conversationIdSchema,
   conversationTextSchema,
 } from "../../shared/conversations.ts";
@@ -43,7 +43,9 @@ const finalizationSchema = z
     status: z.enum(["completed", "no-support", "incomplete"]),
     reason: z.enum(["failed", "cancelled"]).optional(),
     text: conversationTextSchema,
-    citations: z.array(conversationCitationInputSchema.refine((citation) => !citation.deleted)),
+    citations: conversationCitationInputsSchema.refine((citations) =>
+      citations.every((citation) => !citation.deleted),
+    ),
     expectedVersion: z.number().int().nonnegative(),
   })
   .refine((value) =>

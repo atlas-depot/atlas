@@ -278,3 +278,43 @@ it("bounds accepted input and quote text before any database write", async () =>
     .where(eq(conversationMessages.conversationId, f.id));
   expect(messages).toHaveLength(1);
 });
+
+it("accepts 100 grouped inputs and citations, rejects 101 before writing, and preserves the remaining queue", async () => {
+  const f = await fixture();
+  const inputIds: string[] = [];
+  for (let index = 0; index < 101; index++) inputIds.push((await f.input(`Question ${index}`)).id);
+  await expect(f.first.startAttempt(f.owner, f.id, randomUUID(), { inputIds })).rejects.toThrow();
+  expect(
+    await database.db
+      .select()
+      .from(conversationTurns)
+      .where(eq(conversationTurns.conversationId, f.id)),
+  ).toHaveLength(0);
+  const turn = await f.start(inputIds.slice(0, 100));
+  const citation = await source(f.owner);
+  const citations = Array.from({ length: 100 }, () => citation);
+  const payload = {
+    status: "completed" as const,
+    text: "Answer for the first hundred inputs",
+    citations,
+    expectedVersion: 0,
+  };
+  await expect(
+    f.first.finalize(f.owner, f.id, turn.id, { ...payload, citations: [...citations, citation] }),
+  ).rejects.toThrow();
+  expect(
+    await database.db
+      .select()
+      .from(conversationMessages)
+      .where(eq(conversationMessages.turnId, turn.id)),
+  ).toHaveLength(0);
+  const completed = await f.first.finalize(f.owner, f.id, turn.id, payload);
+  expect(completed).toMatchObject({ status: "saved", value: { inputIds: inputIds.slice(0, 100) } });
+  if (completed.status !== "saved" || completed.value.role !== "assistant")
+    throw new Error("Missing answer");
+  expect(completed.value.citations).toHaveLength(100);
+  const remaining = await f.start([inputIds[100]!]);
+  expect(await createConversationStore(database.db).read(f.owner, f.id)).toMatchObject({
+    activeTurn: { id: remaining.id, inputIds: [inputIds[100]] },
+  });
+});
