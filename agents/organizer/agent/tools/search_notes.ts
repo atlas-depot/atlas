@@ -22,6 +22,7 @@ const tool = defineTool({
         ownerOfSession: (sessionId) => turns.ownerOfSession(sessionId),
         embed: createSearchQueryEncoder(
           createNoteEmbedder({ apiKey: process.env.OPENROUTER_API_KEY ?? "" }),
+          ctx.abortSignal,
         ),
         candidates: (owner, vector, limit) => search.candidates(owner, vector, limit),
       });

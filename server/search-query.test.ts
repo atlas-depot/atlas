@@ -7,9 +7,10 @@ const vector = () => Array.from({ length: EMBEDDING_DIMENSIONS }, (_, i) => (i =
 
 it("uses the approved query encoding and accepts one valid vector", async () => {
   const embed = vi.fn().mockResolvedValue([vector()]);
-  const result = await createSearchQueryEncoder(embed)("  Notu nerede yazdım?  ");
+  const signal = new AbortController().signal;
+  const result = await createSearchQueryEncoder(embed, signal)("  Notu nerede yazdım?  ");
   expect(result).toEqual(vector());
-  expect(embed).toHaveBeenCalledExactlyOnceWith([encodeSearchQuery("Notu nerede yazdım?")]);
+  expect(embed).toHaveBeenCalledExactlyOnceWith([encodeSearchQuery("Notu nerede yazdım?")], signal);
 });
 
 it("rejects empty and oversized queries before any provider call", async () => {
