@@ -268,3 +268,124 @@ test("structured blocks persist IDs, nested lists and tables through save and AP
     fullPage: true,
   });
 });
+
+test("keyboard search and source opening work on narrow mobile through the real API path", async ({
+  page,
+}, testInfo) => {
+  const firstResponse = await page.request.post("/api/notes", {
+    headers: { Origin: origin, "Idempotency-Key": randomUUID() },
+    data: {
+      title: "Incident Response",
+      content: {
+        format: "blocknote",
+        schemaVersion: 1,
+        blocks: [
+          {
+            id: "incident-heading",
+            type: "heading",
+            props: { level: 2 },
+            content: [{ type: "text", text: "Escalation", styles: {} }],
+            children: [],
+          },
+          {
+            id: "incident-body",
+            type: "paragraph",
+            props: {},
+            content: [
+              {
+                type: "text",
+                text: "Page the primary oncall engineer immediately.",
+                styles: {},
+              },
+            ],
+            children: [],
+          },
+        ],
+      },
+      createdAt: "2026-11-08T10:00:00.000Z",
+    },
+  });
+  expect(firstResponse.status()).toBe(201);
+
+  const secondResponse = await page.request.post("/api/notes", {
+    headers: { Origin: origin, "Idempotency-Key": randomUUID() },
+    data: {
+      title: "Vector Search Architecture",
+      content: {
+        format: "blocknote",
+        schemaVersion: 1,
+        blocks: [
+          {
+            id: "vector-heading",
+            type: "heading",
+            props: { level: 2 },
+            content: [{ type: "text", text: "Retrieval Pipeline", styles: {} }],
+            children: [],
+          },
+          {
+            id: "vector-block",
+            type: "paragraph",
+            props: {},
+            content: [
+              {
+                type: "text",
+                text: "PostgreSQL pgvector ranks passages by cosine similarity.",
+                styles: {},
+              },
+            ],
+            children: [],
+          },
+        ],
+      },
+      createdAt: "2026-11-08T10:01:00.000Z",
+    },
+  });
+  expect(secondResponse.status()).toBe(201);
+  const vectorNote = noteSchema.parse(await secondResponse.json());
+
+  await expect
+    .poll(async () => {
+      const statusResponse = await page.request.get(`/api/notes/${vectorNote.id}/index`);
+      if (statusResponse.status() !== 200) return "pending";
+      const body = (await statusResponse.json()) as { status: string };
+      return body.status;
+    })
+    .toBe("ready");
+
+  await page.setViewportSize({ width: 375, height: 812 });
+  await page.goto("/");
+
+  const searchRegion = page.getByRole("region", { name: "Search notes" });
+  const searchInput = searchRegion.getByLabel("Search saved notes");
+  await searchInput.focus();
+  await page.keyboard.type("pgvector cosine");
+  await page.keyboard.press("Enter");
+
+  await expect(searchRegion.getByText('Query: "pgvector cosine"')).toBeVisible();
+  await expect(searchRegion.getByText("Vector Search Architecture")).toBeVisible();
+  await expect(
+    searchRegion.getByText("Retrieval Pipeline - Block vector-block - Revision 1"),
+  ).toBeVisible();
+  await expect(
+    searchRegion.getByText("PostgreSQL pgvector ranks passages by cosine similarity."),
+  ).toBeVisible();
+
+  const openSourceButton = searchRegion.getByRole("button", { name: "Open source", exact: true });
+  await openSourceButton.focus();
+  await page.keyboard.press("Enter");
+
+  const openedSource = page.getByRole("region", { name: "Opened source" });
+  await expect(openedSource).toContainText("Vector Search Architecture");
+  await expect(openedSource).toContainText("Revision 1");
+  await expect(openedSource).toContainText("Block vector-block");
+  await expect(
+    page.locator('[data-node-type="blockContainer"][data-id="vector-block"]'),
+  ).toHaveAttribute("data-cited-block", "true");
+  expect(await page.evaluate("document.documentElement.scrollWidth <= window.innerWidth")).toBe(
+    true,
+  );
+  await page.screenshot({
+    path: testInfo.outputPath("search-source-mobile-api.png"),
+    fullPage: true,
+  });
+});

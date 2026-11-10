@@ -39,6 +39,8 @@ type EditorProps = {
   importGeneratedMarkdown?: boolean;
   initialContent: NoteContent;
   disabled: boolean;
+  highlightedBlockId?: string;
+  highlightedRange?: { startOffset: number; endOffset: number };
   onChange: (content: NoteContent) => void;
   onModeChange: (mode: EditorMode) => void;
   onValidityChange: (valid: boolean) => void;
@@ -87,8 +89,11 @@ function MarkdownNoteEditor(props: EditorProps & { source: string }) {
         document={converted}
       />
     );
+  const citedRangeAttr = props.highlightedRange
+    ? `${props.highlightedRange.startOffset}-${props.highlightedRange.endOffset}`
+    : undefined;
   return (
-    <div className="space-y-2">
+    <div className="space-y-2" data-cited-range={citedRangeAttr}>
       <Label htmlFor={contentId}>Markdown source</Label>
       <p className="text-sm text-muted-foreground">
         Source mode preserves this Markdown without conversion.
@@ -99,6 +104,7 @@ function MarkdownNoteEditor(props: EditorProps & { source: string }) {
         maxLength={100_000}
         rows={6}
         className="note-source"
+        data-cited-range={citedRangeAttr}
         readOnly={props.disabled}
         onChange={(event) => {
           setSource(event.target.value);
@@ -113,12 +119,15 @@ function RichDocumentEditor({
   initialContent,
   document,
   disabled,
+  highlightedBlockId,
+  highlightedRange,
   onChange,
   onModeChange,
   onValidityChange,
   importedFromMarkdown = false,
 }: EditorProps & { document: BlockNoteDocument; importedFromMarkdown?: boolean }) {
   const contentId = useId();
+  const containerRef = useRef<HTMLElement | null>(null);
   // Initialize with the actual content: importing through replaceBlocks would
   // create an undo entry that could erase the note immediately after opening.
   const editor = useCreateBlockNote({
@@ -146,8 +155,48 @@ function RichDocumentEditor({
       onChange(document);
     }
   }, [document, importedFromMarkdown, onChange]);
+  useEffect(() => {
+    const root = containerRef.current;
+    if (!root) return;
+    const clearMarks = () => {
+      for (const previous of root.querySelectorAll("[data-cited-block='true']")) {
+        previous.removeAttribute("data-cited-block");
+      }
+    };
+    clearMarks();
+    if (!highlightedBlockId) return;
+    const selector = `[data-node-type="blockContainer"][data-id="${CSS.escape(highlightedBlockId)}"]`;
+    let scrolled = false;
+    const applyMark = () => {
+      const matched = root.querySelector<HTMLElement>(selector);
+      if (!matched) return;
+      if (matched.getAttribute("data-cited-block") !== "true") {
+        matched.setAttribute("data-cited-block", "true");
+      }
+      if (!scrolled && typeof matched.scrollIntoView === "function") {
+        scrolled = true;
+        matched.scrollIntoView({ block: "nearest" });
+      }
+    };
+    applyMark();
+    const observer = new MutationObserver(() => applyMark());
+    observer.observe(root, { childList: true, subtree: true });
+    return () => {
+      observer.disconnect();
+      clearMarks();
+    };
+  }, [highlightedBlockId, document]);
+  const citedRangeAttr = highlightedRange
+    ? `${highlightedRange.startOffset}-${highlightedRange.endOffset}`
+    : undefined;
   return (
-    <section className="rich-note-editor" aria-label="Note editor">
+    <section
+      ref={containerRef}
+      className="rich-note-editor"
+      aria-label="Note editor"
+      data-cited-block-id={highlightedBlockId}
+      data-cited-range={citedRangeAttr}
+    >
       <div className="editor-history" aria-label="Editing history">
         <Button
           variant="ghost"
