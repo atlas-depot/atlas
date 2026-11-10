@@ -84,7 +84,7 @@
 }
 
 .note-search-card.is-active {
-  ring-color: var(--primary);
+  --tw-ring-color: var(--primary);
 }
 
 .note-search-excerpt,

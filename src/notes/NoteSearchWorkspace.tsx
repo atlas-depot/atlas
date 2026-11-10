@@ -62,18 +62,22 @@ export function NoteSearchWorkspace({
   const [outcome, setOutcome] = useState<SearchOutcome | null>(null);
   const [failure, setFailure] = useState<string | null>(null);
   const requestIdRef = useRef(0);
+  const inFlightIdRef = useRef(0);
   const enabledRef = useRef(enabled);
 
   useEffect(() => {
     enabledRef.current = enabled;
     if (!enabled) {
       requestIdRef.current += 1;
+      inFlightIdRef.current = 0;
+      void Promise.resolve().then(() => setSearching(false));
     }
   }, [enabled]);
 
   useEffect(() => {
     return () => {
       requestIdRef.current += 1;
+      inFlightIdRef.current = 0;
     };
   }, []);
 
@@ -82,6 +86,7 @@ export function NoteSearchWorkspace({
     if (!enabledRef.current || trimmed.length === 0) return;
 
     const requestId = ++requestIdRef.current;
+    inFlightIdRef.current = requestId;
     setSubmittedQuery(trimmed);
     setSearching(true);
     setFailure(null);
@@ -106,7 +111,8 @@ export function NoteSearchWorkspace({
       }
       setFailure(searchFailureMessage(error));
     } finally {
-      if (requestId === requestIdRef.current) {
+      if (inFlightIdRef.current === requestId) {
+        inFlightIdRef.current = 0;
         setSearching(false);
       }
     }
