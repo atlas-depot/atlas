@@ -15,6 +15,9 @@ Status: Efe accepted the decisions below, including create-receipt retention, in
   detailed web-source support belongs to #75.
 - Cursor pages default to 50 and have at most 100 records. Message cursors use immutable sequence
   numbers. Payload sizes are bounded.
+- Creation accepts `{}` with a UUID `Idempotency-Key` header and a server-generated ID. No title
+  or rename operation is included. Message text is bounded to 100,000 UTF-16 code units and
+  citation excerpts to 1,000, matching JavaScript string and existing note limits.
 
 - Every list, read, append and delete derives the owner from verified authentication. A direct
   conversation ID never grants access. Limit both conversation lists and message pages.
@@ -41,7 +44,7 @@ Status: Efe accepted the decisions below, including create-receipt retention, in
 | Citation | Ordered typed source identities attached to an answer, exact note excerpts of at most 1,000 characters and deleted-source markers. Note references keep their #66 location after excerpt redaction. Detailed web-source fields belong to #75. |
 | Cleanup intent | Content-free runtime identity and retry state retained independently of deleted conversation content until remote retirement is verified. It does not claim exactly-once external cleanup. |
 
-The smallest deletion implementation appears to be a transaction that locks the conversation,
+The deletion transaction locks the conversation,
 records any required cleanup intent, and deletes the conversation and dependent content. A
 message append must find and lock an existing owned conversation; it must never upsert one.
 The foreign key from message to conversation then prevents a late completion from recreating
@@ -53,8 +56,8 @@ For source-note deletion, citation insertion first checks and locks the owned li
 locks the conversation for append. Note deletion locks the note, redacts every excerpt tied to
 its ID in the same transaction, then removes the note. The citation row has no cascading note
 foreign key because its deleted-source reference must survive. The redaction marker forbids a
-non-null excerpt. This lock order and the conversation-delete interaction need a real
-PostgreSQL race test before adoption, not an assumption based on single-threaded fixtures.
+non-null excerpt. The real PostgreSQL tests exercise this lock order and the
+conversation-delete interaction.
 
 ## Accepted create replay contract
 
@@ -66,7 +69,7 @@ while the conversation exists returns the current conversation; after deletion i
 `409` conflict without recreating it. A changed payload also returns `409`. A shorter TTL would
 let an old request recreate a deleted conversation after expiry.
 
-## PostgreSQL verification prepared for implementation
+## PostgreSQL verification contract
 
 | Trigger | Expected observation |
 | --- | --- |
@@ -90,6 +93,7 @@ let an old request recreate a deleted conversation after expiry.
 | Storage transaction fails before commit | Caller does not acknowledge a saved message, sequence or deletion. |
 | Cleanup provider outcome is unknown | Durable intent remains retryable/inspectable without claiming remote success. |
 
-The first experiment after approval should migrate an isolated PostgreSQL test
-database, replay the JSON fixture through two independent pools, and force the deletion races
-with real row locks. Do not apply a migration to shared staging as part of this preparation.
+The executable regressions live in `server/db/conversation-*.integration.ts` and
+`server/db/conversations.integration.ts`. The JSON example remains illustrative, not an
+executable test. Run the database suite against an isolated local PostgreSQL instance.
+No shared staging migration is part of this verification.

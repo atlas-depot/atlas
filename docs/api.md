@@ -7,6 +7,7 @@ The Hono API serves JSON under `/api`. The Zod schemas in `shared/` are the sour
 - [Organize schemas](../shared/organize.ts): run states, the start response and note provenance.
 - [Draft schemas](../shared/drafts.ts): temporary drafts and reconnect state.
 - [Session schemas](../shared/auth.ts): the identity returned by `GET /api/auth/session`. The browser sign-in routes are described in [development](development.md#local-api).
+- [Conversation schemas](../shared/conversations.ts): persistent conversation, history and citation responses.
 
 ## Common rules
 
@@ -58,6 +59,39 @@ the preceding 60 seconds across API processes. Rejected requests return `429 RAT
 `Retry-After` and make no provider call. Provider failures consume admission. Missing or failed
 admission storage returns `503` rather than allowing an uncounted call. Expired owner counters
 are removed in bounded batches as subsequent requests arrive.
+
+## Conversations
+
+| Request | Response |
+| --- | --- |
+| `POST /api/conversations`, `{}` plus UUID `Idempotency-Key` | `201` server-generated conversation |
+| `GET /api/conversations?limit=50&cursor=...` | `200 { conversations, nextCursor }`, newest creation first |
+| `GET /api/conversations/:id` | `200 { conversation, activeTurn }`, including the current checkpoint when running |
+| `GET /api/conversations/:id/messages?limit=50&cursor=...` | `200 { messages, nextCursor }`, ascending immutable sequence |
+| `DELETE /api/conversations/:id`, empty body | `204` after content deletion and durable cleanup-intent recording |
+
+Pages default to 50 and allow at most 100 records. Use the returned cursor unchanged.
+Creation accepts no owner, ID or title. Identical owner/key replay returns the current
+conversation. Replaying creation after deletion returns `409` without recreating content.
+The content-free key/hash/ID receipt lasts until account erasure, like note creation receipts.
+
+Message and checkpoint text is bounded to 100,000 UTF-16 code units, with NUL and malformed
+Unicode rejected. Accepted inputs remain separate and ordered. Final answers carry the IDs
+of all consumed inputs and distinguish `completed`, `no-support`, and `incomplete` with a
+`failed` or `cancelled` reason. Partial history is not verified context for later answers.
+Citation excerpts are at most 1,000 UTF-16 code units. Note deletion clears their stored
+excerpts, retaining delivered answer text and deleted-source references. Changed source
+versions are marked stale. No previous full note revision is archived.
+
+Turn admission, checkpointing, finalization, Stop/resume and runtime bookkeeping are internal
+store operations for #71. This API does not execute models or accept public message writes yet.
+Stop pauses the queue and preserves an incomplete output. Finalization rechecks source access
+under note locks before publishing. An unavailable source suppresses unpublished text and
+records an empty failed attempt. Exact terminal retries return the current redacted record.
+The caller must validate citation provenance and answer support against its generation evidence.
+Runtime identities stay private. Cleanup intents survive conversation deletion, including
+allocation operations whose remote session ID has not arrived. They remain until retirement
+of the exact session is verified. #71 owns the runtime adapter and cleanup worker.
 
 ## Organize
 
