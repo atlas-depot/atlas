@@ -104,6 +104,15 @@ Use an isolated local PostgreSQL server with pgvector installed and a test role 
 
 Drizzle Kit uses esbuild's packaged platform executable. `allowBuilds.esbuild: false` disables its dependency install scripts; migration generation must continue to work after a frozen install.
 
+### Conversation migration cutover
+
+Migration `0008_conversation-records` adds conversation storage and independent cleanup intents.
+Use the same short write pause described below: drain old writers, apply the migration, and
+reopen only on the new API. An older API can delete notes without redacting conversation
+excerpts, so do not leave old note-delete entry points available once conversations are enabled.
+Rolling back the API requires keeping note mutations and conversation operations disabled.
+Runtime execution and the cleanup worker belong to #71. This migration alone starts neither.
+
 ### Note-index migration cutover
 
 `0006_note-index` requires a write-paused cutover. Its backfill runs once. Older writers do not create or refresh index intents, and maintenance cannot recover missing or outdated intents. Overlapping old and new writers are unsupported.

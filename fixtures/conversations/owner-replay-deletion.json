@@ -1,0 +1,86 @@
+{
+  "description": "Synthetic #70 inputs and expected outcomes; this is not a database or public API schema.",
+  "owners": {
+    "alex": "synthetic-owner-alex",
+    "sam": "synthetic-owner-sam"
+  },
+  "conversation": {
+    "id": "d64c3810-45dc-4494-aaf6-c1decb549015",
+    "owner": "alex"
+  },
+  "messages": [
+    {
+      "id": "172f1b3f-46e4-46fa-a01f-4740f25ba081",
+      "operationId": "a5372948-3d1a-4690-bfa1-9e396668b38c",
+      "role": "user",
+      "text": "Where is the meeting?",
+      "sequence": 1
+    },
+    {
+      "id": "ea74ca06-2afb-451b-8d7f-79764f0973b0",
+      "operationId": "892bd576-c161-42fc-b64f-d7046ac87650",
+      "role": "user",
+      "text": "And at what time?",
+      "sequence": 2
+    },
+    {
+      "id": "21af9812-dc7d-4983-bce3-38519d3af54c",
+      "operationId": "551b9cd8-4f72-4a14-824f-f0088f73b8e7",
+      "role": "assistant",
+      "text": "The meeting is at the library at 14:00.",
+      "sequence": 3,
+      "state": "completed",
+      "addresses": ["172f1b3f-46e4-46fa-a01f-4740f25ba081", "ea74ca06-2afb-451b-8d7f-79764f0973b0"],
+      "source": {
+        "kind": "note",
+        "reference": {
+          "kind": "block",
+          "noteId": "389e1044-164c-4931-b054-0384d66b9523",
+          "version": "\"389e1044-164c-4931-b054-0384d66b9523:3\"",
+          "blockId": "meeting-block",
+          "headingPath": []
+        },
+        "excerpt": "Meeting at the library at 14:00.",
+        "deleted": false
+      }
+    },
+    {
+      "id": "c9de02fd-071f-4c7c-8831-c074e640d952",
+      "operationId": "b98fdf18-dab4-4938-8b15-38a4c80a28a7",
+      "role": "user",
+      "text": "Can you check the follow-up?",
+      "sequence": 4
+    },
+    {
+      "id": "cf982391-64d3-4e64-a974-79ab5720a180",
+      "operationId": "2ba13b47-05c7-49f2-9387-2b6f1e94d3ff",
+      "role": "assistant",
+      "text": "Partial answer",
+      "sequence": 5,
+      "state": "incomplete",
+      "reason": "cancelled",
+      "addresses": ["c9de02fd-071f-4c7c-8831-c074e640d952"]
+    },
+    {
+      "id": "f21c9051-0d0d-4a18-ae90-22a166145042",
+      "operationId": "069cfa8d-5efc-49c1-9667-b73fb1dbe974",
+      "role": "user",
+      "text": "What changed?",
+      "sequence": 6,
+      "state": "queued"
+    }
+  ],
+  "queuePaused": true,
+  "expected": [
+    "sam cannot list, read, append to or delete alex's conversation by direct ID",
+    "replaying the same operation ID and payload returns the same message without a second row",
+    "replaying an operation ID with changed payload is rejected",
+    "the completed answer addresses both ordered user messages",
+    "the incomplete answer remains visible but is not completed evidence",
+    "the queued message survives cancellation and reconnect; nothing runs before explicit resume",
+    "deleting the source note removes only the excerpt copy and marks its reference deleted",
+    "a citation write racing with source deletion cannot restore the excerpt",
+    "deleting the conversation denies every read and fences a late write",
+    "a failed transaction acknowledges no saved message"
+  ]
+}

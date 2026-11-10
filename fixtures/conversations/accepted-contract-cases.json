@@ -1,0 +1,48 @@
+{
+  "description": "Synthetic #70 cases for real PostgreSQL tests; identities and text are not private data.",
+  "owner": "synthetic-owner-alex",
+  "notes": [
+    {
+      "id": "389e1044-164c-4931-b054-0384d66b9523",
+      "content": "Meeting at the library at 14:00."
+    },
+    {
+      "id": "eb48a657-9f15-4da4-8fbc-54cb775da632",
+      "content": "# Checklist\n- Bring the blue folder."
+    }
+  ],
+  "citations": [
+    {
+      "kind": "note",
+      "reference": {
+        "kind": "block",
+        "noteId": "389e1044-164c-4931-b054-0384d66b9523",
+        "version": "\"389e1044-164c-4931-b054-0384d66b9523:1\"",
+        "blockId": "meeting-block",
+        "headingPath": []
+      },
+      "excerpt": "Meeting at the library at 14:00."
+    },
+    {
+      "kind": "note",
+      "reference": {
+        "kind": "markdown",
+        "noteId": "eb48a657-9f15-4da4-8fbc-54cb775da632",
+        "version": "\"eb48a657-9f15-4da4-8fbc-54cb775da632:1\"",
+        "headingPath": ["Checklist"],
+        "startOffset": 12,
+        "endOffset": 36
+      },
+      "excerpt": "Bring the blue folder."
+    }
+  ],
+  "expected": [
+    "deleting the first note redacts only its citation; the Markdown citation retains its excerpt and revision-bound range",
+    "replaying the finalized answer after redaction returns the current redacted citation, never the original excerpt",
+    "explicit retry of a cancelled attempt keeps its incomplete message and creates a new attempt linked to the same input IDs",
+    "late completion of a cancelled attempt cannot mark it completed",
+    "an input accepted while an answer runs is queued with a distinct identity and survives reconnect",
+    "failed output remains incomplete and no-support remains distinct from a completed sourced answer",
+    "a repeated create request cannot restore a conversation deleted after its first creation"
+  ]
+}

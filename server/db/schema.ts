@@ -21,6 +21,8 @@ import type { NotePassageSource } from "../../shared/passages.ts";
 import type { IndexFailureCode } from "../../shared/index-jobs.ts";
 import { EMBEDDING_DIMENSIONS } from "../../shared/embedding.ts";
 
+export * from "./conversation-schema.ts";
+
 export const notes = pgTable(
   "notes",
   {
