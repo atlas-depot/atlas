@@ -18,7 +18,7 @@ const hasCode = (code: NoteEmbeddingError["code"]) => (error: unknown) => {
   return true;
 };
 
-await test("uses the fixed model/dimensions and binds shuffled vectors to repeated input positions", async () => {
+await test("pins DeepInfra with no provider fallback and binds shuffled vectors to repeated inputs", async () => {
   const texts = ["# Same private text", "Other source", "# Same private text"];
   let calls = 0;
   const embed = createNoteEmbedder({
@@ -34,7 +34,7 @@ await test("uses the fixed model/dimensions and binds shuffled vectors to repeat
       assert.deepEqual(JSON.parse(init.body), {
         model: EMBEDDING_MODEL,
         input: texts,
-        provider: { require_parameters: true },
+        provider: { require_parameters: true, only: ["deepinfra"], allow_fallbacks: false },
         dimensions: 1536,
         encoding_format: "float",
       });
@@ -53,7 +53,12 @@ await test("bounds sequential requests and keeps batch-local response indices in
     fetch: async (_url, init) => {
       assert.equal(++active, 1);
       assert.ok(typeof init?.body === "string");
-      const body = JSON.parse(init.body) as { input: string[] };
+      const body = JSON.parse(init.body) as { input: string[]; provider: unknown };
+      assert.deepEqual(body.provider, {
+        require_parameters: true,
+        only: ["deepinfra"],
+        allow_fallbacks: false,
+      });
       sizes.push(body.input.length);
       active--;
       return response(body.input.map((value, index) => item(index, vector(Number(value)))));
