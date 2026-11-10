@@ -1,5 +1,5 @@
 import { isDeepStrictEqual } from "node:util";
-import { and, asc, cosineDistance, eq, sql } from "drizzle-orm";
+import { and, asc, cosineDistance, eq, inArray, sql } from "drizzle-orm";
 import { z } from "zod";
 import { EMBEDDING_FINGERPRINT, embeddingVectorSchema } from "../../shared/embedding.ts";
 import { notePassageSourceSchema, type NotePassage } from "../../shared/passages.ts";
@@ -50,22 +50,43 @@ export function createNoteSearchStore(db: Database) {
           .limit(size * 10);
 
         const passages: Array<NotePassage & { score: number }> = [];
-        for (const row of rows) {
-          if (passages.length === size) break;
-          // A source writer locks the same note before edit/deletion. This shared lock
-          // keeps the validated source stable until the search transaction commits.
-          const [note] = await tx
-            .select({ revision: notes.revision, content: notes.content })
-            .from(notes)
-            .where(and(eq(notes.id, row.noteId), eq(notes.ownerId, owner)))
-            .for("share");
+        const sources = new Map<
+          string,
+          { revision: number; projection: ReturnType<typeof projectNotePassages> } | null
+        >();
+        for (let index = 0; index < rows.length && passages.length < size; index++) {
+          // Load only the next ranked window, not the entire overfetch set. Shared
+          // locks keep cached projections stable until this transaction commits.
+          if (index % size === 0) {
+            const ids = [
+              ...new Set(rows.slice(index, index + size).map((row) => row.noteId)),
+            ].filter((id) => !sources.has(id));
+            if (ids.length) {
+              const currentNotes = await tx
+                .select({ id: notes.id, revision: notes.revision, content: notes.content })
+                .from(notes)
+                .where(and(inArray(notes.id, ids), eq(notes.ownerId, owner)))
+                .orderBy(notes.id)
+                .for("share");
+              // Missing or inaccessible notes must not be retried in later windows.
+              for (const id of ids) sources.set(id, null);
+              for (const note of currentNotes) {
+                sources.set(note.id, {
+                  revision: note.revision,
+                  projection: projectNotePassages({
+                    noteId: note.id,
+                    version: JSON.stringify(`${note.id}:${note.revision}`),
+                    content: note.content,
+                  }),
+                });
+              }
+            }
+          }
+          const row = rows[index];
+          const note = sources.get(row.noteId);
           if (!note || note.revision !== row.revision) continue;
           const source = notePassageSourceSchema.safeParse(row.source);
-          const current = projectNotePassages({
-            noteId: row.noteId,
-            version: JSON.stringify(`${row.noteId}:${note.revision}`),
-            content: note.content,
-          });
+          const current = note.projection;
           const measuredDistance = Number(row.distance);
           if (
             !source.success ||
