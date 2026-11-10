@@ -1,0 +1,33 @@
+{
+  "description": "Synthetic frozen evaluation set for #68. Labels are fixture identities, not public source references.",
+  "notes": [
+    { "label": "A", "content": "Toplantı perşembe saat 14.00'te kütüphanede." },
+    { "label": "B", "content": "The design review is on Friday at 09:30 in room B12." },
+    { "label": "C", "content": "Bisikletin arka lastiği patladı; tamir cumartesi yapılacak." },
+    { "label": "D", "content": "The bike's front brake was replaced on Tuesday." },
+    { "label": "E", "content": "Kütüphane üyeliği 12 Aralık'ta yenilenecek." },
+    { "label": "F", "content": "The project budget is 120 dollars for November." },
+    { "label": "G", "content": "The Monday meeting is in room C at 14:00." },
+    {
+      "label": "H",
+      "content": "The Friday design review checklist contains budget questions. Its meeting location has not been recorded."
+    }
+  ],
+  "longNote": {
+    "label": "I",
+    "repeat": 60,
+    "filler": "The project checklist tracks routine equipment inspection, supply inventory and status updates. ",
+    "target": "The accessibility review is at 16:30 in room D4."
+  },
+  "queries": [
+    { "text": "Perşembe görüşmesi nerede ve kaçta?", "expected": "A" },
+    { "text": "Where is the Friday critique?", "expected": "B" },
+    { "text": "When will the punctured rear wheel be fixed?", "expected": "C" },
+    { "text": "Ön fren ne zaman değişti?", "expected": "D" },
+    { "text": "Kütüphane üyeliğini ne zaman yenilemeliyim?", "expected": "E" },
+    { "text": "What is the November spending limit?", "expected": "F" },
+    { "text": "Where is the accessibility review?", "expected": "I" },
+    { "text": "Perşembe bisiklet tamiri nerede?", "expected": null },
+    { "text": "What is the team's April revenue?", "expected": null }
+  ]
+}
