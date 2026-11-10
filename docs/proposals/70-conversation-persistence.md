@@ -1,7 +1,7 @@
 # Proposal: persistent conversation and deletion contract for #70
 
-Status: Efe accepted the decisions below in issue #70 on 10 November 2026. The create replay
-record and its retention remain a proposal. The synthetic example is in
+Status: Efe accepted the decisions below, including create-receipt retention, in issue #70 on
+10 November 2026. The synthetic example is in
 [`fixtures/conversations/owner-replay-deletion.json`](../../fixtures/conversations/owner-replay-deletion.json).
 
 ## Fixed behavior from #70 and related issues
@@ -47,7 +47,7 @@ message append must find and lock an existing owned conversation; it must never 
 The foreign key from message to conversation then prevents a late completion from recreating
 history. A failed cleanup-intent write makes the deletion transaction fail rather than claiming
 success without a durable cleanup path. Efe accepted hard deletion and the separate cleanup
-intent; the create-replay record below remains open.
+intent, together with the create-replay record below.
 
 For source-note deletion, citation insertion first checks and locks the owned live note, then
 locks the conversation for append. Note deletion locks the note, redacts every excerpt tied to
@@ -56,16 +56,15 @@ foreign key because its deleted-source reference must survive. The redaction mar
 non-null excerpt. This lock order and the conversation-delete interaction need a real
 PostgreSQL race test before adoption, not an assumption based on single-threaded fixtures.
 
-## Remaining create replay proposal for Efe
+## Accepted create replay contract
 
 Use a separate creation receipt keyed by verified owner and client-generated UUID operation ID.
 Store only a validated-payload fingerprint and original conversation UUID, with no title,
 messages or runtime data. Insert it atomically with a new conversation. Retain it after deletion
 until account deletion, matching the existing note-create receipt lifetime. An identical replay
 while the conversation exists returns the current conversation; after deletion it returns a
-conflict without recreating it. A changed payload always conflicts. A shorter TTL would let an
-old request recreate a deleted conversation after expiry. Please confirm the lifetime and the
-post-deletion replay response before this portion of the migration is frozen.
+`409` conflict without recreating it. A changed payload also returns `409`. A shorter TTL would
+let an old request recreate a deleted conversation after expiry.
 
 ## PostgreSQL verification prepared for implementation
 

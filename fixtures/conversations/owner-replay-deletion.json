@@ -30,10 +30,7 @@
       "text": "The meeting is at the library at 14:00.",
       "sequence": 3,
       "state": "completed",
-      "addresses": [
-        "172f1b3f-46e4-46fa-a01f-4740f25ba081",
-        "ea74ca06-2afb-451b-8d7f-79764f0973b0"
-      ],
+      "addresses": ["172f1b3f-46e4-46fa-a01f-4740f25ba081", "ea74ca06-2afb-451b-8d7f-79764f0973b0"],
       "source": {
         "kind": "note",
         "reference": {
@@ -62,9 +59,7 @@
       "sequence": 5,
       "state": "incomplete",
       "reason": "cancelled",
-      "addresses": [
-        "c9de02fd-071f-4c7c-8831-c074e640d952"
-      ]
+      "addresses": ["c9de02fd-071f-4c7c-8831-c074e640d952"]
     },
     {
       "id": "f21c9051-0d0d-4a18-ae90-22a166145042",
