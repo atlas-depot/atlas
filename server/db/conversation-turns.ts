@@ -110,18 +110,27 @@ export function createConversationTurns(db: Database) {
   }
 
   return {
-    /** Record all retrieved evidence before it reaches the model, even if never cited. */
+    /**
+     * Record all retrieved evidence before it reaches the model, even if never cited.
+     * Search tool calls in one turn can run concurrently. Serialize them per session so each
+     * call merges its sources and byte count instead of rejecting the other call.
+     */
     async recordSearch(sessionId: string, sources: SourceDependency[], output: unknown) {
-      const [snapshot] = await db
-        .select({ turn: conversationTurns, owner: conversations.ownerId })
-        .from(conversationTurns)
-        .innerJoin(conversations, eq(conversations.id, conversationTurns.conversationId))
-        .where(
-          and(eq(conversationTurns.sessionId, sessionId), eq(conversationTurns.status, "running")),
-        );
-      if (!snapshot) return false;
-      const dependencies = mergeDependencies(snapshot.turn.sourceDependencies, sources);
       return db.transaction(async (tx) => {
+        // Short lock only. No provider work runs inside this transaction.
+        await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtextextended(${sessionId}, 72))`);
+        const [snapshot] = await tx
+          .select({ turn: conversationTurns, owner: conversations.ownerId })
+          .from(conversationTurns)
+          .innerJoin(conversations, eq(conversations.id, conversationTurns.conversationId))
+          .where(
+            and(
+              eq(conversationTurns.sessionId, sessionId),
+              eq(conversationTurns.status, "running"),
+            ),
+          );
+        if (!snapshot) return false;
+        const dependencies = mergeDependencies(snapshot.turn.sourceDependencies, sources);
         if (!(await lockContextSources(tx, snapshot.owner, dependencies))) return false;
         const parent = await lockOwnedConversation(
           tx,
@@ -147,22 +156,17 @@ export function createConversationTurns(db: Database) {
               eq(conversationTurns.status, "running"),
             ),
           );
-        if (
-          !context ||
-          !turn ||
-          JSON.stringify(turn.sourceDependencies) !==
-            JSON.stringify(snapshot.turn.sourceDependencies)
-        )
-          return false;
+        if (!context || !turn) return false;
+        const merged = mergeDependencies(turn.sourceDependencies, dependencies);
         const bytes = turn.retrievalBytes + byteSize(output);
         if (bytes > CONTEXT_LIMITS.retrievalBytes) return false;
         await tx
           .update(conversationTurns)
-          .set({ sourceDependencies: dependencies, retrievalBytes: bytes })
+          .set({ sourceDependencies: merged, retrievalBytes: bytes })
           .where(eq(conversationTurns.id, turn.id));
         await tx
           .update(conversationContexts)
-          .set({ sources: dependencies })
+          .set({ sources: merged })
           .where(eq(conversationContexts.turnId, turn.id));
         return true;
       });

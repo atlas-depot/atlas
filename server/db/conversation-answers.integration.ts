@@ -676,6 +676,33 @@ it("records uncited retrieval before the model sees it and excludes the entire d
   });
 });
 
+it("merges concurrent retrieval from one attempt instead of rejecting a parallel search", async () => {
+  const f = await fixture();
+  const first = await f.note("First", "Alpha evidence.");
+  const second = await f.note("Second", "Beta evidence.");
+  await f.first.send(f.owner, f.id, randomUUID(), { text: "Search twice" });
+  const session = f.fake.calls.submit[0]!.sessionId;
+  const turns = createConversationTurns(database.db);
+  const outputs = [first, second].map((note) => ({
+    sources: [{ noteId: note.noteId, version: note.source.version }],
+    output: { passages: [note] },
+  }));
+  expect(
+    await Promise.all(
+      outputs.map(({ sources, output }) => turns.recordSearch(session, sources, output)),
+    ),
+  ).toEqual([true, true]);
+  const [turn] = await database.db
+    .select()
+    .from(conversationTurns)
+    .where(eq(conversationTurns.sessionId, session));
+  expect(turn!.sourceDependencies).toEqual(
+    expect.arrayContaining(outputs.flatMap(({ sources }) => sources)),
+  );
+  expect(turn!.retrievalBytes).toBeGreaterThan(0);
+  expect(await turns.contextAuthorized(session)).toBe(true);
+});
+
 it("does not authorize another account's source or an over-budget tool result", async () => {
   const f = await fixture();
   const other = await fixture();
