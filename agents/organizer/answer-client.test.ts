@@ -248,6 +248,7 @@ await test("note search takes its owner from the bound session and refuses an un
     ownerOfSession: async (sessionId: string) =>
       sessionId === "session-alex" ? "owner-alex" : undefined,
     embed: async () => [0.1],
+    record: async () => true,
     candidates: async (ownerId: string) => {
       searched.push(ownerId);
       return {
@@ -262,6 +263,52 @@ await test("note search takes its owner from the bound session and refuses an un
   );
   await assert.rejects(searchOwnedNotes("session-unknown", { query: "anything" }, dependencies));
   assert.deepEqual(searched, ["owner-alex"]);
+});
+
+await test("note search records every returned passage and withholds output it could not record", async () => {
+  const recorded: unknown[] = [];
+  const dependencies = (saved: boolean) => ({
+    ownerOfSession: async () => "owner-alex",
+    embed: async () => [0.1],
+    candidates: async () => ({
+      passages: [{ text: passage.text, source }],
+      coverage: { ready: 1, pending: 0, failed: 0 },
+    }),
+    record: async (sessionId: string, sources: unknown) => {
+      recorded.push([sessionId, sources]);
+      return saved;
+    },
+  });
+  await searchOwnedNotes("session-alex", { query: "anything" }, dependencies(true));
+  assert.deepEqual(recorded, [
+    ["session-alex", [{ noteId: source.noteId, version: source.version }]],
+  ]);
+  await assert.rejects(
+    searchOwnedNotes("session-alex", { query: "anything" }, dependencies(false)),
+  );
+});
+
+await test("an expired session found while reading an answer is reported, not retried", async () => {
+  const adapter = createDurableEveAnswerer({
+    baseUrl: "https://organizer.example.com",
+    serviceToken,
+  });
+  // The eve reader uses the global fetch, so the expiry is scripted there for this read.
+  const original = globalThis.fetch;
+  let reads = 0;
+  globalThis.fetch = async () => {
+    reads++;
+    return Response.json({ code: "session_expired" }, { status: 410 });
+  };
+  try {
+    assert.deepEqual(
+      await adapter.inspect("session-1", { deliveryId: "delivery", steerDeliveryIds: [] }),
+      { status: "expired", text: "" },
+    );
+    assert.equal(reads, 1);
+  } finally {
+    globalThis.fetch = original;
+  }
 });
 
 await test("each job sees only its own tools: research never joins a chat session", () => {
