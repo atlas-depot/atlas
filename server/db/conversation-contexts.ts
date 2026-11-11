@@ -79,7 +79,18 @@ export async function invalidateSourceContext(tx: ConversationTransaction, id: s
       .select()
       .from(conversationTurns)
       .where(eq(conversationTurns.id, context.turnId));
-    if (turn?.status === "running") await enqueueTurnCleanup(tx, owner, turn);
+    if (turn?.status === "running") {
+      await enqueueTurnCleanup(tx, owner, turn);
+      // The draft may hold text from the deleted note. Drop it and fence a late checkpoint,
+      // so neither Stop nor a finishing attempt can publish it.
+      await tx
+        .update(conversationTurns)
+        .set({
+          runningText: "",
+          checkpointVersion: sql`${conversationTurns.checkpointVersion} + 1`,
+        })
+        .where(eq(conversationTurns.id, turn.id));
+    }
     await tx
       .update(conversationCleanupIntents)
       .set({ retryAt: sql`now()` })

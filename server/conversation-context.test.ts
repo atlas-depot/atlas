@@ -87,4 +87,10 @@ describe("bounded conversation context", () => {
     });
     expect(compactionInput(null, [])).toBeNull();
   });
+  it("keeps one copy of a dependency whatever its property order", () => {
+    const noteId = "00000000-0000-4000-8000-000000000001";
+    expect(mergeDependencies([{ noteId, version: "v1" }], [{ version: "v1", noteId }])).toEqual([
+      { noteId, version: "v1" },
+    ]);
+  });
 });

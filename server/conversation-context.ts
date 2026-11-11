@@ -66,7 +66,9 @@ export function byteSize(value: unknown): number {
 /** The union without the size check, for callers that drop material instead of failing. */
 export function unionDependencies(...sets: readonly SourceDependency[][]): SourceDependency[] {
   const unique = new Map<string, SourceDependency>();
-  for (const dependency of sets.flat()) unique.set(JSON.stringify(dependency), dependency);
+  // Keyed by value, so the same dependency with another property order is not kept twice.
+  for (const dependency of sets.flat())
+    unique.set(`${dependency.noteId}\n${dependency.version}`, dependency);
   return [...unique.values()].sort(
     (a, b) => a.noteId.localeCompare(b.noteId) || a.version.localeCompare(b.version),
   );

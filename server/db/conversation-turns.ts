@@ -27,6 +27,8 @@ import {
   byteSize,
   CONTEXT_LIMITS,
   mergeDependencies,
+  sourceDependenciesSchema,
+  unionDependencies,
   type SourceDependency,
 } from "../conversation-context.ts";
 import { readConversationMessage } from "./conversation-messages.ts";
@@ -138,7 +140,10 @@ export function createConversationTurns(db: Database) {
             ),
           );
         if (!snapshot) return { status: "unavailable" as const };
-        const dependencies = mergeDependencies(snapshot.turn.sourceDependencies, sources);
+        // Past the lineage limit the search is refused as over budget, not as an error.
+        const dependencies = unionDependencies(snapshot.turn.sourceDependencies, sources);
+        if (!sourceDependenciesSchema.safeParse(dependencies).success)
+          return { status: "budget" as const };
         if (!(await lockContextSources(tx, snapshot.owner, dependencies)))
           return { status: "unavailable" as const };
         const parent = await lockOwnedConversation(
@@ -686,6 +691,12 @@ export function createConversationTurns(db: Database) {
           );
         if (!turn) return { status: "not_found" as const };
         if (turn.status !== "running") return { status: "conflict" as const };
+        // Text observed before a source was deleted must not be saved after the deletion.
+        const [context] = await tx
+          .select({ state: conversationContexts.state })
+          .from(conversationContexts)
+          .where(eq(conversationContexts.turnId, turn.id));
+        if (context?.state === "recovery") return { status: "conflict" as const };
         if (turn.checkpointVersion === expectedVersion + 1 && turn.runningText === text)
           return { status: "saved" as const, version: turn.checkpointVersion };
         if (turn.checkpointVersion !== expectedVersion) return { status: "conflict" as const };

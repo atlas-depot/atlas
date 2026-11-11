@@ -1356,3 +1356,31 @@ it("stops inheriting lineage at its cap instead of making the conversation unans
     .limit(1);
   expect(context!.sources).toHaveLength(400);
 });
+
+it("drops a running draft when its source is deleted and refuses a late checkpoint", async () => {
+  const f = await fixture();
+  const source = await f.note("Source", "CHECKPOINT-MARKER");
+  f.fake.observe(
+    f.result([source], [{ source: source.source, excerpt: source.text }], source.text),
+  );
+  await f.first.send(f.owner, f.id, randomUUID(), { text: "First" });
+  f.fake.observe({ status: "running", text: "A draft with CHECKPOINT-MARKER" });
+  await f.second.send(f.owner, f.id, randomUUID(), { text: "More on that?" });
+  const turns = createConversationTurns(database.db);
+  expect((await turns.dispatchState(f.owner, f.id))?.turn.runningText).toContain("MARKER");
+  await createNoteStore(database.db).delete(f.owner, source.noteId, source.revision);
+  const { turn } = (await turns.dispatchState(f.owner, f.id))!;
+  expect(turn.runningText).toBe("");
+  // A driver that read the runtime before the deletion reports its text afterwards.
+  expect(
+    await turns.checkpoint(
+      f.owner,
+      f.id,
+      turn.id,
+      turn.checkpointVersion,
+      "Late CHECKPOINT-MARKER",
+    ),
+  ).toEqual({ status: "conflict" });
+  await f.first.stop(f.owner, f.id);
+  expect((await f.history()).at(-1)).toMatchObject({ status: "incomplete", text: "" });
+});
