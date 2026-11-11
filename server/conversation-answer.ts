@@ -11,7 +11,8 @@ export type AnswerObservation =
   | { status: "running"; text: string }
   | { status: "result"; result: unknown; evidence: AnswerEvidence[] }
   | { status: "cancelled"; text: string }
-  | { status: "failed"; text: string };
+  | { status: "failed"; text: string }
+  | { status: "expired"; text: string };
 export type AnswerDelivery =
   | { status: "delivered"; sessionId: string; deliveryId: string }
   | { status: "expired" }

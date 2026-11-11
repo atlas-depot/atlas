@@ -4,6 +4,8 @@ import { openDatabase, readDatabaseUrl } from "../../server/db/connection.ts";
 import { createConversationCleanupStore } from "../../server/db/conversation-cleanup.ts";
 import { createConversationTurns } from "../../server/db/conversation-turns.ts";
 import { createDurableEveAnswerer } from "./answer-client.ts";
+import { createDurableEveCompactor } from "./context-client.ts";
+import { createConversationContextStore } from "../../server/db/conversation-contexts.ts";
 import { createOrganizerBackend } from "./backend.ts";
 
 /** Maintenance is explicit per environment; previews never sweep shared data by default. */
@@ -52,6 +54,13 @@ export async function reconcileConversationAnswers(environment: NodeJS.ProcessEn
     const result = await createConversationAnswers({
       turns: createConversationTurns(connection.db),
       cleanup: createConversationCleanupStore(connection.db),
+      contexts: createConversationContextStore(connection.db),
+      compactorFor: (baseUrl) =>
+        createDurableEveCompactor({
+          baseUrl,
+          serviceToken: serviceToken.data,
+          deploymentProtectionSecret: environment.VERCEL_AUTOMATION_BYPASS_SECRET,
+        }),
       runtimeUrl,
       runtimeFor: (baseUrl) =>
         createDurableEveAnswerer({

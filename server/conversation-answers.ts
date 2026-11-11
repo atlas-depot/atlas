@@ -8,6 +8,14 @@ import {
 } from "./conversation-answer.ts";
 import type { createConversationCleanupStore } from "./db/conversation-cleanup.ts";
 import type { createConversationTurns } from "./db/conversation-turns.ts";
+import type { createConversationContextStore } from "./db/conversation-contexts.ts";
+import {
+  byteSize,
+  composeContext,
+  CONTEXT_LIMITS,
+  mergeDependencies,
+  type ContextCompactor,
+} from "./conversation-context.ts";
 
 type Turns = ReturnType<typeof createConversationTurns>;
 type Cleanup = ReturnType<typeof createConversationCleanupStore>;
@@ -29,11 +37,23 @@ function finalization(observation: Exclude<AnswerObservation, { status: "running
     expectedVersion: turn.checkpointVersion,
   });
   if (observation.status === "cancelled") return incomplete("cancelled", observation.text);
-  if (observation.status === "failed") return incomplete("failed", observation.text);
+  if (observation.status === "failed" || observation.status === "expired")
+    return incomplete("failed", observation.text);
   const resolved = resolveAnswer(observation.result, observation.evidence);
   // An invented source or a malformed result is a failed attempt, never a published answer.
   return resolved.ok
-    ? { ...resolved.answer, expectedVersion: turn.checkpointVersion }
+    ? {
+        ...resolved.answer,
+        expectedVersion: turn.checkpointVersion,
+        provenanceComplete: true,
+        sourceDependencies: mergeDependencies(
+          turn.sourceDependencies,
+          observation.evidence.map(({ source }) => ({
+            noteId: source.noteId,
+            version: source.version,
+          })),
+        ),
+      }
     : incomplete("failed", "");
 }
 
@@ -47,12 +67,16 @@ export function createConversationAnswers({
   cleanup,
   runtimeUrl,
   runtimeFor,
+  contexts,
+  compactorFor,
 }: {
   turns: Turns;
   cleanup: Cleanup;
   /** Immutable deployment URL, stored with the attempt before any runtime call. */
   runtimeUrl: string;
   runtimeFor: (baseUrl: string) => AnswerRuntime;
+  contexts: ReturnType<typeof createConversationContextStore>;
+  compactorFor: (baseUrl: string) => ContextCompactor;
 }) {
   const fail = (owner: string, conversationId: string, turn: Turn) =>
     turns.finalize(owner, conversationId, turn.id, {
@@ -68,6 +92,119 @@ export function createConversationAnswers({
     const state = await turns.dispatchState(owner, conversationId);
     if (!state) return undefined;
     const { turn, inputs } = state;
+    let context;
+    try {
+      context = await contexts.prepare(owner, conversationId, turn.id, runtimeUrl);
+    } catch (error) {
+      if (!(error instanceof Error) || error.name !== "ZodError") throw error;
+      await contexts.recover(owner, conversationId, turn.id, "history_unavailable");
+    }
+    if (!context) {
+      const updated = await turns.dispatchState(owner, conversationId);
+      if (updated?.turn.contextRecovery) await fail(owner, conversationId, updated.turn);
+      return undefined;
+    }
+    if (context.state === "recovery") {
+      await contexts.recover(
+        owner,
+        conversationId,
+        turn.id,
+        turn.contextRecovery ?? "source_changed",
+      );
+      await fail(owner, conversationId, turn);
+      return undefined;
+    }
+    if (context.state === "summarizing") {
+      if (!(await contexts.summaryWindowOpen(context.operationId))) {
+        if (!(await contexts.recoverSummarizing(owner, conversationId, turn.id, "summary_failed")))
+          return { summaryPublished: true } as const;
+        await fail(owner, conversationId, turn);
+        return undefined;
+      }
+      const compactor = compactorFor(context.runtimeUrl);
+      const sessionId = context.sessionId ?? (await compactor.allocate(context.operationId));
+      if (!(await contexts.bindSummary(owner, context, sessionId))) return undefined;
+      let deliveryId = context.deliveryId;
+      if (!deliveryId) {
+        // The snapshot predates allocation. A deletion or edit since then must not place
+        // historical text in the new session.
+        if (!(await contexts.summaryAuthorized(sessionId))) {
+          if (
+            !(await contexts.recoverSummarizing(owner, conversationId, turn.id, "source_changed"))
+          )
+            return { summaryPublished: true } as const;
+          await fail(owner, conversationId, turn);
+          return undefined;
+        }
+        const receipt = await compactor.submit(
+          sessionId,
+          context.operationId,
+          context.summaryInput!,
+        );
+        if (receipt.status !== "delivered") {
+          if (
+            !(await contexts.recoverSummarizing(
+              owner,
+              conversationId,
+              turn.id,
+              receipt.status === "expired" ? "runtime_expired" : "context_budget",
+            ))
+          )
+            return { summaryPublished: true } as const;
+          await fail(owner, conversationId, turn);
+          return undefined;
+        }
+        deliveryId = receipt.deliveryId;
+        if (!(await contexts.bindSummary(owner, context, sessionId, deliveryId))) return undefined;
+      }
+      const observation = await compactor.inspect(sessionId, deliveryId);
+      if (observation.status === "running") {
+        await turns.touch(turn.id);
+        return undefined;
+      }
+      if (observation.status === "failed" || observation.status === "expired") {
+        if (
+          !(await contexts.recoverSummarizing(
+            owner,
+            conversationId,
+            turn.id,
+            observation.status === "expired" ? "runtime_expired" : "summary_failed",
+          ))
+        )
+          return { summaryPublished: true } as const;
+        await fail(owner, conversationId, turn);
+        return undefined;
+      }
+      if (!(await contexts.publishSummary(owner, context, observation.result))) {
+        // A concurrent reader may have published this summary first. Continue only when the
+        // durable context is ready; otherwise surface the concrete recovery state.
+        const latest = await contexts.prepare(owner, conversationId, turn.id, context.runtimeUrl);
+        if (latest?.state === "ready") return { summaryPublished: true } as const;
+        if (latest?.state === "recovery") {
+          await contexts.recover(owner, conversationId, turn.id, "source_changed");
+          await fail(owner, conversationId, turn);
+          return undefined;
+        }
+        const updated = await turns.dispatchState(owner, conversationId);
+        if (updated?.turn.contextRecovery) await fail(owner, conversationId, updated.turn);
+        return undefined;
+      }
+      // Continue the same attempt on the next bounded pass; never send an uncommitted summary.
+      return { summaryPublished: true } as const;
+    }
+    const opening = inputs.filter((input) => !input.steer).map((input) => input.text);
+    const question = composeContext(context.summary, context.recent, composeQuestion(opening));
+    if (
+      byteSize(question) +
+        inputs
+          .filter((input) => input.steer)
+          .reduce((size, input) => size + byteSize(input.text), 0) >
+      CONTEXT_LIMITS.promptBytes
+    ) {
+      await contexts.recover(owner, conversationId, turn.id, "context_budget");
+      await fail(owner, conversationId, turn);
+      return undefined;
+    }
     const runtime = runtimeFor(turn.runtimeUrl ?? runtimeUrl);
     // The attempt ID is the allocation and delivery key, so a crash at any step converges.
     if (!turn.allocationOperationId) {
@@ -85,9 +222,22 @@ export function createConversationAnswers({
     }
     let deliveryId = turn.deliveryId;
     if (!deliveryId) {
-      const opening = inputs.filter((input) => !input.steer).map((input) => input.text);
-      const receipt = await runtime.submit(sessionId, turn.id, composeQuestion(opening));
-      if (receipt.status !== "delivered") return void (await fail(owner, conversationId, turn));
+      // The snapshot predates allocation. A source deleted since then, even before the
+      // cleanup intent existed, must not have its derived context placed in the new session.
+      if (!(await turns.contextAuthorized(sessionId))) {
+        await contexts.recover(owner, conversationId, turn.id, "source_changed");
+        return void (await fail(owner, conversationId, turn));
+      }
+      const receipt = await runtime.submit(sessionId, turn.id, question);
+      if (receipt.status !== "delivered") {
+        await contexts.recover(
+          owner,
+          conversationId,
+          turn.id,
+          receipt.status === "expired" ? "runtime_expired" : "context_budget",
+        );
+        return void (await fail(owner, conversationId, turn));
+      }
       deliveryId = receipt.deliveryId;
       await turns.recordDelivery(owner, conversationId, turn.id, deliveryId);
     }
@@ -98,11 +248,28 @@ export function createConversationAnswers({
         continue;
       }
       const receipt = await runtime.steer(sessionId, input.id, input.text);
-      if (receipt.status !== "delivered") return void (await fail(owner, conversationId, turn));
+      if (receipt.status !== "delivered") {
+        await contexts.recover(
+          owner,
+          conversationId,
+          turn.id,
+          receipt.status === "expired" ? "runtime_expired" : "context_budget",
+        );
+        return void (await fail(owner, conversationId, turn));
+      }
       await turns.recordDelivery(owner, conversationId, turn.id, receipt.deliveryId, input.id);
       steerDeliveryIds.push(receipt.deliveryId);
     }
-    return { turn, runtime, sessionId, deliveryId, steerDeliveryIds };
+    return {
+      turn: {
+        ...turn,
+        sourceDependencies: mergeDependencies(turn.sourceDependencies, context.sources),
+      },
+      runtime,
+      sessionId,
+      deliveryId,
+      steerDeliveryIds,
+    };
   }
 
   /** One pass: start or continue the attempt, publish it if it ended, then take the queue. */
@@ -112,6 +279,7 @@ export function createConversationAnswers({
       if (next.status !== "busy" && next.status !== "started") return;
       const bound = await dispatch(owner, conversationId);
       if (!bound) return;
+      if ("summaryPublished" in bound) continue;
       const { turn, runtime, sessionId, deliveryId, steerDeliveryIds } = bound;
       const observation = await runtime.inspect(sessionId, { deliveryId, steerDeliveryIds });
       if (observation.status === "running") {
@@ -126,6 +294,8 @@ export function createConversationAnswers({
         else await turns.touch(turn.id);
         return;
       }
+      if (observation.status === "expired")
+        await contexts.recover(owner, conversationId, turn.id, "runtime_expired");
       await turns.finalize(owner, conversationId, turn.id, finalization(observation, turn));
     }
   }
@@ -148,21 +318,19 @@ export function createConversationAnswers({
       | "runtimeUrl"
       | "sessionId"
       | "attempts"
+      | "purpose"
     >,
   ) {
-    const runtime = runtimeFor(intent.runtimeUrl);
+    const runtime =
+      intent.purpose === "summary"
+        ? compactorFor(intent.runtimeUrl)
+        : runtimeFor(intent.runtimeUrl);
     try {
       let sessionId = intent.sessionId;
       if (!sessionId) {
         // Repeating the stable allocation returns the same session without starting a model.
         sessionId = await runtime.allocate(intent.allocationOperationId);
-        await cleanup.bindRuntime(
-          intent.ownerId,
-          intent.conversationId,
-          intent.allocationOperationId,
-          intent.allocationOperationId,
-          sessionId,
-        );
+        if (!(await cleanup.bindIntent(intent.allocationOperationId, sessionId))) return false;
       }
       await runtime.retire(sessionId);
       return await cleanup.confirmRetired(intent.allocationOperationId, sessionId);
@@ -202,19 +370,14 @@ export function createConversationAnswers({
 
     /** Cancels the active attempt and pauses the queue. Accepted inputs stay queued. */
     async stop(owner: string, conversationId: string) {
-      const active = (await turns.dispatchState(owner, conversationId))?.turn;
       const stopped = await turns.stop(owner, conversationId);
-      // Ending this attempt's session is what stops generation. A failure stays a
-      // retryable intent for maintenance and never undoes the stop.
-      if (stopped.status === "paused" && active?.allocationOperationId && active.runtimeUrl)
-        await retire({
-          ownerId: owner,
-          conversationId,
-          allocationOperationId: active.allocationOperationId,
-          runtimeUrl: active.runtimeUrl,
-          sessionId: active.sessionId,
-          attempts: 0,
-        }).catch(() => false);
+      if (stopped.status === "paused") {
+        const operations = [stopped.allocationOperationId, stopped.summaryOperationId].filter(
+          (id): id is string => id !== null,
+        );
+        for (const intent of await cleanup.retireExact(owner, conversationId, operations))
+          await retire(intent);
+      }
       return stopped;
     },
 

@@ -275,3 +275,35 @@ it("does not silently drop a malformed runtime cleanup identity", async () => {
   );
   expect(await f.intent()).toBeUndefined();
 });
+
+it("retires only the operations captured by stop, not newer summary work", async () => {
+  const f = await fixture();
+  expect(await f.prepare()).toMatchObject({ status: "prepared" });
+  await database.db.transaction((tx) =>
+    enqueueTurnCleanup(tx, f.owner, {
+      conversationId: f.id,
+      allocationOperationId: f.allocationOperationId,
+      runtimeUrl,
+      sessionId: "synthetic-session",
+    }),
+  );
+  expect(await f.intent()).toBeDefined();
+  const newer = randomUUID();
+  const future = new Date(Date.now() + 600_000).toISOString();
+  await database.db.insert(conversationCleanupIntents).values({
+    ownerId: f.owner,
+    conversationId: f.id,
+    allocationOperationId: newer,
+    runtimeUrl,
+    purpose: "summary",
+    retryAt: future,
+    lastFailureCode: "allocation_unknown",
+  });
+  const claimed = await f.cleanup.retireExact(f.owner, f.id, [f.allocationOperationId]);
+  expect(claimed.map((intent) => intent.allocationOperationId)).toEqual([f.allocationOperationId]);
+  const [untouched] = await database.db
+    .select()
+    .from(conversationCleanupIntents)
+    .where(eq(conversationCleanupIntents.allocationOperationId, newer));
+  expect(Date.parse(untouched!.retryAt)).toBeGreaterThan(Date.now() + 500_000);
+});

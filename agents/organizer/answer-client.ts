@@ -69,7 +69,7 @@ export function createDurableEveAnswerer(
           .snapshot({ signal: transport.timeout() });
         return observeAnswer(snapshot.events, deliveries);
       } catch (error) {
-        if (expired(error)) return { status: "failed", text: "" };
+        if (expired(error)) return { status: "expired", text: "" };
         throw new Error("Answer state could not be read. Existing work was not cancelled.");
       }
     },

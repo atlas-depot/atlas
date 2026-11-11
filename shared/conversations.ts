@@ -64,9 +64,23 @@ export const activeConversationTurnSchema = z.strictObject({
   checkpointVersion: z.number().int().nonnegative(),
   inputIds: conversationInputIdsSchema,
 });
+export const conversationRecoveryReasonSchema = z.enum([
+  "history_unavailable",
+  "context_budget",
+  "summary_failed",
+  "source_changed",
+  "runtime_expired",
+]);
 export const conversationReadSchema = z.strictObject({
   conversation: conversationSchema,
   activeTurn: activeConversationTurnSchema.nullable(),
+  recovery: z
+    .strictObject({
+      turnId: conversationIdSchema,
+      reason: conversationRecoveryReasonSchema,
+    })
+    .nullable()
+    .default(null),
 });
 export const conversationListSchema = z.strictObject({
   conversations: z.array(conversationSchema),
@@ -86,6 +100,7 @@ export const conversationSendSchema = z.strictObject({
   message: conversationMessageSchema,
   conversation: conversationSchema,
   activeTurn: activeConversationTurnSchema.nullable(),
+  recovery: conversationReadSchema.shape.recovery,
 });
 export const conversationPageSchema = z.strictObject({
   limit: z.coerce.number().int().min(1).max(100).default(50),

@@ -1,4 +1,4 @@
-import { and, asc, eq, lte, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, lte, sql } from "drizzle-orm";
 import { z } from "zod";
 import { noteTextSchema } from "../../shared/document.ts";
 import { indexRuntimeUrlSchema } from "../../shared/index-jobs.ts";
@@ -60,11 +60,60 @@ export async function enqueueConversationCleanup(
     .from(conversationTurns)
     .where(eq(conversationTurns.conversationId, conversationId));
   for (const turn of turns) await enqueueTurnCleanup(tx, ownerId, turn);
+  await tx
+    .update(conversationCleanupIntents)
+    .set({ retryAt: sql`now()` })
+    .where(
+      and(
+        eq(conversationCleanupIntents.ownerId, ownerId),
+        eq(conversationCleanupIntents.conversationId, conversationId),
+      ),
+    );
 }
 
 /** Internal runtime bookkeeping. No method performs or claims an external retirement itself. */
 export function createConversationCleanupStore(db: Database) {
   return {
+    /** Stop retires only the sessions captured for its active attempt, never newer work. */
+    async retireExact(owner: string, conversationId: string, operations: readonly string[]) {
+      const ids = operations.map((id) => uuidSchema.parse(id));
+      if (ids.length === 0) return [];
+      const scope = and(
+        eq(conversationCleanupIntents.ownerId, owner),
+        eq(conversationCleanupIntents.conversationId, conversationId),
+        inArray(conversationCleanupIntents.allocationOperationId, ids),
+      );
+      await db
+        .update(conversationCleanupIntents)
+        .set({ retryAt: sql`now()` })
+        .where(scope);
+      return db
+        .select()
+        .from(conversationCleanupIntents)
+        .where(scope)
+        .orderBy(
+          asc(conversationCleanupIntents.retryAt),
+          asc(conversationCleanupIntents.allocationOperationId),
+        )
+        .limit(100);
+    },
+    /** Late receipts can only bind an existing intent, never recreate conversation data. */
+    async bindIntent(allocationOperationId: string, sessionId: string) {
+      const bound = await db
+        .update(conversationCleanupIntents)
+        .set({ sessionId: identitySchema.parse(sessionId), lastFailureCode: null })
+        .where(
+          and(
+            eq(
+              conversationCleanupIntents.allocationOperationId,
+              uuidSchema.parse(allocationOperationId),
+            ),
+            sql`(${conversationCleanupIntents.sessionId} IS NULL OR ${conversationCleanupIntents.sessionId} = ${sessionId})`,
+          ),
+        )
+        .returning();
+      return bound.length === 1;
+    },
     async prepareRuntime(
       ownerId: string,
       conversationId: string,

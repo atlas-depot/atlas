@@ -1,0 +1,23 @@
+{
+  "description": "Synthetic follow-up, expired-runtime and deleted-source cases for conversation context. Text is not private data.",
+  "followUp": {
+    "question": "Where does the garden club meet?",
+    "next": "What time was that again?"
+  },
+  "expiredRuntime": {
+    "question": "Summarize the picnic plan.",
+    "partial": "PARTIAL-PICNIC-DRAFT the picnic starts at",
+    "next": "And who brings the lemonade?"
+  },
+  "deletedSource": {
+    "title": "Garden club",
+    "content": "SYNTHETIC-FERN-MARKER-4821 The garden club meets in the greenhouse.",
+    "question": "Where does the garden club meet?",
+    "next": "Is that place heated?"
+  },
+  "expected": [
+    "a follow-up prompt carries earlier eligible messages; a failed or cancelled partial answer is never among them",
+    "a confirmed runtime expiry is a visible recovery that pauses the queue; nothing is replaced without the user",
+    "after the source note is deleted, its marker stays in the delivered answer but leaves every saved summary and later prompt"
+  ]
+}
