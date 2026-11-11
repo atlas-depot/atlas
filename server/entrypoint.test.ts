@@ -35,8 +35,7 @@ async function startApi(overrides: Record<string, string | undefined> = {}) {
   });
   return new Promise<string>((resolve, reject) => {
     let output = "";
-    // Full-suite load can delay the child process; keep the integration check from racing it.
-    const deadline = setTimeout(() => reject(new Error("API startup timed out.")), 15_000);
+    const deadline = setTimeout(() => reject(new Error("API startup timed out.")), 5_000);
     child.once("error", (error) => {
       clearTimeout(deadline);
       reject(error);
@@ -86,7 +85,7 @@ it("serves health and protects API routes through the real Node entrypoint and V
     expect(response.headers.get("WWW-Authenticate")).toBe('Bearer realm="atlas"');
     expect(await response.json()).toMatchObject({ error: { code: "UNAUTHENTICATED" } });
   }
-}, 60_000);
+}, 20_000);
 
 it("serves browser login and session routes through the real Node entrypoint", async () => {
   const appOrigin = "http://127.0.0.1:5177";
@@ -133,7 +132,7 @@ it("serves browser login and session routes through the real Node entrypoint", a
   });
   expect(missingOrigin.status).toBe(403);
   await missingOrigin.arrayBuffer();
-}, 60_000);
+}, 20_000);
 
 it("rejects invalid startup configuration with safe diagnostics", async () => {
   const result: unknown = await promisify(execFile)(process.execPath, ["server/index.ts"], {
@@ -147,7 +146,7 @@ it("rejects invalid startup configuration with safe diagnostics", async () => {
     stderr: expect.stringContaining("API_PORT"),
   });
   expect(result).toMatchObject({ stderr: expect.not.stringContaining("SYNTHETIC_SECRET") });
-}, 60_000);
+});
 
 it("builds the frontend even when backend port configuration is invalid", async () => {
   const output = await mkdtemp(join(tmpdir(), "atlas-build-"));
@@ -155,7 +154,7 @@ it("builds the frontend even when backend port configuration is invalid", async 
   await promisify(execFile)(
     process.execPath,
     ["node_modules/vite-plus/bin/vp", "build", "--outDir", output],
-    { cwd: root, env: { ...process.env, API_PORT: "invalid", VITEST: "" }, timeout: 60_000 },
+    { cwd: root, env: { ...process.env, API_PORT: "invalid", VITEST: "" }, timeout: 20_000 },
   );
   expect(await readFile(join(output, "index.html"), "utf8")).toContain('type="module"');
-}, 70_000);
+}, 30_000);
