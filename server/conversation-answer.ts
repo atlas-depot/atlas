@@ -14,7 +14,9 @@ export type AnswerObservation =
   | { status: "failed"; text: string };
 export type AnswerDelivery =
   | { status: "delivered"; sessionId: string; deliveryId: string }
-  | { status: "expired" };
+  | { status: "expired" }
+  /** The runtime refused the input, for example as too large. It must not be resent. */
+  | { status: "rejected" };
 /** The private runtime as the API sees it. Every call is short and safe to repeat. */
 export type AnswerRuntime = {
   allocate(operationId: string): Promise<string>;

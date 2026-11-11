@@ -45,6 +45,11 @@ const inputSchema = z.strictObject({
 /** One owner may hold this many running answers across all conversations. */
 export const MAX_RUNNING_TURNS_PER_OWNER = 3;
 const MAX_TURN_INPUTS = 100;
+/**
+ * UTF-8 bytes of input text one answer may combine. JSON escaping can expand text up to six
+ * times, so this keeps the request well under the private runtime's 4.5 MB body limit.
+ */
+export const MAX_TURN_INPUT_BYTES = 500_000;
 const attemptSchema = z.strictObject({
   inputIds: conversationInputIdsSchema,
   retryOfId: conversationIdSchema.optional(),
@@ -58,6 +63,19 @@ async function turnInputs(tx: ConversationTransaction, turnId: string) {
       .where(eq(conversationTurnInputs.turnId, turnId))
       .orderBy(asc(conversationTurnInputs.ordinal))
   ).map((row) => row.messageId);
+}
+
+/** Call with the conversation lock held, immediately before inserting a running attempt. */
+async function ownerAtCapacity(tx: ConversationTransaction, owner: string) {
+  // Serialize the owner-wide count across conversations and API processes.
+  await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtextextended(${owner}, 71))`);
+  const active = await tx
+    .select({ id: conversationTurns.id })
+    .from(conversationTurns)
+    .innerJoin(conversations, eq(conversations.id, conversationTurns.conversationId))
+    .where(and(eq(conversations.ownerId, owner), eq(conversationTurns.status, "running")))
+    .limit(MAX_RUNNING_TURNS_PER_OWNER);
+  return active.length >= MAX_RUNNING_TURNS_PER_OWNER;
 }
 
 /** Internal persistence only. Callers execute models after durable admission/runtime binding. */
@@ -194,20 +212,26 @@ export function createConversationTurns(db: Database) {
           );
         if (running) return { status: "busy" as const, turn: running };
         if (parent.queuePaused) return { status: "paused" as const };
-        const pending = await unconsumedInputs(tx, parent.id)
+        const waiting = await tx
+          .select({
+            id: conversationMessages.id,
+            bytes: sql<number>`octet_length(${conversationMessages.text})`.mapWith(Number),
+          })
+          .from(conversationMessages)
+          .where(inArray(conversationMessages.id, unconsumedInputs(tx, parent.id)))
           .orderBy(asc(conversationMessages.sequence))
           .limit(MAX_TURN_INPUTS);
-        if (pending.length === 0) return { status: "idle" as const };
-        // Serialize the owner-wide count across conversations and API processes.
-        await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtextextended(${owner}, 71))`);
-        const active = await tx
-          .select({ id: conversationTurns.id })
-          .from(conversationTurns)
-          .innerJoin(conversations, eq(conversations.id, conversationTurns.conversationId))
-          .where(and(eq(conversations.ownerId, owner), eq(conversationTurns.status, "running")))
-          .limit(MAX_RUNNING_TURNS_PER_OWNER);
-        if (active.length >= MAX_RUNNING_TURNS_PER_OWNER) return { status: "owner_busy" as const };
-        const inputIds = pending.map((message) => message.id);
+        if (waiting.length === 0) return { status: "idle" as const };
+        if (await ownerAtCapacity(tx, owner)) return { status: "owner_busy" as const };
+        // One answer is one runtime request. Take inputs in order while they fit; the first
+        // always fits on its own, and the rest stay queued for the next answer.
+        const inputIds: string[] = [];
+        let bytes = 0;
+        for (const input of waiting) {
+          bytes += input.bytes;
+          if (inputIds.length > 0 && bytes > MAX_TURN_INPUT_BYTES) break;
+          inputIds.push(input.id);
+        }
         const [turn] = await tx
           .insert(conversationTurns)
           .values({
@@ -495,6 +519,8 @@ export function createConversationTurns(db: Database) {
             );
           if (consumed.length) return { status: "conflict" as const };
         }
+        // A retry is a running answer like any other and counts against the owner's cap.
+        if (await ownerAtCapacity(tx, owner)) return { status: "owner_busy" as const };
         const [turn] = await tx
           .insert(conversationTurns)
           .values({

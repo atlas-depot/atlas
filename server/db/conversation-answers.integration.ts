@@ -469,3 +469,66 @@ it("starts an accepted conversation in maintenance once its owner has a free slo
   expect(f.fake.calls.submit.filter((call) => call.message === delayed!.id)).toHaveLength(1);
   expect(await active(paused!.id)).toBeNull();
 });
+
+it("keeps one answer's combined input within the runtime request limit and fails a refused delivery once", async () => {
+  const f = await fixture();
+  const turns = createConversationTurns(database.db);
+  await turns.stop(f.owner, f.id);
+  const large = "\u754c".repeat(100_000);
+  const ids: string[] = [];
+  for (let index = 0; index < 3; index++) {
+    const accepted = await turns.acceptInput(f.owner, f.id, randomUUID(), { text: large });
+    if (accepted.status !== "saved") throw new Error("Input not saved");
+    ids.push(accepted.value.id);
+  }
+  await turns.resume(f.owner, f.id);
+  // Each input is 300,000 bytes: two together would exceed the bound, so they go one by one.
+  expect(await turns.startNext(f.owner, f.id)).toMatchObject({ status: "started" });
+  expect(await f.store.read(f.owner, f.id)).toMatchObject({ activeTurn: { inputIds: [ids[0]] } });
+
+  f.fake.runtime.submit = async (sessionId, key, message) => {
+    f.fake.calls.submit.push({ sessionId, key, message });
+    return { status: "rejected" };
+  };
+  await f.first.refresh(f.owner, f.id);
+  expect((await f.history()).find((message) => message.role === "assistant")).toMatchObject({
+    status: "incomplete",
+    reason: "failed",
+    inputIds: [ids[0]],
+  });
+  // The refused attempt ended. Its input is never resent; the next read takes the next one.
+  await f.first.refresh(f.owner, f.id);
+  expect(f.fake.calls.submit).toHaveLength(2);
+  expect(new Set(f.fake.calls.submit.map((call) => call.key)).size).toBe(2);
+  expect((await f.history()).filter((message) => message.role === "assistant")).toMatchObject([
+    { inputIds: [ids[0]] },
+    { inputIds: [ids[1]] },
+  ]);
+});
+
+it("counts an explicit retry against the owner's running answers", async () => {
+  const f = await fixture();
+  const turns = createConversationTurns(database.db);
+  await turns.acceptInput(f.owner, f.id, randomUUID(), { text: "Question" });
+  await turns.startNext(f.owner, f.id);
+  const stopped = await turns.stop(f.owner, f.id);
+  if (stopped.status !== "paused" || stopped.message?.role !== "assistant")
+    throw new Error("Nothing stopped");
+  await turns.resume(f.owner, f.id);
+  const others = await database.db
+    .insert(conversations)
+    .values([1, 2, 3].map(() => ({ ownerId: f.owner })))
+    .returning();
+  for (const other of others) {
+    await turns.acceptInput(f.owner, other.id, randomUUID(), { text: "Question" });
+    expect((await turns.startNext(f.owner, other.id)).status).toBe("started");
+  }
+  const key = randomUUID();
+  expect(await f.first.retry(f.owner, f.id, stopped.message.turnId, key)).toEqual({
+    status: "owner_busy",
+  });
+  await turns.stop(f.owner, others[0]!.id);
+  expect(await f.first.retry(f.owner, f.id, stopped.message.turnId, key)).toMatchObject({
+    status: "saved",
+  });
+});

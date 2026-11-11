@@ -11,6 +11,7 @@ import {
   createEveTransport,
   expired,
   ExpiredSubmission,
+  RejectedSubmission,
   sessionIdSchema,
   type EveTransportOptions,
 } from "./eve-transport.ts";
@@ -30,6 +31,7 @@ export function createDurableEveAnswerer(
       return { status: "delivered" as const, ...(await transport.deliver(sessionId, body)) };
     } catch (error) {
       if (error instanceof ExpiredSubmission) return { status: "expired" as const };
+      if (error instanceof RejectedSubmission) return { status: "rejected" as const };
       throw new Error("Answer delivery is unconfirmed. Retry the same fixed session only.");
     }
   };

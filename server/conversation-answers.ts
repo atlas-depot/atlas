@@ -87,7 +87,7 @@ export function createConversationAnswers({
     if (!deliveryId) {
       const opening = inputs.filter((input) => !input.steer).map((input) => input.text);
       const receipt = await runtime.submit(sessionId, turn.id, composeQuestion(opening));
-      if (receipt.status === "expired") return void (await fail(owner, conversationId, turn));
+      if (receipt.status !== "delivered") return void (await fail(owner, conversationId, turn));
       deliveryId = receipt.deliveryId;
       await turns.recordDelivery(owner, conversationId, turn.id, deliveryId);
     }
@@ -98,7 +98,7 @@ export function createConversationAnswers({
         continue;
       }
       const receipt = await runtime.steer(sessionId, input.id, input.text);
-      if (receipt.status === "expired") return void (await fail(owner, conversationId, turn));
+      if (receipt.status !== "delivered") return void (await fail(owner, conversationId, turn));
       await turns.recordDelivery(owner, conversationId, turn.id, receipt.deliveryId, input.id);
       steerDeliveryIds.push(receipt.deliveryId);
     }

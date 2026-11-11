@@ -231,6 +231,17 @@ await test("an expired fixed session is reported and never replaced", async () =
   });
 });
 
+await test("an input the runtime refuses for its size is reported as rejected, not retried blindly", async () => {
+  const adapter = createDurableEveAnswerer({
+    baseUrl: "https://organizer.example.com",
+    serviceToken,
+    fetchImpl: async () => new Response("Request Entity Too Large", { status: 413 }),
+  });
+  assert.deepEqual(await adapter.submit("session-1", "turn-key", "Question"), {
+    status: "rejected",
+  });
+});
+
 await test("note search takes its owner from the bound session and refuses an unbound one", async () => {
   const searched: string[] = [];
   const dependencies = {

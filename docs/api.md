@@ -91,7 +91,8 @@ versions are marked stale. No previous full note revision is archived.
 
 Sending a message accepts one input and returns before the answer exists. `policy` is
 `queue` (default) or `steer`. A queued input waits for the running answer. Up to 100 waiting inputs
-can be answered together; any beyond that stay queued for the next answer. The answer lists
+and 500,000 UTF-8 bytes of their text can be answered together; any beyond that stay queued
+for the next answer. The answer lists
 every input it consumed. A
 steer joins the running answer and redirects it; with no answer running it starts one. A
 steer is never turned into a queued message: when the running answer cannot take it the
@@ -99,7 +100,7 @@ request returns `409`. Repeat an uncertain send with the same key and body. It r
 same message and may continue its accepted work. A changed body returns `409`.
 
 Each owner may send 20 new messages in any 60 seconds. New queued attempts wait while three
-answers are running for that owner. Explicit retries are exempt from this concurrency limit.
+answers are running for that owner. An explicit retry counts as a running answer too: above the limit it returns `409`.
 Above the first limit the request returns `429 RATE_LIMITED` with `Retry-After`; a replay is
 not counted. Once a slot opens, a read or the maintenance sweep can start the queued work.
 

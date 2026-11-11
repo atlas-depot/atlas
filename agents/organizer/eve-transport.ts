@@ -11,6 +11,8 @@ export type SessionReader = Pick<ClientSession, "snapshot" | "end">;
 export type ReaderClient = { sessions: { attach(sessionId: string): SessionReader } };
 /** The fixed session can no longer accept input. Never answered by starting a replacement. */
 export class ExpiredSubmission extends Error {}
+/** The runtime refused this input outright. Sending it again cannot succeed. */
+export class RejectedSubmission extends Error {}
 
 export type EveTransportOptions = {
   /** Use an immutable deployment URL for work that must survive a later deployment. */
@@ -96,6 +98,8 @@ export function createEveTransport({
           throw new ExpiredSubmission();
       }
       await response.body?.cancel();
+      // Repeating a request the runtime refuses for its size can never succeed.
+      if (response.status === 413) throw new RejectedSubmission();
       throw new Error();
     }
     return await response.json();

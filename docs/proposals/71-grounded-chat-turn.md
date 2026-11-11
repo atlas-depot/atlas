@@ -62,4 +62,3 @@ its inputs and records every consumed input on that one answer.
 - A paid provider call can repeat when a runtime step is replayed. Atlas publishes one answer.
 - Retirement of a session is confirmed from its history. An unconfirmed end stays a
   retryable cleanup intent.
-- An explicit retry is not counted against the three running answers per owner.
