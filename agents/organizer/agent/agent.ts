@@ -2,6 +2,7 @@ import { createOpenRouter } from "@openrouter/ai-sdk-provider";
 import { defineAgent } from "eve";
 import { readConfig } from "../config.ts";
 import { wrapLanguageModel } from "ai";
+import { preserveCompactionFacts } from "../compaction-policy.ts";
 import { contextBudget } from "../context-budget.ts";
 import { defineDynamic } from "eve/models";
 import { isChatSession, isContextSession } from "../job.ts";
@@ -16,7 +17,10 @@ export default defineAgent({
   model: defineDynamic((ctx) => {
     const model = provider(config.ORGANIZER_MODEL, { maxTokens: 16_384 });
     if (!isChatSession(ctx.session) && !isContextSession(ctx.session))
-      return { model, modelContextWindowTokens: config.ORGANIZER_CONTEXT_TOKENS };
+      return {
+        model: wrapLanguageModel({ model, middleware: preserveCompactionFacts() }),
+        modelContextWindowTokens: config.ORGANIZER_CONTEXT_TOKENS,
+      };
     // The provider boundary also covers eve's automatic compaction and provider retries.
     const withDatabase = async <T>(
       run: (db: ReturnType<typeof openDatabase>["db"]) => Promise<T>,
@@ -33,20 +37,23 @@ export default defineAgent({
     };
     const guarded = wrapLanguageModel({
       model,
-      middleware: contextBudget(
-        config.ORGANIZER_CONTEXT_TOKENS,
-        () =>
-          withDatabase((db) =>
-            isChatSession(ctx.session)
-              ? createConversationTurns(db).contextAuthorized(ctx.session.id)
-              : createConversationContextStore(db).summaryAuthorized(ctx.session.id),
-          ),
-        // A summary that runs over budget already ends as summary_failed.
-        () =>
-          withDatabase((db) =>
-            createConversationContextStore(db).recoverBySession(ctx.session.id, "context_budget"),
-          ),
-      ),
+      middleware: [
+        preserveCompactionFacts(),
+        contextBudget(
+          config.ORGANIZER_CONTEXT_TOKENS,
+          () =>
+            withDatabase((db) =>
+              isChatSession(ctx.session)
+                ? createConversationTurns(db).contextAuthorized(ctx.session.id)
+                : createConversationContextStore(db).summaryAuthorized(ctx.session.id),
+            ),
+          // A summary that runs over budget already ends as summary_failed.
+          () =>
+            withDatabase((db) =>
+              createConversationContextStore(db).recoverBySession(ctx.session.id, "context_budget"),
+            ),
+        ),
+      ],
     });
     return { model: guarded, modelContextWindowTokens: config.ORGANIZER_CONTEXT_TOKENS };
   }),
