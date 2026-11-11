@@ -190,6 +190,11 @@ export function finalizeConversationTurn(db: ReturnType<typeof openDatabase>["db
             contextRecovery: sql`coalesce(${conversationTurns.contextRecovery}, 'source_changed')`,
           })
           .where(eq(conversationTurns.id, turn.id));
+        // Recovery pauses the queue like Stop, so it stays visible until the user acts.
+        await tx
+          .update(conversations)
+          .set({ queuePaused: true })
+          .where(eq(conversations.id, parent.id));
         await publishConversationAnswer(tx, parent, turn, {
           status: "incomplete",
           reason: "failed",

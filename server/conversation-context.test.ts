@@ -1,9 +1,12 @@
 import { describe, expect, it } from "vite-plus/test";
 import {
   byteSize,
+  compactionInput,
   composeContext,
+  CONTEXT_LIMITS,
   mergeDependencies,
   splitContext,
+  summaryOutputSchema,
   summaryResultSchema,
 } from "./conversation-context.ts";
 
@@ -43,10 +46,45 @@ describe("bounded conversation context", () => {
     const b = { ...a, version: "revision-2" };
     expect(mergeDependencies([a], [a, b])).toEqual([a, b]);
   });
+  it("compacts the newest older messages that fit and leaves whole earlier ones out", () => {
+    const older = [1, 2, 3].map((sequence) => ({
+      id: String(sequence),
+      sequence,
+      role: "user" as const,
+      text: "a".repeat(20_000),
+    }));
+    const input = compactionInput("Earlier summary", older)!;
+    expect(byteSize(input)).toBeLessThanOrEqual(CONTEXT_LIMITS.reconstructionBytes);
+    expect(JSON.parse(input)).toEqual({
+      previousSummary: "Earlier summary",
+      messages: [older[1], older[2]],
+    });
+    expect(compactionInput("Earlier summary", [])).toBeNull();
+  });
   it("separates historical context from the unchanged current question", () => {
     expect(composeContext(null, [], "What now?")).toBe("What now?");
     expect(composeContext("Older decisions", [], "What now?")).toBe(
       'Conversation context (historical, not current source evidence):\n{"summary":"Older decisions","recent":[]}\n\nCurrent question:\nWhat now?',
     );
+  });
+  it("accepts every summary length the runtime schema allows, in any script", () => {
+    const length = summaryOutputSchema.properties.summary.maxLength;
+    for (const letter of ["a", "ğ", "漢"])
+      expect(summaryResultSchema.safeParse({ summary: letter.repeat(length) }).success).toBe(true);
+  });
+  it("compacts the newest older messages that fit and leaves earlier ones out whole", () => {
+    const older = [1, 2, 3, 4].map((sequence) => ({
+      id: String(sequence),
+      sequence,
+      role: "assistant" as const,
+      text: `m${sequence} ${"a".repeat(20_000)}`,
+    }));
+    const input = compactionInput("Earlier summary.", older)!;
+    expect(byteSize(input)).toBeLessThanOrEqual(CONTEXT_LIMITS.reconstructionBytes);
+    expect(JSON.parse(input)).toEqual({
+      previousSummary: "Earlier summary.",
+      messages: older.slice(2),
+    });
+    expect(compactionInput(null, [])).toBeNull();
   });
 });

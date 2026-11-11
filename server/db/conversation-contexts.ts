@@ -1,15 +1,16 @@
 import { randomUUID } from "node:crypto";
-import { and, asc, eq, gt, inArray, lte, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, inArray, lte, sql } from "drizzle-orm";
 import { z } from "zod";
 import {
   byteSize,
+  compactionInput,
   compactionInputSchema,
   contextMessagesSchema,
   CONTEXT_LIMITS,
-  mergeDependencies,
   sourceDependenciesSchema,
   splitContext,
   summaryResultSchema,
+  unionDependencies,
   type ContextMessage,
   type ContextRecovery,
   type SourceDependency,
@@ -50,7 +51,9 @@ export async function lockContextSources(
 }
 
 /** Note mutations already hold the source lock. Preserve UI answers, erase derived context. */
-export async function invalidateSourceContext(tx: ConversationTransaction, noteId: string) {
+export async function invalidateSourceContext(tx: ConversationTransaction, id: string) {
+  // Lineage stores the database's lowercase form. A route accepts any letter case.
+  const noteId = id.toLowerCase();
   const affected = sql`${conversationContexts.sources} @> ${JSON.stringify([{ noteId }])}::jsonb`;
   const rows = await tx
     .select({
@@ -123,7 +126,7 @@ export function createConversationContextStore(db: Database) {
     return db.transaction(async (tx) => {
       const parent = await lockOwnedConversation(tx, owner, conversationId);
       if (!parent) return;
-      await tx
+      const marked = await tx
         .update(conversationTurns)
         .set({ contextRecovery: sql`coalesce(${conversationTurns.contextRecovery}, ${code})` })
         .where(
@@ -132,7 +135,15 @@ export function createConversationContextStore(db: Database) {
             eq(conversationTurns.conversationId, parent.id),
             eq(conversationTurns.status, "running"),
           ),
-        );
+        )
+        .returning({ id: conversationTurns.id });
+      // Like Stop: queued inputs wait for an explicit resume, so the recovery stays the
+      // latest outcome and the queue cannot drain into repeated failures.
+      if (marked.length)
+        await tx
+          .update(conversations)
+          .set({ queuePaused: true })
+          .where(eq(conversations.id, parent.id));
       const [context] = await tx
         .update(conversationContexts)
         .set({ state: "recovery", summary: null, summaryInput: null, recent: [] })
@@ -188,7 +199,10 @@ export function createConversationContextStore(db: Database) {
             eq(conversationContexts.sessionId, sessionId),
             eq(conversationContexts.state, "summarizing"),
             eq(conversationTurns.status, "running"),
+            // The retry time doubles as the execution deadline only until the first cleanup
+            // attempt. A failed retirement moves it forward and must not reopen the window.
             gt(conversationCleanupIntents.retryAt, sql`now()`),
+            eq(conversationCleanupIntents.attempts, 0),
           ),
         )
         .limit(2);
@@ -238,22 +252,27 @@ export function createConversationContextStore(db: Database) {
         return undefined;
       }
       const after = checkpoint?.throughSequence ?? 0;
-      const rows = await db
-        .select({ message: conversationMessages, turn: conversationTurns })
-        .from(conversationMessages)
-        .leftJoin(conversationTurns, eq(conversationTurns.id, conversationMessages.turnId))
-        .where(
-          and(
-            eq(conversationMessages.conversationId, conversationId),
-            gt(conversationMessages.sequence, after),
-            lte(conversationMessages.sequence, parent.nextSequence - 1),
-          ),
-        )
-        .orderBy(asc(conversationMessages.sequence))
-        .limit(CONTEXT_LIMITS.historyMessages + 1);
+      // Only the newest bounded window is read. Unsummarized history before it is left out of
+      // model context, so losing a checkpoint in a long conversation stays recoverable.
+      const rows = (
+        await db
+          .select({ message: conversationMessages, turn: conversationTurns })
+          .from(conversationMessages)
+          .leftJoin(conversationTurns, eq(conversationTurns.id, conversationMessages.turnId))
+          .where(
+            and(
+              eq(conversationMessages.conversationId, conversationId),
+              gt(conversationMessages.sequence, after),
+              lte(conversationMessages.sequence, parent.nextSequence - 1),
+            ),
+          )
+          .orderBy(desc(conversationMessages.sequence))
+          .limit(CONTEXT_LIMITS.historyMessages)
+      ).reverse();
+      const first = rows[0]?.message.sequence ?? after + 1;
       if (
-        rows.length > CONTEXT_LIMITS.historyMessages ||
-        rows.some(({ message }, i) => message.sequence !== after + i + 1) ||
+        (rows.length < CONTEXT_LIMITS.historyMessages && first !== after + 1) ||
+        rows.some(({ message }, i) => message.sequence !== first + i) ||
         (rows.at(-1)?.message.sequence ?? after) !== parent.nextSequence - 1
       ) {
         await recover(owner, conversationId, turnId, "history_unavailable");
@@ -282,10 +301,7 @@ export function createConversationContextStore(db: Database) {
       }
       rows.unshift(...deferred);
       rows.sort((a, b) => a.message.sequence - b.message.sequence);
-      if (rows.length > CONTEXT_LIMITS.historyMessages) {
-        await recover(owner, conversationId, turnId, "history_unavailable");
-        return undefined;
-      }
+      rows.splice(0, Math.max(0, rows.length - CONTEXT_LIMITS.historyMessages));
       const consumed = await db
         .select({ id: conversationTurnInputs.messageId })
         .from(conversationTurnInputs)
@@ -305,7 +321,7 @@ export function createConversationContextStore(db: Database) {
         .from(conversationTurnInputs)
         .where(eq(conversationTurnInputs.turnId, turnId));
       const currentIds = new Set(currentInputs.map(({ id }) => id));
-      const dependencies = mergeDependencies(
+      const dependencies = unionDependencies(
         checkpoint?.sources ?? [],
         ...rows.flatMap(({ turn }) =>
           turn?.provenanceComplete ? [sourceDependenciesSchema.parse(turn.sourceDependencies)] : [],
@@ -318,10 +334,7 @@ export function createConversationContextStore(db: Database) {
             .where(
               and(
                 eq(notes.ownerId, owner),
-                inArray(
-                  notes.id,
-                  dependencies.map(({ noteId }) => noteId),
-                ),
+                inArray(notes.id, [...new Set(dependencies.map(({ noteId }) => noteId))]),
               ),
             )
         : [];
@@ -351,19 +364,24 @@ export function createConversationContextStore(db: Database) {
             return undefined;
           }
           if (turn.status === "incomplete") continue;
-          if (!turn.provenanceComplete) {
-            await recover(owner, conversationId, turnId, "history_unavailable");
-            return undefined;
-          }
+          // Unknown lineage cannot be proven safe, so the answer is never model context.
+          if (!turn.provenanceComplete) continue;
           if (!eligible(turn.sourceDependencies)) continue;
-          sources = mergeDependencies(sources, turn.sourceDependencies);
         }
-        selected.push({
+        const entry = {
           id: message.id,
           sequence: message.sequence,
           role: message.role,
           text: message.text,
-        });
+        };
+        // It stays in UI history. Skipping it lets the smaller messages around it be compacted.
+        if (byteSize(entry) > CONTEXT_LIMITS.messageBytes) continue;
+        if (turn && message.role === "assistant") {
+          const inherited = unionDependencies(sources, turn.sourceDependencies);
+          if (inherited.length > CONTEXT_LIMITS.inheritedSources) continue;
+          sources = inherited;
+        }
+        selected.push(entry);
       }
       const { older, recent } = splitContext(selected);
       contextMessagesSchema.parse(selected);
@@ -379,13 +397,7 @@ export function createConversationContextStore(db: Database) {
             message.sequence <= throughSequence,
         )
         .map(({ message }) => message.id);
-      const summaryInput = older.length
-        ? JSON.stringify({ previousSummary: checkpoint?.text ?? null, messages: older })
-        : null;
-      if (summaryInput && byteSize(summaryInput) > CONTEXT_LIMITS.reconstructionBytes) {
-        await recover(owner, conversationId, turnId, "context_budget");
-        return undefined;
-      }
+      const summaryInput = compactionInput(checkpoint?.text ?? null, older);
       return db.transaction(async (tx) => {
         if (!(await lockContextSources(tx, owner, sources))) return undefined;
         const locked = await lockOwnedConversation(tx, owner, conversationId);

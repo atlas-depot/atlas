@@ -617,6 +617,15 @@ export function createConversationTurns(db: Database) {
         }
         // A retry is a running answer like any other and counts against the owner's cap.
         if (await ownerAtCapacity(tx, owner)) return { status: "owner_busy" as const };
+        // It can also start a summary, so it spends the same send budget as a new message.
+        if (input.retryOfId) {
+          const admission = await admitConversationInput(tx, owner);
+          if (!admission.allowed)
+            return {
+              status: "rate_limited" as const,
+              retryAfterSeconds: admission.retryAfterSeconds,
+            };
+        }
         const [turn] = await tx
           .insert(conversationTurns)
           .values({

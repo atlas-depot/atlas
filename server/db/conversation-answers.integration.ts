@@ -31,6 +31,16 @@ const malicious = JSON.parse(
     "utf8",
   ),
 ) as { title: string; content: string; question: string; supportedExcerpt: string };
+const cases = JSON.parse(
+  readFileSync(
+    new URL("../../fixtures/conversations/follow-up-context.json", import.meta.url),
+    "utf8",
+  ),
+) as {
+  followUp: { question: string; next: string };
+  expiredRuntime: { question: string; partial: string; next: string };
+  deletedSource: { title: string; content: string; question: string; next: string };
+};
 
 /** A scripted private runtime. It records every call so duplicated work is visible. */
 function fakeRuntime() {
@@ -334,6 +344,8 @@ it("suppresses an unpublished answer whose source was deleted and flags one whos
 
   f.fake.observe({ status: "running", text: "" });
   const edited = await f.note("Edited", "Rent is due on the 5th.");
+  // The source loss paused the queue, so the next question waits for an explicit resume.
+  await f.first.resume(f.owner, f.id);
   await f.first.send(f.owner, f.id, randomUUID(), { text: "When is rent due?" });
   f.fake.observe(f.result([edited], [{ source: edited.source, excerpt: "due on the 5th" }]));
   await notes.update(f.owner, edited.noteId, edited.revision, {
@@ -526,8 +538,11 @@ it("keeps one answer's combined input within the runtime request limit and fails
     reason: "failed",
     inputIds: [ids[0]],
   });
-  // The refused attempt ended. Its input is never resent; the next read takes the next one.
+  // The refused attempt ended and paused the queue. A read alone starts nothing more.
   await f.first.refresh(f.owner, f.id);
+  expect(f.fake.calls.submit).toHaveLength(1);
+  // Its input is never resent; after a resume the next input gets its own attempt.
+  await f.first.resume(f.owner, f.id);
   expect(f.fake.calls.submit).toHaveLength(2);
   expect(new Set(f.fake.calls.submit.map((call) => call.key)).size).toBe(2);
   expect((await f.history()).filter((message) => message.role === "assistant")).toMatchObject([
@@ -630,7 +645,11 @@ it("forces compaction, tracks transitive dependencies and removes deleted eviden
   expect((await f.history()).at(-1)).toMatchObject({ status: "incomplete", text: "" });
   expect((await f.store.read(f.owner, f.id))?.recovery?.reason).toBe("source_changed");
   f.fake.observe({ status: "running", text: "" });
+  // Recovery pauses the queue: a new message is saved but waits for an explicit resume.
   await f.first.send(f.owner, f.id, randomUUID(), { text: "What remains available?" });
+  expect(f.fake.calls.submit.at(-1)!.sessionId).toBe(active.sessionId);
+  expect((await f.store.read(f.owner, f.id))?.recovery?.reason).toBe("source_changed");
+  await f.first.resume(f.owner, f.id);
   const safe = f.fake.calls.submit.at(-1)!;
   expect(safe.sessionId).not.toBe(active.sessionId);
   expect(safe.message).not.toContain(secret);
@@ -747,6 +766,8 @@ it("reports a confirmed runtime expiry without blindly allocating a replacement"
   if (failed.role !== "assistant") throw new Error("Missing incomplete answer");
   f.fake.observe({ status: "running", text: "" });
   const operation = randomUUID();
+  expect((await f.first.retry(f.owner, f.id, failed.turnId, randomUUID())).status).toBe("paused");
+  await f.first.resume(f.owner, f.id);
   const [a, b] = await Promise.all([
     f.first.retry(f.owner, f.id, failed.turnId, operation),
     f.second.retry(f.owner, f.id, failed.turnId, operation),
@@ -757,7 +778,7 @@ it("reports a confirmed runtime expiry without blindly allocating a replacement"
   expect((await f.history()).filter(({ role }) => role === "user")).toHaveLength(1);
 });
 
-it("makes missing history and unknown legacy provenance visible without sending another prompt", async () => {
+it("reports missing history as recovery but leaves an answer of unknown provenance out of context", async () => {
   for (const mode of ["missing", "unknown"] as const) {
     const f = await fixture();
     f.fake.observe(f.result([], [], "An earlier answer."));
@@ -773,8 +794,18 @@ it("makes missing history and unknown legacy provenance visible without sending 
         .where(eq(conversationTurns.id, answer.turnId));
     f.fake.observe({ status: "running", text: "" });
     await f.second.send(f.owner, f.id, randomUUID(), { text: "What did that mean?" });
-    expect((await f.store.read(f.owner, f.id))?.recovery?.reason).toBe("history_unavailable");
-    expect(f.fake.calls.submit).toHaveLength(1);
+    const read = await f.store.read(f.owner, f.id);
+    if (mode === "missing") {
+      expect(read?.recovery?.reason).toBe("history_unavailable");
+      expect(read?.conversation.queuePaused).toBe(true);
+      expect(f.fake.calls.submit).toHaveLength(1);
+    } else {
+      // A pre-migration answer cannot prove its lineage. The follow-up still runs without it.
+      expect(read?.recovery).toBeNull();
+      expect(f.fake.calls.submit).toHaveLength(2);
+      expect(f.fake.calls.submit[1]!.message).toContain("First");
+      expect(f.fake.calls.submit[1]!.message).not.toContain("An earlier answer.");
+    }
   }
 });
 
@@ -970,4 +1001,202 @@ it("exposes a refused summary as recovery instead of retrying the same refused i
   await f.first.refresh(f.owner, f.id);
   expect(submissions).toBe(1);
   expect((await f.store.read(f.owner, f.id))?.recovery?.reason).toBe("summary_failed");
+});
+
+it("invalidates derived context when the deleted note id arrives in upper case", async () => {
+  const f = await fixture();
+  const { title, content, question, next } = cases.deletedSource;
+  const source = await f.note(title, content);
+  f.fake.observe(
+    f.result(
+      [source],
+      [{ source: source.source, excerpt: content }],
+      `${content} ${"detail ".repeat(1_500)}`,
+    ),
+  );
+  await f.first.send(f.owner, f.id, randomUUID(), { text: question });
+  f.fake.summary({ summary: `Earlier: ${content}` });
+  f.fake.observe({ status: "running", text: "" });
+  await f.second.send(f.owner, f.id, randomUUID(), { text: next });
+  const summaries = () =>
+    database.db
+      .select()
+      .from(conversationSummaries)
+      .where(eq(conversationSummaries.conversationId, f.id));
+  expect(await summaries()).toHaveLength(1);
+  await createNoteStore(database.db).delete(f.owner, source.noteId.toUpperCase(), source.revision);
+  expect(await summaries()).toEqual([]);
+});
+
+it("leaves a message too large for any context out of later turns instead of blocking them", async () => {
+  const f = await fixture();
+  const huge = "漢".repeat(17_000);
+  await f.first.send(f.owner, f.id, randomUUID(), { text: huge });
+  expect(await f.store.read(f.owner, f.id)).toMatchObject({
+    recovery: { reason: "context_budget" },
+    conversation: { queuePaused: true },
+  });
+  await f.first.resume(f.owner, f.id);
+  await f.second.send(f.owner, f.id, randomUUID(), { text: "A normal question" });
+  expect((await f.store.read(f.owner, f.id))?.recovery).toBeNull();
+  expect(f.fake.calls.compact).toHaveLength(0);
+  expect(f.fake.calls.submit.map(({ message }) => message)).toEqual(["A normal question"]);
+  // A reconnect rereads the saved snapshot. It must still be valid without the huge message.
+  await f.first.refresh(f.owner, f.id);
+  expect((await f.store.read(f.owner, f.id))?.recovery).toBeNull();
+  expect((await f.history())[0]!.text).toBe(huge);
+});
+
+it("leaves a cancelled partial answer out of the next prompt", async () => {
+  const f = await fixture();
+  const { question, partial, next } = cases.expiredRuntime;
+  await f.first.send(f.owner, f.id, randomUUID(), { text: question });
+  f.fake.observe({ status: "cancelled", text: partial });
+  await f.first.refresh(f.owner, f.id);
+  f.fake.observe({ status: "running", text: "" });
+  await f.second.send(f.owner, f.id, randomUUID(), { text: next });
+  const prompt = f.fake.calls.submit.at(-1)!.message;
+  expect(prompt).toContain(question);
+  expect(prompt).not.toContain(partial);
+  expect((await f.history()).some(({ text }) => text === partial)).toBe(true);
+});
+
+it("does not reopen the summary window when retiring its expired session fails", async () => {
+  const f = await fixture();
+  f.fake.observe(f.result([], [], "old ".repeat(3_000)));
+  await f.first.send(f.owner, f.id, randomUUID(), { text: "First" });
+  f.fake.compactor.inspect = async () => ({ status: "running" });
+  await f.first.send(f.owner, f.id, randomUUID(), { text: "Follow-up" });
+  const session = f.fake.calls.compact[0]!.sessionId;
+  const contexts = createConversationContextStore(database.db);
+  expect(await contexts.summaryAuthorized(session)).toBe(true);
+  await database.db
+    .update(conversationCleanupIntents)
+    .set({ retryAt: sql`now()` })
+    .where(eq(conversationCleanupIntents.sessionId, session));
+  f.fake.compactor.retire = async () => {
+    throw new Error("unconfirmed");
+  };
+  await f.first.sweep(100);
+  const [intent] = await database.db
+    .select()
+    .from(conversationCleanupIntents)
+    .where(eq(conversationCleanupIntents.sessionId, session));
+  // The failed retirement was rescheduled into the future. That is not a new deadline.
+  expect(Date.parse(intent!.retryAt)).toBeGreaterThan(Date.now());
+  expect(await contexts.summaryAuthorized(session)).toBe(false);
+});
+
+it("sends no context to a session allocated while its source was being deleted", async () => {
+  const f = await fixture();
+  const source = await f.note("Source", "ALLOCATION-RACE-MARKER");
+  f.fake.observe(
+    f.result([source], [{ source: source.source, excerpt: source.text }], source.text),
+  );
+  await f.first.send(f.owner, f.id, randomUUID(), { text: "First" });
+  f.fake.observe({ status: "running", text: "" });
+  f.fake.runtime.allocate = async (operationId) => {
+    await createNoteStore(database.db).delete(f.owner, source.noteId, source.revision);
+    return `session-${operationId}`;
+  };
+  await f.second.send(f.owner, f.id, randomUUID(), { text: "More on that?" });
+  expect(f.fake.calls.submit).toHaveLength(1);
+  // The next read ends the attempt. It still never delivers the stale snapshot.
+  await f.first.refresh(f.owner, f.id);
+  expect(f.fake.calls.submit).toHaveLength(1);
+  expect((await f.store.read(f.owner, f.id))?.recovery?.reason).toBe("source_changed");
+  expect((await f.history()).at(-1)).toMatchObject({ status: "incomplete", text: "" });
+});
+
+it("charges an explicit retry against the owner's send limit", async () => {
+  const f = await fixture();
+  await f.first.send(f.owner, f.id, randomUUID(), { text: "Question" });
+  f.fake.observe({ status: "failed", text: "" });
+  await f.first.refresh(f.owner, f.id);
+  const failed = (await f.history()).at(-1)!;
+  if (failed.role !== "assistant") throw new Error("Missing incomplete answer");
+  const now = new Date().toISOString();
+  await database.db
+    .update(conversationAdmissions)
+    .set({ admittedAt: Array.from({ length: 20 }, () => now) })
+    .where(eq(conversationAdmissions.ownerId, f.owner));
+  expect(await f.first.retry(f.owner, f.id, failed.turnId, randomUUID())).toMatchObject({
+    status: "rate_limited",
+  });
+  expect(f.fake.calls.allocate).toHaveLength(1);
+});
+
+it("rebuilds from the newest history that fits after a long conversation loses its summary", async () => {
+  const f = await fixture();
+  for (let index = 0; index < 7; index++) {
+    f.fake.observe(f.result([], [], `Answer ${index}. ${"w ".repeat(4_500)}`));
+    await f.first.send(f.owner, f.id, randomUUID(), { text: `Question ${index}` });
+    for (let pass = 0; pass < 3; pass++) await f.first.refresh(f.owner, f.id);
+  }
+  expect((await f.history()).filter(({ role }) => role === "assistant")).toHaveLength(7);
+  // The same loss a source deletion causes, without needing a note here.
+  await database.db
+    .delete(conversationSummaries)
+    .where(eq(conversationSummaries.conversationId, f.id));
+  f.fake.observe({ status: "running", text: "" });
+  await f.first.send(f.owner, f.id, randomUUID(), { text: cases.followUp.next });
+  await f.first.refresh(f.owner, f.id);
+  const rebuilt = f.fake.calls.compact.at(-1)!.message;
+  expect(Buffer.byteLength(rebuilt)).toBeLessThanOrEqual(48_000);
+  expect(rebuilt).toContain("Answer 6.");
+  expect(rebuilt).not.toContain("Answer 0.");
+  expect((await f.store.read(f.owner, f.id))?.recovery).toBeNull();
+  expect(f.fake.calls.submit.at(-1)!.message).toContain(cases.followUp.next);
+});
+
+it("stops inheriting lineage at its cap instead of making the conversation unanswerable", async () => {
+  const f = await fixture();
+  const now = new Date().toISOString();
+  const texts = ["LINEAGE-CAP-FIRST answer.", "LINEAGE-CAP-SECOND answer."];
+  for (const text of texts) {
+    f.fake.observe(f.result([], [], text));
+    await f.first.send(f.owner, f.id, randomUUID(), { text: "Another question" });
+    // Each answer depends on 400 distinct notes, as many searches over a long attempt would.
+    const sources = await database.db
+      .insert(noteRows)
+      .values(
+        Array.from({ length: 400 }, () => ({
+          ownerId: f.owner,
+          title: "Synthetic",
+          content: "Synthetic source.",
+          createdAt: now,
+          updatedAt: now,
+        })),
+      )
+      .returning({ id: noteRows.id, revision: noteRows.revision });
+    const answer = (await f.history()).at(-1)!;
+    if (answer.role !== "assistant") throw new Error("Missing answer");
+    await database.db
+      .update(conversationTurns)
+      .set({
+        sourceDependencies: sources.map(({ id, revision }) => ({
+          noteId: id,
+          version: noteTag(id, revision),
+        })),
+      })
+      .where(eq(conversationTurns.id, answer.turnId));
+  }
+  f.fake.observe({ status: "running", text: "" });
+  await f.first.send(f.owner, f.id, randomUUID(), { text: "And now?" });
+  await f.first.refresh(f.owner, f.id);
+  expect((await f.store.read(f.owner, f.id))?.recovery).toBeNull();
+  const prompt = f.fake.calls.submit.at(-1)!.message;
+  // 800 inherited sources would leave no room to record new retrieval. The later answer is
+  // left out whole; its lineage is never dropped while its text stays.
+  expect(prompt).toContain(texts[0]);
+  expect(prompt).not.toContain(texts[1]);
+  const [context] = await database.db
+    .select()
+    .from(conversationContexts)
+    .where(eq(conversationContexts.conversationId, f.id))
+    .orderBy(
+      sql`cardinality(ARRAY(SELECT jsonb_array_elements(${conversationContexts.sources}))) DESC`,
+    )
+    .limit(1);
+  expect(context!.sources).toHaveLength(400);
 });

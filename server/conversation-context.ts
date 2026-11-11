@@ -20,6 +20,10 @@ export const CONTEXT_LIMITS = {
   reconstructionBytes: 48_000,
   historyMessages: 500,
   retrievalBytes: 48_000,
+  /** A larger single message can never fit a compaction input, so it is never model context. */
+  messageBytes: 40_000,
+  /** Inherited lineage stays below the 1,000 cap so an attempt can still record retrieval. */
+  inheritedSources: 500,
 } as const;
 
 export type ContextRecovery = z.infer<typeof conversationRecoveryReasonSchema>;
@@ -31,7 +35,8 @@ export const summaryOutputSchema = {
   type: "object",
   additionalProperties: false,
   required: ["summary"],
-  properties: { summary: { type: "string", minLength: 1, maxLength: 4_000 } },
+  // UTF-16 units, not bytes: 1,300 units encode to at most 3,900 UTF-8 bytes of plain text.
+  properties: { summary: { type: "string", minLength: 1, maxLength: 1_300 } },
 } as const;
 
 export type ContextCompactor = {
@@ -54,14 +59,17 @@ export function byteSize(value: unknown): number {
   return Buffer.byteLength(typeof value === "string" ? value : JSON.stringify(value), "utf8");
 }
 
-export function mergeDependencies(...sets: readonly SourceDependency[][]): SourceDependency[] {
+/** The union without the size check, for callers that drop material instead of failing. */
+export function unionDependencies(...sets: readonly SourceDependency[][]): SourceDependency[] {
   const unique = new Map<string, SourceDependency>();
   for (const dependency of sets.flat()) unique.set(JSON.stringify(dependency), dependency);
-  return sourceDependenciesSchema.parse(
-    [...unique.values()].sort(
-      (a, b) => a.noteId.localeCompare(b.noteId) || a.version.localeCompare(b.version),
-    ),
+  return [...unique.values()].sort(
+    (a, b) => a.noteId.localeCompare(b.noteId) || a.version.localeCompare(b.version),
   );
+}
+
+export function mergeDependencies(...sets: readonly SourceDependency[][]): SourceDependency[] {
+  return sourceDependenciesSchema.parse(unionDependencies(...sets));
 }
 
 export type ContextMessage = {
@@ -90,6 +98,23 @@ export function splitContext(messages: ContextMessage[]) {
   let start = messages.length;
   while (start > 0 && byteSize(messages.slice(start - 1)) <= CONTEXT_LIMITS.recentBytes) start--;
   return { older: messages.slice(0, start), recent: messages.slice(start) };
+}
+
+/**
+ * The compaction input for the newest older messages that fit the budget. Whole earlier
+ * messages are left out rather than cut, so one long history cannot block every later turn.
+ */
+export function compactionInput(previousSummary: string | null, older: ContextMessage[]) {
+  const input = (messages: ContextMessage[]) => JSON.stringify({ previousSummary, messages });
+  let size = byteSize(input([]));
+  let start = older.length;
+  while (start > 0) {
+    const next = byteSize(older[start - 1]) + 1;
+    if (size + next > CONTEXT_LIMITS.reconstructionBytes) break;
+    size += next;
+    start--;
+  }
+  return start === older.length ? null : input(older.slice(start));
 }
 
 /** Historical content resolves references; only a fresh search can establish answer evidence. */

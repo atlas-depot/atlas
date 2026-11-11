@@ -80,13 +80,14 @@ it("upgrades existing history without rewriting identities or inventing complete
   await turns.acceptInput(owner, id, randomUUID(), { text: "And why was that?" });
   const next = await turns.startNext(owner, id);
   if (next.status !== "started") throw new Error("New turn did not start");
-  expect(
-    await createConversationContextStore(database.db).prepare(
-      owner,
-      id,
-      next.turn.id,
-      "https://runtime.example.test",
-    ),
-  ).toBeUndefined();
-  expect((await turns.dispatchState(owner, id))?.turn.contextRecovery).toBe("history_unavailable");
+  // Unknown lineage is never model context, and it does not block the follow-up either.
+  const context = await createConversationContextStore(database.db).prepare(
+    owner,
+    id,
+    next.turn.id,
+    "https://runtime.example.test",
+  );
+  expect(context).toMatchObject({ state: "ready", summary: null, sources: [] });
+  expect(context?.recent.map(({ text }) => text)).toEqual(["What did we decide?"]);
+  expect((await turns.dispatchState(owner, id))?.turn.contextRecovery).toBeNull();
 });
