@@ -99,7 +99,7 @@ export function createConversationCleanupStore(db: Database) {
     async bindIntent(allocationOperationId: string, sessionId: string) {
       const bound = await db
         .update(conversationCleanupIntents)
-        .set({ sessionId: identitySchema.parse(sessionId) })
+        .set({ sessionId: identitySchema.parse(sessionId), lastFailureCode: null })
         .where(
           and(
             eq(

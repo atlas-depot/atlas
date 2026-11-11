@@ -447,7 +447,7 @@ export function createConversationContextStore(db: Database) {
         // The intent survives deletion and receives late allocation receipts for cleanup only.
         await tx
           .update(conversationCleanupIntents)
-          .set({ sessionId })
+          .set({ sessionId, lastFailureCode: null })
           .where(
             and(
               eq(conversationCleanupIntents.allocationOperationId, context.operationId),
