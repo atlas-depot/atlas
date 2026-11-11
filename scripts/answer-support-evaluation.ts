@@ -215,7 +215,7 @@ export async function evaluateAnswerSupport({
         kind: "block" as const,
         noteId,
         version: JSON.stringify(`${noteId}:1`),
-        blockId: label,
+        blockId: randomUUID(),
         headingPath: [],
       };
       const id = evidenceId(source);

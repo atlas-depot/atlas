@@ -57,7 +57,10 @@ function provider(limit: number, reply: (passageId: string) => Response[]) {
     if (!tool && body.tools[0]?.function.name !== "grade")
       return call("search_notes", { query: "meeting" });
     if (tool) {
-      const { passages } = JSON.parse(tool.content) as { passages: { id: string }[] };
+      const { passages } = JSON.parse(tool.content) as {
+        passages: { id: string; source: { blockId: string } }[];
+      };
+      expect(passages[0]!.source.blockId).not.toBe(fixture.cases[0]!.passages[0]!.label);
       script ??= reply(passages[0]!.id);
     }
     return script!.shift()!;
