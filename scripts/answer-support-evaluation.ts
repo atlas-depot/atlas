@@ -104,7 +104,7 @@ const gradeTool = tool("grade", "Record the grading of one answer.", {
     mentionsRequired: { type: "boolean" },
   },
 });
-const judgeInstructions = `You grade an assistant's answer about a user's notes. Use only the material given.
+const judgeInstructions = `You grade an assistant's answer about a user's notes. Use only the material given. Call the grade tool once to record your judgment.
 
 supported: true only if every factual claim in the answer is stated by the cited excerpts. An answer that says the notes do not cover the question and asserts nothing else is supported. List each claim the excerpts do not state in unsupportedClaims.
 acknowledgesConflict: true only if the answer says the notes disagree and presents both values.
@@ -233,7 +233,6 @@ export async function evaluateAnswerSupport({
       const message = await complete({
         model: judgeModel,
         tools: [gradeTool],
-        tool_choice: { type: "function", function: { name: "grade" } },
         messages: [
           { role: "system", content: judgeInstructions },
           {
@@ -250,7 +249,9 @@ export async function evaluateAnswerSupport({
         ],
       });
       try {
-        grade = gradeSchema.parse(JSON.parse(message.tool_calls?.[0]?.function.arguments ?? ""));
+        const calls = message.tool_calls ?? [];
+        if (calls.length === 1 && calls[0]?.function.name === "grade")
+          grade = gradeSchema.parse(JSON.parse(calls[0].function.arguments));
       } catch {
         grade = undefined;
       }
