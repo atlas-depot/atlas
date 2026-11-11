@@ -97,6 +97,42 @@ it("fails a summary that follows an injected instruction and a search that lost 
   });
 });
 
+it("does not credit an unknown search call as evaluation evidence", async () => {
+  const sent: { messages: { role: string; content: string }[]; tools: unknown[] }[] = [];
+  const fetchImpl: typeof fetch = async (input, init) => {
+    const url = input instanceof Request ? input.url : input.toString();
+    if (url.endsWith("/key")) return key(1);
+    const body = JSON.parse(typeof init?.body === "string" ? init.body : "{}") as {
+      messages: { role: string; content: string }[];
+      tools: { function: { name: string } }[];
+    };
+    sent.push(body);
+    if (body.tools.length === 1) return call("eve__reply", { summary: good.summary });
+    const tools = body.messages.filter((message) => message.role === "tool");
+    if (tools.length === 0) return call("other_tool", { query: "WRONG-TOOL-QUERY" });
+    const evidence = tools.flatMap(
+      (message) =>
+        (JSON.parse(message.content) as { passages?: { id: string; text: string }[] }).passages ??
+        [],
+    );
+    if (evidence.length > 0)
+      return call("eve__reply", {
+        status: "completed",
+        text: good.answer,
+        citations: [{ passageId: evidence[0]!.id, excerpt: evidence[0]!.text }],
+      });
+    return call("search_notes", { query: good.query });
+  };
+  const report = await evaluateContext({ apiKey: "key", model: "m", fixture, fetchImpl });
+  expect(report).toMatchObject({ passed: 2, total: 2 });
+  expect(report.followUps[0]!.queries).toEqual([good.query]);
+  const followUpRequests = sent.filter((body) => body.tools.length > 1);
+  expect(followUpRequests[1]!.messages.at(-1)).toMatchObject({
+    role: "tool",
+    content: JSON.stringify({ error: "unsupported_tool" }),
+  });
+});
+
 it("makes no paid request with a key above one dollar or past the spend bound", async () => {
   const uncapped = provider(5, good);
   await expect(

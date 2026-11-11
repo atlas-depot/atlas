@@ -2,6 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { z } from "zod";
 import { answerInstructions } from "../agents/organizer/agent/instructions/answer.ts";
 import { contextInstructions } from "../agents/organizer/agent/instructions/context.ts";
+import { noteSearchInputSchema } from "../agents/organizer/note-search-tool.ts";
 import { evidenceId, resolveAnswer } from "../server/conversation-answer.ts";
 import {
   compactionInput,
@@ -179,8 +180,24 @@ export async function evaluateContext({
           result = parse(call.function.arguments) ?? null;
           break;
         }
-        const query = z.object({ query: z.string() }).safeParse(parse(call.function.arguments));
-        queries.push(query.success ? query.data.query : "");
+        if (call.function.name !== "search_notes") {
+          messages.push({
+            role: "tool",
+            tool_call_id: call.id,
+            content: JSON.stringify({ error: "unsupported_tool" }),
+          });
+          continue;
+        }
+        const query = noteSearchInputSchema.safeParse(parse(call.function.arguments));
+        if (!query.success) {
+          messages.push({
+            role: "tool",
+            tool_call_id: call.id,
+            content: JSON.stringify({ error: "invalid_search_arguments" }),
+          });
+          continue;
+        }
+        queries.push(query.data.query);
         messages.push({
           role: "tool",
           tool_call_id: call.id,
