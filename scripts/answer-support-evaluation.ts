@@ -27,7 +27,7 @@ export const answerSupportFixtureSchema = z.strictObject({
 });
 export type AnswerSupportFixture = z.infer<typeof answerSupportFixtureSchema>;
 
-const keyBudgetSchema = z.object({
+export const keyBudgetSchema = z.object({
   data: z.object({
     limit: z.number().positive().max(1),
     limit_remaining: z.number().positive(),
@@ -35,7 +35,7 @@ const keyBudgetSchema = z.object({
     include_byok_in_limit: z.literal(true),
   }),
 });
-const completionSchema = z.object({
+export const completionSchema = z.object({
   choices: z
     .array(
       z.object({
@@ -65,11 +65,11 @@ const gradeSchema = z.object({
   mentionsRequired: z.boolean(),
 });
 
-const tool = (name: string, description: string, parameters: unknown) => ({
+export const tool = (name: string, description: string, parameters: unknown) => ({
   type: "function",
   function: { name, description, parameters },
 });
-const answerTools = [
+export const answerTools = [
   tool(
     "search_notes",
     "Search the user's own saved notes by meaning. Returns passages with an id, their text " +
