@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { eq, inArray, sql } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { readFileSync } from "node:fs";
 import { expect, it } from "vite-plus/test";
 import type { NotePassageSource } from "../../shared/passages.ts";
@@ -19,7 +19,7 @@ import {
 } from "./conversation-schema.ts";
 import { createConversationStore } from "./conversations.ts";
 import { createConversationTurns } from "./conversation-turns.ts";
-import { createConversationContextStore } from "./conversation-contexts.ts";
+import { createConversationContextStore, lockContextSources } from "./conversation-contexts.ts";
 import type { ContextCompactor } from "../conversation-context.ts";
 import { setupIndexTestDatabase } from "./index-test-database.ts";
 import { createNoteStore, noteTag } from "./notes.ts";
@@ -645,6 +645,7 @@ it("reconstructs a context-dependent follow-up in a new runtime after the old se
   expect(next.message).toContain("When does that project meet?");
   expect((await f.history()).slice(0, before.length)).toEqual(before);
   await Promise.all([f.first.refresh(f.owner, f.id), f.second.refresh(f.owner, f.id)]);
+  expect(f.fake.calls.submit).toHaveLength(2);
   expect(new Set(f.fake.calls.submit.map(({ key }) => key)).size).toBe(2);
 });
 
@@ -719,7 +720,7 @@ it("records uncited retrieval before the model sees it and excludes the entire d
       [cited, uncited].map(({ source }) => ({ noteId: source.noteId, version: source.version })),
       { passages: [cited, uncited] },
     ),
-  ).toBe(true);
+  ).toMatchObject({ status: "recorded" });
   f.fake.observe(
     f.result(
       [cited],
@@ -753,7 +754,7 @@ it("merges concurrent retrieval from one attempt instead of rejecting a parallel
     await Promise.all(
       outputs.map(({ sources, output }) => turns.recordSearch(session, sources, output)),
     ),
-  ).toEqual([true, true]);
+  ).toEqual([{ status: "recorded" }, { status: "recorded" }]);
   const [turn] = await database.db
     .select()
     .from(conversationTurns)
@@ -778,8 +779,10 @@ it("does not authorize another account's source or an over-budget tool result", 
       [{ noteId: foreign.noteId, version: foreign.source.version }],
       "small",
     ),
-  ).toBe(false);
-  expect(await turns.recordSearch(session, [], "x".repeat(48_001))).toBe(false);
+  ).toMatchObject({ status: "unavailable" });
+  expect(await turns.recordSearch(session, [], "x".repeat(48_001))).toMatchObject({
+    status: "budget",
+  });
 });
 
 it("keeps a paused queue across expiry/reload and concurrent explicit resumes start one attempt", async () => {
@@ -1043,7 +1046,117 @@ it("exposes a refused summary as recovery instead of retrying the same refused i
   await f.second.send(f.owner, f.id, randomUUID(), { text: "Follow-up" });
   await f.first.refresh(f.owner, f.id);
   expect(submissions).toBe(1);
+  expect((await f.store.read(f.owner, f.id))?.recovery?.reason).toBe("context_budget");
+});
+
+it("requires current source revisions for new context but allows an in-flight used revision", async () => {
+  const f = await fixture();
+  const note = await f.note("Source", "Original content.");
+  const oldSource = { noteId: note.noteId, version: note.source.version };
+  await createNoteStore(database.db).update(f.owner, note.noteId, note.revision, {
+    title: "Source",
+    content: "Changed content.",
+  });
+  expect(await database.db.transaction((tx) => lockContextSources(tx, f.owner, [oldSource]))).toBe(
+    true,
+  );
+  expect(
+    await database.db.transaction((tx) =>
+      lockContextSources(tx, f.owner, [oldSource], { requireCurrentVersion: true }),
+    ),
+  ).toBe(false);
+});
+
+it("does not call the summary provider after its durable window closes", async () => {
+  const f = await fixture();
+  f.fake.observe(f.result([], [], "old ".repeat(3_000)));
+  await f.first.send(f.owner, f.id, randomUUID(), { text: "First" });
+  f.fake.compactor.inspect = async () => ({ status: "running" });
+  await f.second.send(f.owner, f.id, randomUUID(), { text: "Follow-up" });
+  const summarySubmissions = f.fake.calls.compact.length;
+  expect(summarySubmissions).toBeGreaterThan(0);
+  await database.db
+    .update(conversationCleanupIntents)
+    .set({ retryAt: sql`now() - interval '1 minute'` })
+    .where(
+      and(
+        eq(conversationCleanupIntents.ownerId, f.owner),
+        eq(conversationCleanupIntents.purpose, "summary"),
+      ),
+    );
+  await database.db
+    .update(conversationContexts)
+    .set({ sessionId: null, deliveryId: null })
+    .where(eq(conversationContexts.conversationId, f.id));
+  await f.first.refresh(f.owner, f.id);
+  expect(f.fake.calls.compact).toHaveLength(summarySubmissions);
   expect((await f.store.read(f.owner, f.id))?.recovery?.reason).toBe("summary_failed");
+  expect((await f.history()).at(-1)).toMatchObject({ status: "incomplete", reason: "failed" });
+});
+
+it("redacts a delivered citation when note deletion receives an uppercase UUID", async () => {
+  const f = await fixture();
+  const source = await f.note("Source", "UPPERCASE-MARKER");
+  f.fake.observe(
+    f.result(
+      [source],
+      [{ source: source.source, excerpt: "UPPERCASE-MARKER" }],
+      "UPPERCASE-MARKER",
+    ),
+  );
+  await f.first.send(f.owner, f.id, randomUUID(), { text: "First" });
+  await database.db
+    .delete(conversationSummaries)
+    .where(eq(conversationSummaries.conversationId, f.id));
+  await database.db.insert(conversationSummaries).values({
+    conversationId: f.id,
+    throughSequence: 1,
+    text: "UPPERCASE-MARKER summary",
+    sources: [{ noteId: source.noteId, version: source.source.version }],
+  });
+  const deleted = await createNoteStore(database.db).delete(
+    f.owner,
+    source.noteId.toUpperCase(),
+    source.revision,
+  );
+  expect(deleted.status).toBe("deleted");
+  expect(
+    await database.db
+      .select()
+      .from(conversationSummaries)
+      .where(eq(conversationSummaries.conversationId, f.id)),
+  ).toEqual([]);
+  expect((await f.history()).find((message) => message.text === "UPPERCASE-MARKER")).toMatchObject({
+    citations: [{ deleted: true, excerpt: null }],
+  });
+});
+
+it("replays a stopped terminal result with the same normalized publication hash", async () => {
+  const f = await fixture();
+  await f.first.send(f.owner, f.id, randomUUID(), { text: "Question" });
+  const active = (await f.store.read(f.owner, f.id))!.activeTurn!;
+  const stopped = await f.first.stop(f.owner, f.id);
+  if (stopped.status !== "paused" || stopped.message?.role !== "assistant")
+    throw new Error("Stop did not publish an incomplete answer");
+  expect(
+    await createConversationTurns(database.db).finalize(f.owner, f.id, active.id, {
+      status: "incomplete",
+      reason: "cancelled",
+      text: stopped.message.text,
+      citations: [],
+      expectedVersion: active.checkpointVersion,
+    }),
+  ).toMatchObject({ status: "saved" });
+});
+
+it("persists a failed search context as a visible recovery state", async () => {
+  const f = await fixture();
+  await f.first.send(f.owner, f.id, randomUUID(), { text: "Question" });
+  const session = f.fake.calls.submit[0]!.sessionId;
+  expect(
+    await createConversationContextStore(database.db).recoverBySession(session, "context_budget"),
+  ).toBe(true);
+  expect((await f.store.read(f.owner, f.id))?.recovery?.reason).toBe("context_budget");
 });
 
 it("invalidates derived context when the deleted note id arrives in upper case", async () => {

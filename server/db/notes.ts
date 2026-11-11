@@ -196,7 +196,8 @@ export function createNoteStore(db: Database) {
       expectedRevision: number,
     ): Promise<{ status: "deleted" | "not_found" | "conflict" }> {
       const owner = ownerSchema.parse(ownerId);
-      const noteId = noteIdSchema.parse(id);
+      // JSONB source dependencies compare UUID strings, so use the canonical lowercase form.
+      const noteId = noteIdSchema.parse(id).toLowerCase();
       const expected = revisionSchema.parse(expectedRevision);
       return db.transaction(async (tx) => {
         const scope = and(eq(notes.ownerId, owner), eq(notes.id, noteId));

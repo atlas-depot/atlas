@@ -74,7 +74,8 @@ export async function enqueueConversationCleanup(
 /** Internal runtime bookkeeping. No method performs or claims an external retirement itself. */
 export function createConversationCleanupStore(db: Database) {
   return {
-    async expedite(owner: string, conversationId: string) {
+    async expedite(owner: string, conversationId: string, prioritize?: string) {
+      const first = prioritize ? uuidSchema.parse(prioritize) : undefined;
       await db
         .update(conversationCleanupIntents)
         .set({ retryAt: sql`now()` })
@@ -84,7 +85,7 @@ export function createConversationCleanupStore(db: Database) {
             eq(conversationCleanupIntents.conversationId, conversationId),
           ),
         );
-      return db
+      const rows = db
         .select()
         .from(conversationCleanupIntents)
         .where(
@@ -92,8 +93,19 @@ export function createConversationCleanupStore(db: Database) {
             eq(conversationCleanupIntents.ownerId, owner),
             eq(conversationCleanupIntents.conversationId, conversationId),
           ),
-        )
-        .limit(100);
+        );
+      return (
+        first
+          ? rows.orderBy(
+              sql`(${conversationCleanupIntents.allocationOperationId} = ${first}) DESC`,
+              asc(conversationCleanupIntents.retryAt),
+              asc(conversationCleanupIntents.allocationOperationId),
+            )
+          : rows.orderBy(
+              asc(conversationCleanupIntents.retryAt),
+              asc(conversationCleanupIntents.allocationOperationId),
+            )
+      ).limit(100);
     },
     /** Late receipts can only bind an existing intent, never recreate conversation data. */
     async bindIntent(allocationOperationId: string, sessionId: string) {

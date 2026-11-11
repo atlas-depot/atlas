@@ -85,9 +85,12 @@ Follow-ups reconstruct separate answer runtimes using the [#72 context contract]
 The private `context` principal performs bounded conversation summarization without note or web
 tools. The API persists its operation and cleanup intent before allocation; reconnect uses the
 same delivery. The provider middleware rechecks live source authorization for every chat/summary
-model request, including automatic compaction and retries. Organize keeps its existing model path.
-Missing history, invalid summaries, an oversized question and confirmed runtime expiry return
-explicit recovery, which pauses the queue, instead of unbounded history or a blind replacement. Routine tests use scripted summaries.
+model request, including automatic compaction and retries. Concurrent `search_notes` calls in one
+attempt merge their evidence under a per-session lock. New context requires current source
+versions; an in-flight answer may finish against the revision it used and is marked stale.
+Organize keeps its existing model path. Missing history, invalid summaries, an oversized question
+and confirmed runtime expiry return explicit recovery, which pauses the queue, instead of
+unbounded history or a blind replacement. Routine tests use scripted summaries.
 
 ## Build and verification
 

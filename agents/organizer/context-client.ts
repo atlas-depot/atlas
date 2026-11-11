@@ -40,7 +40,7 @@ export function createDurableEveCompactor(
           .snapshot({ signal: transport.timeout() });
         return observeSummary(snapshot.events, deliveryId);
       } catch (error) {
-        if (expired(error)) return { status: "failed" };
+        if (expired(error)) return { status: "expired" };
         throw new Error("Summary state is unavailable. Existing work was not replaced.");
       }
     },

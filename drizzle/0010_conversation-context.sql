@@ -35,6 +35,7 @@ ALTER TABLE "conversation_contexts" ADD CONSTRAINT "conversation_contexts_conver
 ALTER TABLE "conversation_summaries" ADD CONSTRAINT "conversation_summaries_conversation_id_conversations_id_fk" FOREIGN KEY ("conversation_id") REFERENCES "public"."conversations"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 CREATE INDEX "conversation_contexts_sources_idx" ON "conversation_contexts" USING gin ("sources");--> statement-breakpoint
 CREATE INDEX "conversation_summaries_sources_idx" ON "conversation_summaries" USING gin ("sources");--> statement-breakpoint
+CREATE INDEX "conversation_turns_latest_idx" ON "conversation_turns" USING btree ("conversation_id","created_at","id");--> statement-breakpoint
 ALTER TABLE "conversation_cleanup_intents" ADD CONSTRAINT "conversation_cleanup_purpose_valid" CHECK ("conversation_cleanup_intents"."purpose" IN ('answer', 'summary'));--> statement-breakpoint
 ALTER TABLE "conversation_turns" ADD CONSTRAINT "conversation_turns_retrieval_bound" CHECK ("conversation_turns"."retrieval_bytes" BETWEEN 0 AND 48000);--> statement-breakpoint
 ALTER TABLE "conversation_turns" ADD CONSTRAINT "conversation_turns_recovery_valid" CHECK ("conversation_turns"."context_recovery" IS NULL OR "conversation_turns"."context_recovery" IN ('history_unavailable', 'context_budget', 'summary_failed', 'source_changed', 'runtime_expired'));

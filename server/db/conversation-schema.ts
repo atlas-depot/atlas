@@ -95,6 +95,8 @@ export const conversationTurns = pgTable(
     uniqueIndex("conversation_turns_running_idx")
       .on(table.conversationId)
       .where(sql`${table.status} = 'running'`),
+    // Conversation reads resolve only the latest attempt's recovery state.
+    index("conversation_turns_latest_idx").on(table.conversationId, table.createdAt, table.id),
     uniqueIndex("conversation_turns_allocation_idx").on(table.allocationOperationId),
     foreignKey({
       name: "conversation_turns_retry_parent_fk",

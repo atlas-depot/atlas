@@ -47,9 +47,12 @@ invalidated context, so its result cannot become a completed answer. No later at
 runtime's hidden messages or tool history. Remote physical erasure is not claimed: cleanup remains
 durable until retirement is independently confirmed, and provider/backup retention is separate.
 
-Editing a source during generation preserves #71's used-revision/stale-citation policy. For a
-future turn, old-version-derived context is excluded or its checkpoint reconstructed; fresh
-retrieval supplies the current version.
+Editing a source during generation preserves #71's used-revision/stale-citation policy. An
+attempt already in flight may finish against the revision it used and is marked stale. New
+context reconstruction requires current source versions; otherwise old-version-derived context
+is excluded or its checkpoint reconstructed and fresh retrieval supplies the current version.
+Concurrent search tool calls merge their evidence under a per-session lock, so one call cannot
+reject another's lineage.
 
 ## Bounded compaction
 
@@ -58,11 +61,12 @@ The context store reads the newest 500 history records after the checkpoint, ret
 the newest older messages that fit 48,000 bytes. Whole earlier messages, and any single message
 above 40,000 bytes, are left out of model context and stay in UI history. Nothing is cut inside
 a message. This keeps a long conversation answerable after it loses its checkpoint; summarizing
-such material in several passes is future work. The summary is nonempty, schema-validated and at most
-4,000 bytes when JSON-encoded (the runtime schema allows 1,300 characters, which always fits); the final context/question envelope is at most 24,000 bytes.
-Queued inputs combine up to 10,000 bytes, leaving space for history and framing. An oversized
-single accepted input is retained but may require recovery. Retrieved tool output
-is separately capped at 48,000 bytes per answer, with at most 1,000 source dependencies.
+such material in several passes is future work. The summary is nonempty, schema-validated and at
+most 4,000 bytes when JSON-encoded (the runtime schema allows 1,300 characters, which always
+fits); the final context/question envelope is at most 24,000 bytes. Queued inputs combine up to
+10,000 bytes, leaving space for history and framing. A single accepted input is always attempted;
+an oversized one remains saved but may require recovery. Retrieved tool output is separately
+capped at 48,000 bytes per answer, with at most 1,000 source dependencies.
 
 The existing model's configured context window also gates the complete provider prompt, tool
 schemas and response schema, with 16,384 output-token and 4,096 framing reserves. The input
@@ -73,10 +77,12 @@ accepted message remains saved and the attempt reports recovery.
 Compaction uses the existing eve harness with a private `context` job principal. That job has
 neither note retrieval nor public research tools. PostgreSQL records its fixed operation before
 allocation; the same key/session survives lost receipts and API replacement. A durable cleanup
-intent exists before dispatch, with a ten-minute execution window. Stop/deletion expedites cleanup;
-the window's expiry prevents further summary provider calls, and a failed retirement that
-reschedules cleanup does not reopen it. Only a validated, authorized result
-may publish a checkpoint. There is no second agent loop or background memory extractor.
+intent exists before dispatch, with a ten-minute execution window. The window is checked before
+allocation and submission, so an expired summary makes no further provider call and reports
+recovery. Stop/deletion expedites cleanup. A failed retirement that reschedules cleanup does not
+reopen the window. A rejected or expired summary keeps its explicit recovery reason. Only a
+validated, authorized result may publish a checkpoint. There is no second agent loop or background
+memory extractor.
 
 A checkpoint records its sequence boundary and deferred input identities. A queued input may
 precede an older answer in UI order; deferral prevents that accepted input from disappearing
