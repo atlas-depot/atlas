@@ -125,6 +125,13 @@ export function createConversationAnswers({
       if (!(await contexts.bindSummary(owner, context, sessionId))) return undefined;
       let deliveryId = context.deliveryId;
       if (!deliveryId) {
+        // The snapshot predates allocation. A deletion or edit since then must not place
+        // historical text in the new session.
+        if (!(await contexts.summaryAuthorized(sessionId))) {
+          await contexts.recover(owner, conversationId, turn.id, "source_changed");
+          await fail(owner, conversationId, turn);
+          return undefined;
+        }
         const receipt = await compactor.submit(
           sessionId,
           context.operationId,
@@ -205,6 +212,12 @@ export function createConversationAnswers({
     }
     let deliveryId = turn.deliveryId;
     if (!deliveryId) {
+      // The snapshot predates allocation. A source deleted since then, even before the
+      // cleanup intent existed, must not have its derived context placed in the new session.
+      if (!(await turns.contextAuthorized(sessionId))) {
+        await contexts.recover(owner, conversationId, turn.id, "source_changed");
+        return void (await fail(owner, conversationId, turn));
+      }
       const receipt = await runtime.submit(sessionId, turn.id, question);
       if (receipt.status !== "delivered") {
         await contexts.recover(

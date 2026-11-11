@@ -1384,3 +1384,35 @@ it("drops a running draft when its source is deleted and refuses a late checkpoi
   await f.first.stop(f.owner, f.id);
   expect((await f.history()).at(-1)).toMatchObject({ status: "incomplete", text: "" });
 });
+
+it("sends no context when its source is deleted before the runtime is prepared", async () => {
+  const f = await fixture();
+  const source = await f.note("Source", "PRE-ALLOCATION-MARKER");
+  f.fake.observe(
+    f.result([source], [{ source: source.source, excerpt: source.text }], source.text),
+  );
+  await f.first.send(f.owner, f.id, randomUUID(), { text: "First" });
+  f.fake.observe({ status: "running", text: "" });
+  const cleanup = createConversationCleanupStore(database.db);
+  // The deletion lands after the context snapshot and before any cleanup intent exists.
+  const racing = createConversationAnswers({
+    turns: createConversationTurns(database.db),
+    contexts: createConversationContextStore(database.db),
+    compactorFor: () => f.fake.compactor,
+    runtimeUrl: "https://answers.example.test",
+    runtimeFor: () => f.fake.runtime,
+    cleanup: {
+      ...cleanup,
+      prepareRuntime: async (...args) => {
+        await createNoteStore(database.db).delete(f.owner, source.noteId, source.revision);
+        return cleanup.prepareRuntime(...args);
+      },
+    },
+  });
+  await racing.send(f.owner, f.id, randomUUID(), { text: "More on that?" });
+  expect(f.fake.calls.submit).toHaveLength(1);
+  expect(await f.store.read(f.owner, f.id)).toMatchObject({
+    recovery: { reason: "source_changed" },
+    conversation: { queuePaused: true },
+  });
+});
