@@ -26,7 +26,6 @@ import { lockContextSources } from "./conversation-contexts.ts";
 import {
   byteSize,
   CONTEXT_LIMITS,
-  mergeDependencies,
   sourceDependenciesSchema,
   unionDependencies,
   type SourceDependency,
@@ -171,7 +170,9 @@ export function createConversationTurns(db: Database) {
             ),
           );
         if (!context || !turn) return { status: "unavailable" as const };
-        const merged = mergeDependencies(turn.sourceDependencies, dependencies);
+        const merged = unionDependencies(turn.sourceDependencies, dependencies);
+        if (!sourceDependenciesSchema.safeParse(merged).success)
+          return { status: "budget" as const };
         const bytes = turn.retrievalBytes + byteSize(output);
         if (bytes > CONTEXT_LIMITS.retrievalBytes) return { status: "budget" as const };
         await tx
@@ -210,10 +211,12 @@ export function createConversationTurns(db: Database) {
         )
         .limit(2);
       const row = rows.length === 1 ? rows[0] : undefined;
+      const sources = row ? sourceDependenciesSchema.safeParse(row.sources) : undefined;
       return (
         !!row &&
         row.complete &&
-        db.transaction((tx) => lockContextSources(tx, row.owner, mergeDependencies(row.sources)))
+        !!sources?.success &&
+        db.transaction((tx) => lockContextSources(tx, row.owner, sources.data))
       );
     },
     /** Replays return the saved input; only a new message reserves an admission. */
