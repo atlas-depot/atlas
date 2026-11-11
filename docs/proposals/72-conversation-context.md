@@ -61,9 +61,11 @@ The context store reads the newest 500 history records after the checkpoint, ret
 the newest older messages that fit 48,000 bytes. Whole earlier messages, and any single message
 above 40,000 bytes, are left out of model context and stay in UI history. Nothing is cut inside
 a message. This keeps a long conversation answerable after it loses its checkpoint; summarizing
-such material in several passes is future work. The summary is nonempty, schema-validated and at
-most 4,000 bytes when JSON-encoded (the runtime schema allows 1,300 characters, which always
-fits); the final context/question envelope is at most 24,000 bytes. Queued inputs combine up to
+such material in several passes is future work. The summary is nonempty, schema-validated, at
+most 650 Unicode code points (1,300 UTF-16 units) and at most 4,000 bytes when JSON-encoded. C0
+controls other than tab, newline and carriage return are rejected by both the runtime and server
+schemas, so every provider-accepted summary validates. The final context/question envelope is at
+most 24,000 bytes. Queued inputs combine up to
 10,000 bytes, leaving space for history and framing. A single accepted input is always attempted;
 an oversized one remains saved but may require recovery. Retrieved tool output is separately
 capped at 48,000 bytes per answer, with at most 1,000 source dependencies.

@@ -15,7 +15,9 @@ export type SourceDependency = z.infer<typeof sourceDependenciesSchema>[number];
 /** Text ceilings are conservative limits, not character-to-token conversions. */
 export const CONTEXT_LIMITS = {
   recentBytes: 8_000,
-  /** The runtime schema's 1,300 characters fit this byte limit; the server rechecks bytes. */
+  /** Provider code points are a strict subset of these UTF-16 units and bytes. */
+  summaryCodePoints: 650,
+  summaryUnits: 1_300,
   summaryBytes: 4_000,
   promptBytes: 24_000,
   reconstructionBytes: 48_000,
@@ -28,16 +30,30 @@ export const CONTEXT_LIMITS = {
 } as const;
 
 export type ContextRecovery = z.infer<typeof conversationRecoveryReasonSchema>;
+/** Keep tab, newline and carriage return; reject other C0 controls and DEL. */
+// oxlint-disable-next-line no-control-regex -- C0 controls are the invalid input class.
+const forbiddenControlCharacters = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/;
 const summaryTextSchema = noteTextSchema
   .min(1)
+  .max(CONTEXT_LIMITS.summaryUnits)
+  .refine((summary) => Array.from(summary).length <= CONTEXT_LIMITS.summaryCodePoints)
+  .refine((summary) => !forbiddenControlCharacters.test(summary))
   .refine((summary) => byteSize(JSON.stringify(summary)) <= CONTEXT_LIMITS.summaryBytes);
 export const summaryResultSchema = z.strictObject({ summary: summaryTextSchema });
 export const summaryOutputSchema = {
   type: "object",
   additionalProperties: false,
   required: ["summary"],
-  // UTF-16 units, not bytes: 1,300 units encode to at most 3,900 UTF-8 bytes of plain text.
-  properties: { summary: { type: "string", minLength: 1, maxLength: 1_300 } },
+  // 650 code points are at most 1,300 UTF-16 units and 4,000 JSON bytes. The pattern rejects
+  // the same C0 controls as summaryResultSchema, so every accepted provider output validates.
+  properties: {
+    summary: {
+      type: "string",
+      minLength: 1,
+      maxLength: CONTEXT_LIMITS.summaryCodePoints,
+      pattern: "^[^\\u0000-\\u0008\\u000B\\u000C\\u000E-\\u001F\\u007F]*$",
+    },
+  },
 } as const;
 
 export type ContextCompactor = {

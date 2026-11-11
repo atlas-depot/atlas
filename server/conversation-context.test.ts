@@ -27,10 +27,23 @@ describe("bounded conversation context", () => {
     const message = { id: "one", sequence: 1, role: "assistant" as const, text: "a".repeat(9_000) };
     expect(splitContext([message])).toEqual({ older: [message], recent: [] });
   });
-  it("counts UTF-8 bytes rather than treating characters as tokens", () => {
+  it("keeps provider and server summary limits aligned", () => {
+    expect(summaryOutputSchema.properties.summary.maxLength).toBe(CONTEXT_LIMITS.summaryCodePoints);
+    const pattern = new RegExp(summaryOutputSchema.properties.summary.pattern);
+    expect(pattern.test('line\n\t"quoted"')).toBe(true);
+    expect(pattern.test("\u0001")).toBe(false);
     expect(byteSize("漢")).toBe(3);
-    expect(summaryResultSchema.safeParse({ summary: "漢".repeat(1_333) }).success).toBe(false);
-    expect(summaryResultSchema.safeParse({ summary: "漢".repeat(1_332) }).success).toBe(true);
+    // 650 astral code points are 1,300 UTF-16 units and fit 4,000 JSON bytes.
+    expect(summaryResultSchema.safeParse({ summary: "😀".repeat(650) }).success).toBe(true);
+    expect(summaryResultSchema.safeParse({ summary: "😀".repeat(651) }).success).toBe(false);
+    expect(summaryResultSchema.safeParse({ summary: "漢".repeat(650) }).success).toBe(true);
+    expect(summaryResultSchema.safeParse({ summary: "漢".repeat(651) }).success).toBe(false);
+    expect(byteSize(JSON.stringify("😀".repeat(650)))).toBeLessThanOrEqual(
+      CONTEXT_LIMITS.summaryBytes,
+    );
+    // Allowed whitespace and quotes fit; other C0 controls are rejected.
+    expect(summaryResultSchema.safeParse({ summary: '\n"'.repeat(325) }).success).toBe(true);
+    expect(summaryResultSchema.safeParse({ summary: "\u0001".repeat(650) }).success).toBe(false);
   });
   it("validates summaries and never accepts an empty or invented result shape", () => {
     for (const result of [
