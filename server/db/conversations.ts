@@ -127,8 +127,15 @@ export function createConversationStore(db: Database) {
               .where(eq(conversationTurnInputs.turnId, turn.id))
               .orderBy(asc(conversationTurnInputs.ordinal))
           : [];
+        const [latest] = await tx
+          .select({ id: conversationTurns.id, recovery: conversationTurns.contextRecovery })
+          .from(conversationTurns)
+          .where(eq(conversationTurns.conversationId, id))
+          .orderBy(desc(conversationTurns.createdAt), desc(conversationTurns.id))
+          .limit(1);
         return conversationReadSchema.parse({
           conversation: publicConversation(row),
+          recovery: latest?.recovery ? { turnId: latest.id, reason: latest.recovery } : null,
           activeTurn: turn
             ? {
                 id: turn.id,

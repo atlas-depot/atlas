@@ -121,6 +121,18 @@ running ones finish or cancel them, then wait for the maintenance sweep to repor
 cleanup. Runs left behind stay unreadable until their sessions expire on their own. Answers run only when the organizer settings are present, and
 unattended continuation and session cleanup need `ORGANIZER_MAINTENANCE_ENABLED=true`.
 
+### Conversation-context migration cutover
+
+`0010_conversation-context` adds separate summary/context records and source-provenance metadata.
+Legacy answers default to unknown provenance; continuation reports recovery instead of assuming
+their citations contain every source the model saw. No historical UI messages are rewritten.
+
+Stop and drain old conversation/model writers before applying the additive migration. Switch the
+API and private runtime together: the new API uses the additional `context` service principal,
+and old note-delete routes do not invalidate derived context. Keep those old routes disabled.
+Do not roll back to older writers with chat enabled. Apply migrations only through the existing
+authorized environment/operator procedure; local tests do not apply anything to staging.
+
 ### Note-index migration cutover
 
 `0006_note-index` requires a write-paused cutover. Its backfill runs once. Older writers do not create or refresh index intents, and maintenance cannot recover missing or outdated intents. Overlapping old and new writers are unsupported.

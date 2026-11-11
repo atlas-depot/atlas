@@ -22,6 +22,13 @@ import {
 import { admitConversationInput, expireConversationAdmissions } from "./conversation-admission.ts";
 import type { openDatabase } from "./connection.ts";
 import { enqueueTurnCleanup } from "./conversation-cleanup.ts";
+import { lockContextSources } from "./conversation-contexts.ts";
+import {
+  byteSize,
+  CONTEXT_LIMITS,
+  mergeDependencies,
+  type SourceDependency,
+} from "../conversation-context.ts";
 import { readConversationMessage } from "./conversation-messages.ts";
 import {
   conversationPayloadHash,
@@ -35,6 +42,7 @@ import {
   conversationMessages,
   conversationTurns,
   conversationTurnInputs,
+  conversationContexts,
 } from "./conversation-schema.ts";
 
 type Database = ReturnType<typeof openDatabase>["db"];
@@ -46,10 +54,10 @@ const inputSchema = z.strictObject({
 export const MAX_RUNNING_TURNS_PER_OWNER = 3;
 const MAX_TURN_INPUTS = 100;
 /**
- * UTF-8 bytes of input text one answer may combine. JSON escaping can expand text up to six
- * times, so this keeps the request well under the private runtime's 4.5 MB body limit.
+ * Combined UTF-8 input budget, leaving room for 8 KB recent context, 4 KB encoded summary
+ * and grouping/framing in the 24 KB prompt. An oversized first input gets explicit recovery.
  */
-export const MAX_TURN_INPUT_BYTES = 500_000;
+export const MAX_TURN_INPUT_BYTES = 10_000;
 const attemptSchema = z.strictObject({
   inputIds: conversationInputIdsSchema,
   retryOfId: conversationIdSchema.optional(),
@@ -102,6 +110,90 @@ export function createConversationTurns(db: Database) {
   }
 
   return {
+    /** Record all retrieved evidence before it reaches the model, even if never cited. */
+    async recordSearch(sessionId: string, sources: SourceDependency[], output: unknown) {
+      const [snapshot] = await db
+        .select({ turn: conversationTurns, owner: conversations.ownerId })
+        .from(conversationTurns)
+        .innerJoin(conversations, eq(conversations.id, conversationTurns.conversationId))
+        .where(
+          and(eq(conversationTurns.sessionId, sessionId), eq(conversationTurns.status, "running")),
+        );
+      if (!snapshot) return false;
+      const dependencies = mergeDependencies(snapshot.turn.sourceDependencies, sources);
+      return db.transaction(async (tx) => {
+        if (!(await lockContextSources(tx, snapshot.owner, dependencies))) return false;
+        const parent = await lockOwnedConversation(
+          tx,
+          snapshot.owner,
+          snapshot.turn.conversationId,
+        );
+        if (!parent) return false;
+        const [context] = await tx
+          .select()
+          .from(conversationContexts)
+          .where(
+            and(
+              eq(conversationContexts.turnId, snapshot.turn.id),
+              eq(conversationContexts.state, "ready"),
+            ),
+          );
+        const [turn] = await tx
+          .select()
+          .from(conversationTurns)
+          .where(
+            and(
+              eq(conversationTurns.id, snapshot.turn.id),
+              eq(conversationTurns.status, "running"),
+            ),
+          );
+        if (
+          !context ||
+          !turn ||
+          JSON.stringify(turn.sourceDependencies) !==
+            JSON.stringify(snapshot.turn.sourceDependencies)
+        )
+          return false;
+        const bytes = turn.retrievalBytes + byteSize(output);
+        if (bytes > CONTEXT_LIMITS.retrievalBytes) return false;
+        await tx
+          .update(conversationTurns)
+          .set({ sourceDependencies: dependencies, retrievalBytes: bytes })
+          .where(eq(conversationTurns.id, turn.id));
+        await tx
+          .update(conversationContexts)
+          .set({ sources: dependencies })
+          .where(eq(conversationContexts.turnId, turn.id));
+        return true;
+      });
+    },
+
+    /** Checked before every chat model call, including after a tool or a steer. */
+    async contextAuthorized(sessionId: string) {
+      const rows = await db
+        .select({
+          sources: conversationTurns.sourceDependencies,
+          complete: conversationTurns.provenanceComplete,
+          owner: conversations.ownerId,
+        })
+        .from(conversationTurns)
+        .innerJoin(conversations, eq(conversations.id, conversationTurns.conversationId))
+        .innerJoin(conversationContexts, eq(conversationContexts.turnId, conversationTurns.id))
+        .where(
+          and(
+            eq(conversationTurns.sessionId, sessionId),
+            eq(conversationTurns.status, "running"),
+            eq(conversationContexts.state, "ready"),
+          ),
+        )
+        .limit(2);
+      const row = rows.length === 1 ? rows[0] : undefined;
+      return (
+        !!row &&
+        row.complete &&
+        db.transaction((tx) => lockContextSources(tx, row.owner, mergeDependencies(row.sources)))
+      );
+    },
     /** Replays return the saved input; only a new message reserves an admission. */
     async acceptInput(
       owner: string,

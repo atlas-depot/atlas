@@ -11,6 +11,7 @@ import { createConversationStore } from "./db/conversations.ts";
 import { createConversationCleanupStore } from "./db/conversation-cleanup.ts";
 import { createConversationTurns } from "./db/conversation-turns.ts";
 import { createConversationAnswers } from "./conversation-answers.ts";
+import { createConversationContextStore } from "./db/conversation-contexts.ts";
 import { createNoteSearchStore } from "./db/note-search.ts";
 import { createSearchAdmission } from "./db/note-search-admission.ts";
 import { createSearchEmbeddingClient } from "./search-embedding-client.ts";
@@ -60,11 +61,21 @@ async function main() {
   const answerRuntime = organizerSettings
     ? (await import("../agents/organizer/answer-client.ts")).createDurableEveAnswerer
     : undefined;
+  const createCompactor = organizerSettings
+    ? (await import("../agents/organizer/context-client.ts")).createDurableEveCompactor
+    : undefined;
   const answers =
     database && organizerSettings && answerRuntime
       ? createConversationAnswers({
           turns: createConversationTurns(database.db),
           cleanup: createConversationCleanupStore(database.db),
+          contexts: createConversationContextStore(database.db),
+          compactorFor: (baseUrl) =>
+            createCompactor!({
+              baseUrl,
+              serviceToken: organizerSettings.serviceToken,
+              deploymentProtectionSecret: organizerSettings.deploymentProtectionSecret,
+            }),
           runtimeUrl: organizerSettings.runtimeUrl,
           runtimeFor: (baseUrl) =>
             answerRuntime({

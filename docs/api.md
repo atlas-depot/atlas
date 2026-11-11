@@ -66,13 +66,13 @@ are removed in bounded batches as subsequent requests arrive.
 | --- | --- |
 | `POST /api/conversations`, `{}` plus UUID `Idempotency-Key` | `201` server-generated conversation |
 | `GET /api/conversations?limit=50&cursor=...` | `200 { conversations, nextCursor }`, newest creation first |
-| `GET /api/conversations/:id` | `200 { conversation, activeTurn }`, including the current checkpoint when running |
+| `GET /api/conversations/:id` | `200 { conversation, activeTurn, recovery }`, including the current checkpoint when running |
 | `GET /api/conversations/:id/messages?limit=50&cursor=...` | `200 { messages, nextCursor }`, ascending immutable sequence |
 | `DELETE /api/conversations/:id`, empty body | `204` after content deletion and durable cleanup-intent recording |
-| `POST /api/conversations/:id/messages`, `{ text, policy? }` plus UUID `Idempotency-Key` | `202 { message, conversation, activeTurn }` |
-| `POST /api/conversations/:id/stop`, empty body | `200 { conversation, activeTurn }` with the queue paused |
-| `POST /api/conversations/:id/resume`, empty body | `200 { conversation, activeTurn }` |
-| `POST /api/conversations/:id/turns/:turnId/retry`, empty body plus UUID `Idempotency-Key` | `202 { conversation, activeTurn }` |
+| `POST /api/conversations/:id/messages`, `{ text, policy? }` plus UUID `Idempotency-Key` | `202 { message, conversation, activeTurn, recovery }` |
+| `POST /api/conversations/:id/stop`, empty body | `200 { conversation, activeTurn, recovery }` with the queue paused |
+| `POST /api/conversations/:id/resume`, empty body | `200 { conversation, activeTurn, recovery }` |
+| `POST /api/conversations/:id/turns/:turnId/retry`, empty body plus UUID `Idempotency-Key` | `202 { conversation, activeTurn, recovery }` |
 
 Pages default to 50 and allow at most 100 records. Use the returned cursor unchanged.
 Creation accepts no owner, ID or title. Identical owner/key replay returns the current
@@ -91,8 +91,9 @@ versions are marked stale. No previous full note revision is archived.
 
 Sending a message accepts one input and returns before the answer exists. `policy` is
 `queue` (default) or `steer`. A queued input waits for the running answer. Up to 100 waiting inputs
-and 500,000 UTF-8 bytes of their text can be answered together; any beyond that stay queued
-for the next answer. The answer lists
+and 10,000 UTF-8 bytes of their text can be answered together; any beyond that stay queued
+for the next answer. An oversized first input remains saved but may require context budget
+recovery. The answer lists
 every input it consumed. A
 steer joins the running answer and redirects it; with no answer running it starts one. A
 steer is never turned into a queued message: when the running answer cannot take it the
@@ -121,6 +122,18 @@ Stop cancels the running answer as `incomplete` with reason `cancelled`, ends it
 session and pauses the queue. Queued inputs stay until resume. Retry starts a new attempt
 over the same inputs and keeps the incomplete answer in history. With no private runtime
 configured these four routes return `503`. Runtime identities never appear in a response.
+
+`recovery` is normally `null`. `{ turnId, reason }` identifies an incomplete attempt whose
+context could not be used: `history_unavailable`, `context_budget`, `summary_failed`,
+`source_changed` or `runtime_expired`. A read never blindly retries that question or unpauses
+the queue. Explicit retry uses the original accepted input identities and a new operation key.
+An unavailable transport is not proof of expiry and does not authorize a replacement runtime.
+
+Follow-ups use authorized recent messages and a bounded summary, not the full UI history or
+the prior runtime's hidden history. Source dependencies include uncited retrieval and inherited
+context. Deleting a source invalidates affected derived context without erasing delivered answers.
+Unknown legacy provenance or unsafe/over-budget reconstruction reports recovery rather than an
+unvalidated history fallback. See the [context contract](proposals/72-conversation-context.md).
 
 ## Organize
 

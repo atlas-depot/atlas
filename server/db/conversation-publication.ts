@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { z } from "zod";
 import {
   conversationCitationInputsSchema,
@@ -16,6 +16,8 @@ import {
   conversationTurns,
 } from "./conversation-schema.ts";
 import { notes } from "./schema.ts";
+import { sourceDependenciesSchema, mergeDependencies } from "../conversation-context.ts";
+import { conversationContexts } from "./conversation-schema.ts";
 
 type Database = ReturnType<typeof openDatabase>["db"];
 export type ConversationTransaction = Parameters<Parameters<Database["transaction"]>[0]>[0];
@@ -47,6 +49,8 @@ const finalizationSchema = z
       citations.every((citation) => !citation.deleted),
     ),
     expectedVersion: z.number().int().nonnegative(),
+    sourceDependencies: sourceDependenciesSchema.default([]),
+    provenanceComplete: z.boolean().default(false),
   })
   .refine((value) =>
     value.status === "incomplete"
@@ -55,7 +59,7 @@ const finalizationSchema = z
         value.text.trim().length > 0 &&
         (value.status === "completed" ? value.citations.length > 0 : value.citations.length === 0),
   );
-type Finalization = z.infer<typeof finalizationSchema>;
+type Finalization = z.input<typeof finalizationSchema>;
 
 /** Caller owns the parent lock and, for citations, all referenced live note locks. */
 export async function publishConversationAnswer(
@@ -94,6 +98,11 @@ export async function publishConversationAnswer(
       status: input.status,
       reason: input.reason ?? null,
       runningText: null,
+      sourceDependencies: mergeDependencies(
+        turn.sourceDependencies,
+        input.sourceDependencies ?? [],
+      ),
+      provenanceComplete: input.provenanceComplete ?? false,
       updatedAt: new Date().toISOString(),
     })
     .where(eq(conversationTurns.id, turn.id));
@@ -101,6 +110,9 @@ export async function publishConversationAnswer(
     .update(conversations)
     .set({ nextSequence: parent.nextSequence + 1, updatedAt: new Date().toISOString() })
     .where(eq(conversations.id, parent.id));
+  // Only running attempts need a replayable prompt snapshot. Lineage stays on the turn,
+  // and the replaceable summary checkpoint is independent of this transient content.
+  await tx.delete(conversationContexts).where(eq(conversationContexts.turnId, turn.id));
   return (await readConversationMessage(tx, parent.id, message!.id))!;
 }
 
@@ -109,10 +121,25 @@ export function finalizeConversationTurn(db: ReturnType<typeof openDatabase>["db
     const input = finalizationSchema.parse(value);
     const id = conversationIdSchema.parse(turnId);
     return db.transaction(async (tx) => {
+      const [snapshot] = await tx
+        .select({ sources: conversationTurns.sourceDependencies })
+        .from(conversationTurns)
+        .innerJoin(conversations, eq(conversations.id, conversationTurns.conversationId))
+        .where(
+          and(
+            eq(conversationTurns.id, id),
+            eq(conversations.id, conversationId),
+            eq(conversations.ownerId, owner),
+          ),
+        );
+      const dependencies = mergeDependencies(snapshot?.sources ?? [], input.sourceDependencies);
       // Notes precede the conversation lock, matching note deletion/redaction order.
       let sourcesAvailable = true;
       const sourceIds = [
-        ...new Set(input.citations.map((citation) => citation.source.noteId.toLowerCase())),
+        ...new Set([
+          ...input.citations.map((citation) => citation.source.noteId.toLowerCase()),
+          ...dependencies.map((source) => source.noteId),
+        ]),
       ].sort();
       for (const noteId of sourceIds) {
         const [note] = await tx
@@ -142,7 +169,27 @@ export function finalizeConversationTurn(db: ReturnType<typeof openDatabase>["db
           : { status: "conflict" as const };
       }
       if (turn.checkpointVersion !== input.expectedVersion) return { status: "conflict" as const };
+      if (
+        turn.sourceDependencies.some(
+          (source) =>
+            !dependencies.some(
+              (locked) => locked.noteId === source.noteId && locked.version === source.version,
+            ),
+        )
+      )
+        return { status: "conflict" as const };
+      const [context] = await tx
+        .select({ state: conversationContexts.state })
+        .from(conversationContexts)
+        .where(eq(conversationContexts.turnId, turn.id));
+      if (context?.state === "recovery") sourcesAvailable = false;
       if (!sourcesAvailable) {
+        await tx
+          .update(conversationTurns)
+          .set({
+            contextRecovery: sql`coalesce(${conversationTurns.contextRecovery}, 'source_changed')`,
+          })
+          .where(eq(conversationTurns.id, turn.id));
         await publishConversationAnswer(tx, parent, turn, {
           status: "incomplete",
           reason: "failed",

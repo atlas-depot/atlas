@@ -1,9 +1,10 @@
 /**
- * Atlas runs two jobs on this agent. The API authenticates question answering with its own
+ * Atlas selects each job with a private service principal. The API authenticates question answering with its own
  * service username, so the job is fixed by the server and never by a model, a note or a browser.
  */
 export const API_PRINCIPAL = "api";
 export const CHAT_PRINCIPAL = "chat";
+export const CONTEXT_PRINCIPAL = "context";
 
 type SessionAuth = {
   auth: {
@@ -24,6 +25,15 @@ export function isChatSession(session: SessionAuth): boolean {
 export function isOrganizeSession(session: SessionAuth): boolean {
   return (
     session.auth.initiator?.principalId !== CHAT_PRINCIPAL &&
-    session.auth.current?.principalId !== CHAT_PRINCIPAL
+    session.auth.current?.principalId !== CHAT_PRINCIPAL &&
+    session.auth.initiator?.principalId !== CONTEXT_PRINCIPAL &&
+    session.auth.current?.principalId !== CONTEXT_PRINCIPAL
+  );
+}
+
+export function isContextSession(session: SessionAuth): boolean {
+  return (
+    session.auth.initiator?.principalId === CONTEXT_PRINCIPAL &&
+    session.auth.current?.principalId === CONTEXT_PRINCIPAL
   );
 }

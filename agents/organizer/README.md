@@ -81,6 +81,14 @@ snapshots. `eve-transport.ts` carries the request code both clients share.
 The `reconcile` schedule also continues answers no reader is polling and retires finished,
 stopped or deleted answer sessions.
 
+Follow-ups reconstruct separate answer runtimes using the [#72 context contract](../../docs/proposals/72-conversation-context.md).
+The private `context` principal performs bounded conversation summarization without note or web
+tools. The API persists its operation and cleanup intent before allocation; reconnect uses the
+same delivery. The provider middleware rechecks live source authorization for every chat/summary
+model request, including automatic compaction and retries. Organize keeps its existing model path.
+Unknown history, invalid summaries, oversized context and confirmed runtime expiry return explicit
+recovery instead of unbounded history or a blind replacement. Routine tests use scripted summaries.
+
 ## Build and verification
 
 Use `pnpm --dir agents/organizer build` for the standalone eve service. A Vercel project rooted at `agents/organizer` must include workspace files outside that directory and install the root workspace. Use Node 26, normal `eve build`, the private service token and provider settings. Hosted builds supply Vercel OIDC for eve's default sandbox preparation. A local build with `--skip-sandbox-prewarm` only checks generated structure; it is not proof of a deployable artifact. No sandbox tool is exposed to this agent.

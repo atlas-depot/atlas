@@ -15,6 +15,7 @@ import type { openDatabase } from "./connection.ts";
 import { noteCreateRequests, notes } from "./schema.ts";
 import { requestNoteIndex } from "./note-index-intents.ts";
 import { conversationCitations } from "./conversation-schema.ts";
+import { invalidateSourceContext } from "./conversation-contexts.ts";
 
 type Database = ReturnType<typeof openDatabase>["db"];
 type Row = typeof notes.$inferSelect;
@@ -207,6 +208,7 @@ export function createNoteStore(db: Database) {
           .update(conversationCitations)
           .set({ excerpt: null, deleted: true })
           .where(eq(conversationCitations.noteId, noteId));
+        await invalidateSourceContext(tx, noteId);
         await tx.delete(notes).where(and(scope, eq(notes.revision, expected)));
         return { status: "deleted" };
       });

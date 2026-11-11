@@ -60,11 +60,58 @@ export async function enqueueConversationCleanup(
     .from(conversationTurns)
     .where(eq(conversationTurns.conversationId, conversationId));
   for (const turn of turns) await enqueueTurnCleanup(tx, ownerId, turn);
+  await tx
+    .update(conversationCleanupIntents)
+    .set({ retryAt: sql`now()` })
+    .where(
+      and(
+        eq(conversationCleanupIntents.ownerId, ownerId),
+        eq(conversationCleanupIntents.conversationId, conversationId),
+      ),
+    );
 }
 
 /** Internal runtime bookkeeping. No method performs or claims an external retirement itself. */
 export function createConversationCleanupStore(db: Database) {
   return {
+    async expedite(owner: string, conversationId: string) {
+      await db
+        .update(conversationCleanupIntents)
+        .set({ retryAt: sql`now()` })
+        .where(
+          and(
+            eq(conversationCleanupIntents.ownerId, owner),
+            eq(conversationCleanupIntents.conversationId, conversationId),
+          ),
+        );
+      return db
+        .select()
+        .from(conversationCleanupIntents)
+        .where(
+          and(
+            eq(conversationCleanupIntents.ownerId, owner),
+            eq(conversationCleanupIntents.conversationId, conversationId),
+          ),
+        )
+        .limit(100);
+    },
+    /** Late receipts can only bind an existing intent, never recreate conversation data. */
+    async bindIntent(allocationOperationId: string, sessionId: string) {
+      const bound = await db
+        .update(conversationCleanupIntents)
+        .set({ sessionId: identitySchema.parse(sessionId) })
+        .where(
+          and(
+            eq(
+              conversationCleanupIntents.allocationOperationId,
+              uuidSchema.parse(allocationOperationId),
+            ),
+            sql`(${conversationCleanupIntents.sessionId} IS NULL OR ${conversationCleanupIntents.sessionId} = ${sessionId})`,
+          ),
+        )
+        .returning();
+      return bound.length === 1;
+    },
     async prepareRuntime(
       ownerId: string,
       conversationId: string,

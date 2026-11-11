@@ -12,11 +12,17 @@ import {
   conversationCleanupIntents,
   conversations,
   conversationTurns,
+  conversationContexts,
+  conversationMessages,
+  conversationSummaries,
 } from "./conversation-schema.ts";
 import { createConversationStore } from "./conversations.ts";
 import { createConversationTurns } from "./conversation-turns.ts";
+import { createConversationContextStore } from "./conversation-contexts.ts";
+import type { ContextCompactor } from "../conversation-context.ts";
 import { setupIndexTestDatabase } from "./index-test-database.ts";
 import { createNoteStore, noteTag } from "./notes.ts";
+import { notes as noteRows } from "./schema.ts";
 
 const database = setupIndexTestDatabase();
 const malicious = JSON.parse(
@@ -33,11 +39,29 @@ function fakeRuntime() {
     submit: [] as { sessionId: string; key: string; message: string }[],
     steer: [] as { sessionId: string; key: string; message: string }[],
     retire: [] as string[],
+    compact: [] as { sessionId: string; key: string; message: string }[],
   };
   let observation: AnswerObservation = { status: "running", text: "" };
   let lostSubmits = 0;
   const unreachable = new Set<string>();
   const inspected: string[] = [];
+  let summaryResult: unknown = { summary: "Synthetic older conversation summary." };
+  const compactor: ContextCompactor = {
+    async allocate(key) {
+      return `summary-${key}`;
+    },
+    async submit(sessionId, key, message) {
+      calls.compact.push({ sessionId, key, message });
+      return { status: "delivered", deliveryId: `summary-delivery-${key}` };
+    },
+    async inspect() {
+      return { status: "completed", result: summaryResult };
+    },
+    async retire(sessionId) {
+      calls.retire.push(sessionId);
+      return { status: "ended" };
+    },
+  };
   const runtime: AnswerRuntime = {
     async allocate(operationId) {
       calls.allocate.push(operationId);
@@ -65,6 +89,8 @@ function fakeRuntime() {
   return {
     calls,
     runtime,
+    compactor,
+    summary: (value: unknown) => void (summaryResult = value),
     observe: (next: AnswerObservation) => void (observation = next),
     loseNextSubmit: () => void (lostSubmits = 1),
     inspected,
@@ -78,6 +104,8 @@ async function fixture(owner = randomUUID()) {
     createConversationAnswers({
       turns: createConversationTurns(db),
       cleanup: createConversationCleanupStore(db),
+      contexts: createConversationContextStore(db),
+      compactorFor: () => fake.compactor,
       runtimeUrl: "https://answers.example.test",
       runtimeFor: () => fake.runtime,
     });
@@ -204,7 +232,9 @@ it("queues inputs behind a running answer, keeps them across reconnect and group
 
   f.fake.observe(f.result([plan], [{ source: plan.source, excerpt: "library at 14:00" }]));
   await f.second.refresh(f.owner, f.id);
-  expect(f.fake.calls.submit.at(-1)?.message).toBe("Question 1:\nSecond\n\nQuestion 2:\nThird");
+  expect(f.fake.calls.submit.at(-1)?.message).toContain(
+    "Current question:\nQuestion 1:\nSecond\n\nQuestion 2:\nThird",
+  );
   const answers = (await f.history()).filter((message) => message.role === "assistant");
   expect(answers).toMatchObject([
     { status: "completed", inputIds: [first.value.id] },
@@ -474,7 +504,7 @@ it("keeps one answer's combined input within the runtime request limit and fails
   const f = await fixture();
   const turns = createConversationTurns(database.db);
   await turns.stop(f.owner, f.id);
-  const large = "\u754c".repeat(100_000);
+  const large = "\u754c".repeat(2_000);
   const ids: string[] = [];
   for (let index = 0; index < 3; index++) {
     const accepted = await turns.acceptInput(f.owner, f.id, randomUUID(), { text: large });
@@ -482,7 +512,7 @@ it("keeps one answer's combined input within the runtime request limit and fails
     ids.push(accepted.value.id);
   }
   await turns.resume(f.owner, f.id);
-  // Each input is 300,000 bytes: two together would exceed the bound, so they go one by one.
+  // Each input is 6,000 bytes: two exceed the model-context grouping bound, so they go one by one.
   expect(await turns.startNext(f.owner, f.id)).toMatchObject({ status: "started" });
   expect(await f.store.read(f.owner, f.id)).toMatchObject({ activeTurn: { inputIds: [ids[0]] } });
 
@@ -531,4 +561,386 @@ it("counts an explicit retry against the owner's running answers", async () => {
   expect(await f.first.retry(f.owner, f.id, stopped.message.turnId, key)).toMatchObject({
     status: "saved",
   });
+});
+it("reconstructs a context-dependent follow-up in a new runtime after the old session expires", async () => {
+  const f = await fixture();
+  const source = await f.note("Project", "Project Cedar meets on Tuesday.");
+  f.fake.observe(
+    f.result(
+      [source],
+      [{ source: source.source, excerpt: "Project Cedar" }],
+      "The project is Project Cedar.",
+    ),
+  );
+  await f.first.send(f.owner, f.id, randomUUID(), { text: "Which project?" });
+  const before = await f.history();
+  const oldSession = f.fake.calls.submit[0]!.sessionId;
+  f.fake.unreachable.add(oldSession);
+  f.fake.observe({ status: "running", text: "" });
+  const followup = await f.second.send(f.owner, f.id, randomUUID(), {
+    text: "When does that project meet?",
+  });
+  expect(followup.status).toBe("saved");
+  const next = f.fake.calls.submit.at(-1)!;
+  expect(next.sessionId).not.toBe(oldSession);
+  expect(next.message).toContain("The project is Project Cedar.");
+  expect(next.message).toContain("When does that project meet?");
+  expect((await f.history()).slice(0, before.length)).toEqual(before);
+  await Promise.all([f.first.refresh(f.owner, f.id), f.second.refresh(f.owner, f.id)]);
+  expect(new Set(f.fake.calls.submit.map(({ key }) => key)).size).toBe(2);
+});
+
+it("forces compaction, tracks transitive dependencies and removes deleted evidence from every future context", async () => {
+  const f = await fixture();
+  const secret = "SYNTHETIC-CEDAR-SECRET-7193";
+  const source = await f.note("Project", secret);
+  const answer = `${secret}. ${"Historical detail. ".repeat(600)}`;
+  f.fake.observe(f.result([source], [{ source: source.source, excerpt: secret }], answer));
+  await f.first.send(f.owner, f.id, randomUUID(), { text: "Describe the project." });
+  f.fake.summary({ summary: `The earlier project has marker ${secret}.` });
+  f.fake.observe({ status: "running", text: "" });
+  await f.second.send(f.owner, f.id, randomUUID(), { text: "What does that mean?" });
+  expect(f.fake.calls.compact).toHaveLength(1);
+  expect(f.fake.calls.compact[0]!.message).toContain(secret);
+  await f.first.refresh(f.owner, f.id);
+  expect(f.fake.calls.submit.at(-1)!.message).toContain(secret);
+  // A subsequent answer inherits the dependency even without citing it itself.
+  f.fake.observe(f.result([], [], `The earlier marker was ${secret}.`));
+  await f.second.refresh(f.owner, f.id);
+  f.fake.observe({ status: "running", text: "" });
+  await f.first.send(f.owner, f.id, randomUUID(), { text: "Explain the earlier marker." });
+  const active = f.fake.calls.submit.at(-1)!;
+  const turns = createConversationTurns(database.db);
+  expect(await turns.contextAuthorized(active.sessionId)).toBe(true);
+  await createNoteStore(database.db).delete(f.owner, source.noteId, source.revision);
+  expect(await turns.contextAuthorized(active.sessionId)).toBe(false);
+  expect(
+    await database.db
+      .select()
+      .from(conversationSummaries)
+      .where(eq(conversationSummaries.conversationId, f.id)),
+  ).toEqual([]);
+  const contexts = await database.db
+    .select()
+    .from(conversationContexts)
+    .where(eq(conversationContexts.conversationId, f.id));
+  expect(JSON.stringify(contexts)).not.toContain(secret);
+  f.fake.observe(f.result([], [], `A late result containing ${secret}.`));
+  await f.second.refresh(f.owner, f.id);
+  expect((await f.history()).at(-1)).toMatchObject({ status: "incomplete", text: "" });
+  expect((await f.store.read(f.owner, f.id))?.recovery?.reason).toBe("source_changed");
+  f.fake.observe({ status: "running", text: "" });
+  await f.first.send(f.owner, f.id, randomUUID(), { text: "What remains available?" });
+  const safe = f.fake.calls.submit.at(-1)!;
+  expect(safe.sessionId).not.toBe(active.sessionId);
+  expect(safe.message).not.toContain(secret);
+  const history = await f.history();
+  expect(history.find((message) => message.text === answer)).toMatchObject({
+    text: answer,
+    citations: [{ deleted: true, excerpt: null }],
+  });
+  expect(history.some((message) => message.text === `The earlier marker was ${secret}.`)).toBe(
+    true,
+  );
+});
+
+it("records uncited retrieval before the model sees it and excludes the entire derived answer after deletion", async () => {
+  const f = await fixture();
+  const cited = await f.note("Cited", "A harmless cited passage.");
+  const uncited = await f.note("Uncited", "UNCITED-SOURCE-MARKER");
+  await f.first.send(f.owner, f.id, randomUUID(), { text: "What is saved?" });
+  const session = f.fake.calls.submit[0]!.sessionId;
+  const turns = createConversationTurns(database.db);
+  expect(
+    await turns.recordSearch(
+      session,
+      [cited, uncited].map(({ source }) => ({ noteId: source.noteId, version: source.version })),
+      { passages: [cited, uncited] },
+    ),
+  ).toBe(true);
+  f.fake.observe(
+    f.result(
+      [cited],
+      [{ source: cited.source, excerpt: "harmless" }],
+      "UNCITED-SOURCE-MARKER influenced this answer.",
+    ),
+  );
+  await f.first.refresh(f.owner, f.id);
+  await createNoteStore(database.db).delete(f.owner, uncited.noteId, uncited.revision);
+  f.fake.observe({ status: "running", text: "" });
+  await f.second.send(f.owner, f.id, randomUUID(), { text: "Tell me more." });
+  expect(f.fake.calls.submit.at(-1)!.message).not.toContain("UNCITED-SOURCE-MARKER");
+  expect((await f.history()).find((message) => message.text.includes("influenced"))).toMatchObject({
+    status: "completed",
+    citations: [{ deleted: false }],
+  });
+});
+
+it("does not authorize another account's source or an over-budget tool result", async () => {
+  const f = await fixture();
+  const other = await fixture();
+  const foreign = await other.note("Private", "Not for Alex.");
+  await f.first.send(f.owner, f.id, randomUUID(), { text: "Question" });
+  const turns = createConversationTurns(database.db);
+  const session = f.fake.calls.submit[0]!.sessionId;
+  expect(
+    await turns.recordSearch(
+      session,
+      [{ noteId: foreign.noteId, version: foreign.source.version }],
+      "small",
+    ),
+  ).toBe(false);
+  expect(await turns.recordSearch(session, [], "x".repeat(48_001))).toBe(false);
+});
+
+it("keeps a paused queue across expiry/reload and concurrent explicit resumes start one attempt", async () => {
+  const f = await fixture();
+  await f.first.send(f.owner, f.id, randomUUID(), { text: "Active" });
+  const queued = await f.first.send(f.owner, f.id, randomUUID(), { text: "Queued" });
+  await f.first.stop(f.owner, f.id);
+  f.fake.unreachable.add(f.fake.calls.submit[0]!.sessionId);
+  await Promise.all([f.first.refresh(f.owner, f.id), f.second.refresh(f.owner, f.id)]);
+  expect(f.fake.calls.submit).toHaveLength(1);
+  await Promise.all([f.first.resume(f.owner, f.id), f.second.resume(f.owner, f.id)]);
+  expect(new Set(f.fake.calls.submit.slice(1).map(({ key }) => key)).size).toBe(1);
+  expect(await f.store.read(f.owner, f.id)).toMatchObject({
+    conversation: { queuePaused: false },
+    activeTurn: { inputIds: queued.status === "saved" ? [queued.value.id] : [] },
+  });
+});
+
+it("reports a confirmed runtime expiry without blindly allocating a replacement", async () => {
+  const f = await fixture();
+  await f.first.send(f.owner, f.id, randomUUID(), { text: "Question" });
+  f.fake.observe({ status: "expired", text: "" });
+  await f.second.refresh(f.owner, f.id);
+  expect((await f.store.read(f.owner, f.id))?.recovery?.reason).toBe("runtime_expired");
+  expect(new Set(f.fake.calls.allocate).size).toBe(1);
+  const failed = (await f.history()).at(-1)!;
+  if (failed.role !== "assistant") throw new Error("Missing incomplete answer");
+  f.fake.observe({ status: "running", text: "" });
+  const operation = randomUUID();
+  const [a, b] = await Promise.all([
+    f.first.retry(f.owner, f.id, failed.turnId, operation),
+    f.second.retry(f.owner, f.id, failed.turnId, operation),
+  ]);
+  expect(a.status).toBe("saved");
+  expect(b.status).toBe("saved");
+  expect(new Set(f.fake.calls.allocate).size).toBe(2);
+  expect((await f.history()).filter(({ role }) => role === "user")).toHaveLength(1);
+});
+
+it("makes missing history and unknown legacy provenance visible without sending another prompt", async () => {
+  for (const mode of ["missing", "unknown"] as const) {
+    const f = await fixture();
+    f.fake.observe(f.result([], [], "An earlier answer."));
+    await f.first.send(f.owner, f.id, randomUUID(), { text: "First" });
+    const [answer] = (await f.history()).filter((message) => message.role === "assistant");
+    if (!answer || answer.role !== "assistant") throw new Error("Missing answer");
+    if (mode === "missing")
+      await database.db.delete(conversationMessages).where(eq(conversationMessages.id, answer.id));
+    else
+      await database.db
+        .update(conversationTurns)
+        .set({ provenanceComplete: false })
+        .where(eq(conversationTurns.id, answer.turnId));
+    f.fake.observe({ status: "running", text: "" });
+    await f.second.send(f.owner, f.id, randomUUID(), { text: "What did that mean?" });
+    expect((await f.store.read(f.owner, f.id))?.recovery?.reason).toBe("history_unavailable");
+    expect(f.fake.calls.submit).toHaveLength(1);
+  }
+});
+
+it("reports a summary failure instead of using the unbounded old answer", async () => {
+  const f = await fixture();
+  f.fake.observe(f.result([], [], "old ".repeat(3_000)));
+  await f.first.send(f.owner, f.id, randomUUID(), { text: "First" });
+  f.fake.summary({ summary: "" });
+  await f.second.send(f.owner, f.id, randomUUID(), { text: "Follow-up" });
+  expect((await f.store.read(f.owner, f.id))?.recovery?.reason).toBe("summary_failed");
+  expect(f.fake.calls.submit).toHaveLength(1);
+  expect((await f.history()).some(({ text }) => text === "old ".repeat(3_000))).toBe(true);
+});
+
+it("fences a summary that completes after its source was deleted", async () => {
+  const f = await fixture();
+  const source = await f.note("Source", "SUMMARY-RACE-MARKER");
+  f.fake.observe(
+    f.result(
+      [source],
+      [{ source: source.source, excerpt: source.text }],
+      `${source.text} ${"detail ".repeat(1_500)}`,
+    ),
+  );
+  await f.first.send(f.owner, f.id, randomUUID(), { text: "First" });
+  f.fake.compactor.inspect = async () => {
+    await createNoteStore(database.db).delete(f.owner, source.noteId, source.revision);
+    return { status: "completed", result: { summary: source.text } };
+  };
+  await f.second.send(f.owner, f.id, randomUUID(), { text: "Follow-up" });
+  await f.first.refresh(f.owner, f.id);
+  expect(
+    await database.db
+      .select()
+      .from(conversationSummaries)
+      .where(eq(conversationSummaries.conversationId, f.id)),
+  ).toEqual([]);
+  expect(f.fake.calls.submit).toHaveLength(1);
+  expect((await f.store.read(f.owner, f.id))?.recovery?.reason).toBe("source_changed");
+});
+
+it("rebuilds against edited sources without silently reusing their historical facts", async () => {
+  const f = await fixture();
+  const source = await f.note("Schedule", "Tuesday");
+  f.fake.observe(
+    f.result([source], [{ source: source.source, excerpt: "Tuesday" }], "The meeting is Tuesday."),
+  );
+  await f.first.send(f.owner, f.id, randomUUID(), { text: "When?" });
+  await createNoteStore(database.db).update(f.owner, source.noteId, source.revision, {
+    title: "Schedule",
+    content: "Wednesday",
+  });
+  f.fake.observe({ status: "running", text: "" });
+  await f.second.send(f.owner, f.id, randomUUID(), { text: "When is it now?" });
+  expect(f.fake.calls.submit.at(-1)!.message).not.toContain("Tuesday");
+  expect((await f.history()).find(({ text }) => text === "The meeting is Tuesday.")).toMatchObject({
+    citations: [{ stale: true }],
+  });
+});
+
+it("stops a compaction session and retains its queued input until an explicit resume", async () => {
+  const f = await fixture();
+  f.fake.observe(f.result([], [], "old ".repeat(3_000)));
+  await f.first.send(f.owner, f.id, randomUUID(), { text: "First" });
+  f.fake.compactor.inspect = async () => ({ status: "running" });
+  await f.first.send(f.owner, f.id, randomUUID(), { text: "Follow-up" });
+  await f.first.send(f.owner, f.id, randomUUID(), { text: "Still queued" });
+  const session = f.fake.calls.compact[0]!.sessionId;
+  expect(await createConversationContextStore(database.db).summaryAuthorized(session)).toBe(true);
+  await f.second.stop(f.owner, f.id);
+  expect(f.fake.calls.retire).toContain(session);
+  expect(await createConversationContextStore(database.db).summaryAuthorized(session)).toBe(false);
+  expect((await f.store.read(f.owner, f.id))?.conversation.queuePaused).toBe(true);
+});
+
+it("shows corrupt context as recovery and never resubmits a changed prompt under the old key", async () => {
+  const f = await fixture();
+  await f.first.send(f.owner, f.id, randomUUID(), { text: "Question" });
+  await database.db
+    .update(conversationContexts)
+    .set({ recent: sql`'[{"invalid":"history"}]'::jsonb` })
+    .where(eq(conversationContexts.conversationId, f.id));
+  await f.second.refresh(f.owner, f.id);
+  expect((await f.store.read(f.owner, f.id))?.recovery?.reason).toBe("history_unavailable");
+  expect(f.fake.calls.submit).toHaveLength(1);
+});
+
+it("keeps a queued question whose sequence falls inside a compacted checkpoint", async () => {
+  const f = await fixture();
+  await f.first.send(f.owner, f.id, randomUUID(), { text: "First question" });
+  await f.first.send(f.owner, f.id, randomUUID(), { text: "Remember my choice of blue?" });
+  f.fake.observe(f.result([], [], "Old answer detail. ".repeat(600)));
+  await f.second.refresh(f.owner, f.id);
+  const [checkpoint] = await database.db
+    .select()
+    .from(conversationSummaries)
+    .where(eq(conversationSummaries.conversationId, f.id));
+  const queued = (await f.history()).find(({ text }) => text === "Remember my choice of blue?")!;
+  expect(checkpoint!.deferredInputIds).toContain(queued.id);
+  f.fake.observe(f.result([], [], "Recorded your choice."));
+  await f.first.refresh(f.owner, f.id);
+  f.fake.observe({ status: "running", text: "" });
+  await f.second.send(f.owner, f.id, randomUUID(), { text: "Which color did I choose?" });
+  expect(f.fake.calls.submit.at(-1)!.message).toContain("Remember my choice of blue?");
+});
+
+it("reconnects to one durable compaction operation across concurrent API processes", async () => {
+  const f = await fixture();
+  f.fake.observe(f.result([], [], "old ".repeat(3_000)));
+  await f.first.send(f.owner, f.id, randomUUID(), { text: "First" });
+  f.fake.compactor.inspect = async () => ({ status: "running" });
+  await f.second.send(f.owner, f.id, randomUUID(), { text: "Follow-up" });
+  await Promise.all([f.first.refresh(f.owner, f.id), f.second.refresh(f.owner, f.id)]);
+  expect(new Set(f.fake.calls.compact.map(({ key }) => key)).size).toBe(1);
+  expect(f.fake.calls.submit).toHaveLength(1);
+  f.fake.compactor.inspect = async () => ({
+    status: "completed",
+    result: { summary: "Earlier discussion." },
+  });
+  await Promise.all([f.first.refresh(f.owner, f.id), f.second.refresh(f.owner, f.id)]);
+  f.fake.observe({ status: "running", text: "" });
+  await f.first.refresh(f.owner, f.id);
+  expect(f.fake.calls.submit.at(-1)!.message).toContain("Earlier discussion.");
+});
+
+it("retains an oversized accepted input but reports context budget recovery without starting a model", async () => {
+  const f = await fixture();
+  const text = "漢".repeat(9_000);
+  await f.first.send(f.owner, f.id, randomUUID(), { text });
+  expect((await f.store.read(f.owner, f.id))?.recovery?.reason).toBe("context_budget");
+  expect((await f.history())[0]!.text).toBe(text);
+  expect(f.fake.calls.allocate).toHaveLength(0);
+});
+
+it("retains cleanup for a summary allocation returned after conversation deletion", async () => {
+  const f = await fixture();
+  f.fake.observe(f.result([], [], "old ".repeat(3_000)));
+  await f.first.send(f.owner, f.id, randomUUID(), { text: "First" });
+  f.fake.compactor.allocate = async () => {
+    await f.store.delete(f.owner, f.id);
+    return "late-summary-session";
+  };
+  await f.second.send(f.owner, f.id, randomUUID(), { text: "Follow-up" });
+  expect(await f.store.read(f.owner, f.id)).toBeUndefined();
+  expect(f.fake.calls.compact).toHaveLength(0);
+  expect(
+    await database.db
+      .select()
+      .from(conversationContexts)
+      .where(eq(conversationContexts.conversationId, f.id)),
+  ).toEqual([]);
+  const intents = await database.db
+    .select()
+    .from(conversationCleanupIntents)
+    .where(eq(conversationCleanupIntents.conversationId, f.id));
+  expect(
+    intents.some(
+      (intent) => intent.purpose === "summary" && intent.sessionId === "late-summary-session",
+    ),
+  ).toBe(true);
+});
+
+it("suppresses a late answer after access loss even when no citation names the lost source", async () => {
+  const f = await fixture();
+  const source = await f.note("Private", "ACCESS-LOSS-MARKER");
+  f.fake.observe(
+    f.result([source], [{ source: source.source, excerpt: source.text }], source.text),
+  );
+  await f.first.send(f.owner, f.id, randomUUID(), { text: "First" });
+  f.fake.observe({ status: "running", text: "" });
+  await f.second.send(f.owner, f.id, randomUUID(), { text: "More on that?" });
+  const session = f.fake.calls.submit.at(-1)!.sessionId;
+  await database.db
+    .update(noteRows)
+    .set({ ownerId: "synthetic-new-owner" })
+    .where(eq(noteRows.id, source.noteId));
+  expect(await createConversationTurns(database.db).contextAuthorized(session)).toBe(false);
+  f.fake.observe(f.result([], [], "Unpublished ACCESS-LOSS-MARKER"));
+  await f.first.refresh(f.owner, f.id);
+  expect((await f.history()).at(-1)).toMatchObject({ status: "incomplete", text: "" });
+});
+
+it("exposes a refused summary as recovery instead of retrying the same refused input forever", async () => {
+  const f = await fixture();
+  f.fake.observe(f.result([], [], "old ".repeat(3_000)));
+  await f.first.send(f.owner, f.id, randomUUID(), { text: "First" });
+  let submissions = 0;
+  f.fake.compactor.submit = async () => {
+    submissions++;
+    return { status: "rejected" };
+  };
+  await f.second.send(f.owner, f.id, randomUUID(), { text: "Follow-up" });
+  await f.first.refresh(f.owner, f.id);
+  expect(submissions).toBe(1);
+  expect((await f.store.read(f.owner, f.id))?.recovery?.reason).toBe("summary_failed");
 });

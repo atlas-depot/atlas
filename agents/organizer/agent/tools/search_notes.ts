@@ -18,7 +18,7 @@ const tool = defineTool({
     try {
       const turns = createConversationTurns(connection.db);
       const search = createNoteSearchStore(connection.db);
-      return await searchOwnedNotes(ctx.session.id, input, {
+      const result = await searchOwnedNotes(ctx.session.id, input, {
         ownerOfSession: (sessionId) => turns.ownerOfSession(sessionId),
         embed: createSearchQueryEncoder(
           createNoteEmbedder({ apiKey: process.env.OPENROUTER_API_KEY ?? "" }),
@@ -26,6 +26,16 @@ const tool = defineTool({
         ),
         candidates: (owner, vector, limit) => search.candidates(owner, vector, limit),
       });
+      if (
+        !(await turns.recordSearch(
+          ctx.session.id,
+          result.passages.map(({ source }) => ({ noteId: source.noteId, version: source.version })),
+          result,
+        ))
+      ) {
+        throw new Error("Search context is unavailable or exceeded its budget.");
+      }
+      return result;
     } finally {
       await connection.close();
     }
