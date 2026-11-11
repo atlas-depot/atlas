@@ -7,6 +7,8 @@ const FRAMING_RESERVE = 4_096;
 export function contextBudget(
   windowTokens: number,
   authorize?: () => Promise<boolean>,
+  /** Records why the attempt ends, so the caller sees a reason and not a generic failure. */
+  onOverBudget?: () => Promise<unknown>,
 ): LanguageModelMiddleware {
   return {
     transformParams: async ({ params }) => {
@@ -20,8 +22,10 @@ export function contextBudget(
         }),
         "utf8",
       );
-      if (bytes + OUTPUT_TOKEN_RESERVE + FRAMING_RESERVE > windowTokens)
+      if (bytes + OUTPUT_TOKEN_RESERVE + FRAMING_RESERVE > windowTokens) {
+        await onOverBudget?.();
         throw new Error("Model context budget exceeded.");
+      }
       return {
         ...params,
         maxOutputTokens: Math.min(

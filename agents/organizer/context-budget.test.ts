@@ -80,3 +80,25 @@ await test("every provider boundary rechecks context authorization, including st
   assert.equal(provider.doGenerateCalls.length, 0);
   assert.equal(provider.doStreamCalls.length, 0);
 });
+
+await test("an over-budget call records its reason before it is refused", async () => {
+  const provider = fixture().provider;
+  let recorded = 0;
+  const model = wrapLanguageModel({
+    model: provider,
+    middleware: contextBudget(
+      21_000,
+      async () => true,
+      async () => void recorded++,
+    ),
+  });
+  await assert.rejects(
+    async () =>
+      model.doGenerate({
+        prompt: [{ role: "user", content: [{ type: "text", text: "a".repeat(2_000) }] }],
+      }),
+    /budget exceeded/,
+  );
+  assert.equal(recorded, 1);
+  assert.equal(provider.doGenerateCalls.length, 0);
+});

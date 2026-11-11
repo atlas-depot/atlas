@@ -18,21 +18,35 @@ export default defineAgent({
     if (!isChatSession(ctx.session) && !isContextSession(ctx.session))
       return { model, modelContextWindowTokens: config.ORGANIZER_CONTEXT_TOKENS };
     // The provider boundary also covers eve's automatic compaction and provider retries.
+    const withDatabase = async <T>(
+      run: (db: ReturnType<typeof openDatabase>["db"]) => Promise<T>,
+    ) => {
+      const connection = openDatabase(readDatabaseUrl(process.env), {
+        max: 1,
+        lockTimeoutMs: 5_000,
+      });
+      try {
+        return await run(connection.db);
+      } finally {
+        await connection.close();
+      }
+    };
     const guarded = wrapLanguageModel({
       model,
-      middleware: contextBudget(config.ORGANIZER_CONTEXT_TOKENS, async () => {
-        const connection = openDatabase(readDatabaseUrl(process.env), {
-          max: 1,
-          lockTimeoutMs: 5_000,
-        });
-        try {
-          return isChatSession(ctx.session)
-            ? await createConversationTurns(connection.db).contextAuthorized(ctx.session.id)
-            : await createConversationContextStore(connection.db).summaryAuthorized(ctx.session.id);
-        } finally {
-          await connection.close();
-        }
-      }),
+      middleware: contextBudget(
+        config.ORGANIZER_CONTEXT_TOKENS,
+        () =>
+          withDatabase((db) =>
+            isChatSession(ctx.session)
+              ? createConversationTurns(db).contextAuthorized(ctx.session.id)
+              : createConversationContextStore(db).summaryAuthorized(ctx.session.id),
+          ),
+        // A summary that runs over budget already ends as summary_failed.
+        () =>
+          withDatabase((db) =>
+            createConversationContextStore(db).recoverBySession(ctx.session.id, "context_budget"),
+          ),
+      ),
     });
     return { model: guarded, modelContextWindowTokens: config.ORGANIZER_CONTEXT_TOKENS };
   }),
