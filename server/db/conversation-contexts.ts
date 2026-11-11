@@ -38,15 +38,15 @@ export async function lockContextSources(
   owner: string,
   sources: SourceDependency[],
 ) {
-  for (const noteId of [...new Set(sources.map((source) => source.noteId))].sort()) {
-    const [note] = await tx
-      .select({ id: notes.id, revision: notes.revision })
-      .from(notes)
-      .where(and(eq(notes.id, noteId), eq(notes.ownerId, owner)))
-      .for("share");
-    if (!note) return false;
-  }
-  return true;
+  const ids = [...new Set(sources.map((source) => source.noteId))].sort();
+  if (ids.length === 0) return true;
+  const available = await tx
+    .select({ id: notes.id })
+    .from(notes)
+    .where(and(inArray(notes.id, ids), eq(notes.ownerId, owner)))
+    .orderBy(asc(notes.id))
+    .for("share");
+  return available.length === ids.length;
 }
 
 /** Note mutations already hold the source lock. Preserve UI answers, erase derived context. */
@@ -202,7 +202,16 @@ export function createConversationContextStore(db: Database) {
     },
     async prepare(owner: string, conversationId: string, turnId: string, runtimeUrl: string) {
       const saved = await existing(owner, conversationId, turnId);
-      if (saved) return saved;
+      if (saved) {
+        if (
+          saved.state !== "recovery" &&
+          !(await db.transaction((tx) => lockContextSources(tx, owner, saved.sources)))
+        ) {
+          await recover(owner, conversationId, turnId, "source_changed");
+          return undefined;
+        }
+        return saved;
+      }
       // Read a bounded candidate without locks. Recheck its watermark under locks before save.
       const [parent] = await db
         .select()
