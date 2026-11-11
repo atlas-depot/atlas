@@ -15,6 +15,7 @@ import type { openDatabase } from "./connection.ts";
 import { noteCreateRequests, notes } from "./schema.ts";
 import { requestNoteIndex } from "./note-index-intents.ts";
 import { conversationCitations } from "./conversation-schema.ts";
+import { invalidateSourceContext } from "./conversation-contexts.ts";
 
 type Database = ReturnType<typeof openDatabase>["db"];
 type Row = typeof notes.$inferSelect;
@@ -195,13 +196,16 @@ export function createNoteStore(db: Database) {
       expectedRevision: number,
     ): Promise<{ status: "deleted" | "not_found" | "conflict" }> {
       const owner = ownerSchema.parse(ownerId);
-      const noteId = noteIdSchema.parse(id);
+      // JSONB source dependencies compare UUID strings, so use the canonical lowercase form.
+      const noteId = noteIdSchema.parse(id).toLowerCase();
       const expected = revisionSchema.parse(expectedRevision);
       return db.transaction(async (tx) => {
         const scope = and(eq(notes.ownerId, owner), eq(notes.id, noteId));
         const [current] = await tx.select().from(notes).where(scope).for("update");
         if (!current) return { status: "not_found" };
         if (current.revision !== expected) return { status: "conflict" };
+        // Conversation locks come before citation rows, the order a conversation deletion uses.
+        await invalidateSourceContext(tx, noteId);
         // Citation publication locks source notes first, so no late writer can restore this copy.
         await tx
           .update(conversationCitations)

@@ -21,7 +21,7 @@ function fixture(authenticated = true) {
       .mockResolvedValue({ conversations: [conversation], nextCursor: null }),
     read: vi
       .fn<ConversationService["read"]>()
-      .mockResolvedValue({ conversation, activeTurn: null }),
+      .mockResolvedValue({ conversation, activeTurn: null, recovery: null }),
     messages: vi
       .fn<ConversationService["messages"]>()
       .mockResolvedValue({ messages: [], nextCursor: null }),
@@ -171,7 +171,12 @@ describe("conversation answer HTTP boundary", () => {
       send({ text: "When is the meeting?", policy: "steer" }),
     );
     expect(response.status).toBe(202);
-    expect(await response.json()).toEqual({ message, conversation, activeTurn: null });
+    expect(await response.json()).toEqual({
+      message,
+      conversation,
+      activeTurn: null,
+      recovery: null,
+    });
     expect(answers.send).toHaveBeenCalledExactlyOnceWith("verified-owner", id, key, {
       text: "When is the meeting?",
       policy: "steer",
@@ -219,12 +224,17 @@ describe("conversation answer HTTP boundary", () => {
     const { app, answers } = answering();
     const post = (path: string, headers: Record<string, string> = {}) =>
       app.request(`/api/conversations/${id}/${path}`, { method: "POST", headers });
-    answers.stop.mockResolvedValueOnce({ status: "paused", message: undefined });
+    answers.stop.mockResolvedValueOnce({
+      status: "paused",
+      message: undefined,
+      allocationOperationId: null,
+      summaryOperationId: "synthetic-summary",
+    });
     for (const action of ["stop", "resume"] as const) {
       const response = await post(action);
       expect([response.status, await response.json()]).toEqual([
         200,
-        { conversation, activeTurn: null },
+        { conversation, activeTurn: null, recovery: null },
       ]);
       expect(answers[action]).toHaveBeenCalledExactlyOnceWith("verified-owner", id);
     }
@@ -233,7 +243,7 @@ describe("conversation answer HTTP boundary", () => {
     const retried = await post(`turns/${turnId}/retry`, { "Idempotency-Key": key });
     expect([retried.status, await retried.json()]).toEqual([
       202,
-      { conversation, activeTurn: null },
+      { conversation, activeTurn: null, recovery: null },
     ]);
     expect(answers.retry).toHaveBeenCalledExactlyOnceWith("verified-owner", id, turnId, key);
     expect((await post(`turns/${turnId}/retry`)).status).toBe(400);
@@ -244,5 +254,22 @@ describe("conversation answer HTTP boundary", () => {
     expect((await app.request(`/api/conversations/${id}`)).status).toBe(200);
     expect(answers.refresh).toHaveBeenCalledExactlyOnceWith("verified-owner", id);
     expect(answers.send).not.toHaveBeenCalled();
+  });
+  it("exposes recovery separately from history without automatically resending input", async () => {
+    const { app, answers, store } = answering();
+    store.read.mockResolvedValue({
+      conversation,
+      activeTurn: null,
+      recovery: { turnId: id, reason: "summary_failed" },
+    });
+    const response = await app.request(`/api/conversations/${id}`);
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      conversation,
+      activeTurn: null,
+      recovery: { turnId: id, reason: "summary_failed" },
+    });
+    expect(answers.send).not.toHaveBeenCalled();
+    expect(answers.retry).not.toHaveBeenCalled();
   });
 });

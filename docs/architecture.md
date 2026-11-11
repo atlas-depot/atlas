@@ -53,6 +53,13 @@ public/         Static files served unchanged, currently the code font
 
 Atlas owns user authorization, source provenance and external-action outcomes. eve may handle agent execution, but it does not replace those policies. External actions require the agreed user approval, and retries must handle uncertain provider outcomes. See [security boundaries](security.md).
 
+Conversation continuation keeps immutable UI history separate from the model's bounded context.
+Atlas reconstructs each answer session from recent eligible messages and a validated summary.
+Dependencies include all retrieved sources and prior context, not only citations. Source deletion
+invalidates derived context and fences future provider calls and publication; old delivered
+answers remain visible. Missing or unsafe context exposes recovery. The [context contract](proposals/72-conversation-context.md)
+describes the bounded summary job on the existing eve harness; it is not cross-conversation memory.
+
 The [organizer](../agents/organizer/README.md) is integrated through authenticated Hono routes. Hono owns note access and calls a private eve service on Vercel Workflow. A standard eve research tool uses OpenRouter and returns source records through tool results. Neon stores the owner-bound run, exact source revision, temporary input/result and pinned runtime identity. An empty eve session is committed before the note is sent to its fixed identity with an idempotency key. Reconnect inspects that work across API processes instead of starting a second generation.
 
 A completed result is handed off atomically into a 24-hour owner-bound editable draft alongside persisted eve cleanup intent. Only then is the eve session retired with zero retention requested. Failed cleanup is retryable after process replacement. Draft edits do not extend expiration. Save creates a separate note with server-established source provenance and an idempotent receipt; Discard removes the temporary content. A deleted source does not erase an already delivered draft. An explicitly enabled maintenance schedule reconciles abandoned readers, retries cleanup and physically purges expired content. Each retained deployment must verify hosted Workflow access and resumption and enable maintenance for expiry and cleanup reconciliation.

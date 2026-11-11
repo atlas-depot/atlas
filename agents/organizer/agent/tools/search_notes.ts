@@ -1,5 +1,6 @@
 import { defineDynamic, defineTool } from "eve/tools";
 import { openDatabase, readDatabaseUrl } from "../../../../server/db/connection.ts";
+import { createConversationContextStore } from "../../../../server/db/conversation-contexts.ts";
 import { createConversationTurns } from "../../../../server/db/conversation-turns.ts";
 import { createNoteSearchStore } from "../../../../server/db/note-search.ts";
 import { createSearchQueryEncoder } from "../../../../server/search-query.ts";
@@ -25,6 +26,15 @@ const tool = defineTool({
           ctx.abortSignal,
         ),
         candidates: (owner, vector, limit) => search.candidates(owner, vector, limit),
+        record: async (sessionId, sources, output) => {
+          const recorded = await turns.recordSearch(sessionId, sources, output);
+          if (recorded.status === "recorded") return true;
+          await createConversationContextStore(connection.db).recoverBySession(
+            sessionId,
+            recorded.status === "budget" ? "context_budget" : "source_changed",
+          );
+          return false;
+        },
       });
     } finally {
       await connection.close();

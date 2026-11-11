@@ -45,7 +45,13 @@ const database = setupIndexTestDatabase(async (connection) => {
     updatedAt: input.createdAt,
   });
   // Exercise backfill while bringing storage up to the schema required by current note writes.
-  for (const name of ["0006_note-index", "0007_search-admission", "0008_conversation-records"]) {
+  for (const name of [
+    "0006_note-index",
+    "0007_search-admission",
+    "0008_conversation-records",
+    "0009_conversation-delivery",
+    "0010_conversation-context",
+  ]) {
     await connection.db.execute(
       sql.raw(await readFile(new URL(`../../drizzle/${name}.sql`, import.meta.url), "utf8")),
     );

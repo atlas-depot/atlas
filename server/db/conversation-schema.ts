@@ -15,6 +15,7 @@ import {
   uuid,
 } from "drizzle-orm/pg-core";
 import type { NotePassageSource } from "../../shared/passages.ts";
+import type { ContextMessage, ContextRecovery, SourceDependency } from "../conversation-context.ts";
 
 export type ConversationTurnStatus =
   | "queued"
@@ -72,6 +73,13 @@ export const conversationTurns = pgTable(
     allocationOperationId: uuid("allocation_operation_id"),
     runtimeUrl: text("runtime_url"),
     sessionId: text("session_id"),
+    sourceDependencies: jsonb("source_dependencies")
+      .$type<SourceDependency[]>()
+      .notNull()
+      .default([]),
+    provenanceComplete: boolean("provenance_complete").notNull().default(false),
+    retrievalBytes: integer("retrieval_bytes").notNull().default(0),
+    contextRecovery: text("context_recovery").$type<ContextRecovery>(),
     /** Runtime receipt for the opening input. Private, like the session identity. */
     deliveryId: text("delivery_id"),
     createdAt: timestamp("created_at", { withTimezone: true, mode: "string" })
@@ -87,6 +95,8 @@ export const conversationTurns = pgTable(
     uniqueIndex("conversation_turns_running_idx")
       .on(table.conversationId)
       .where(sql`${table.status} = 'running'`),
+    // Conversation reads resolve only the latest attempt's recovery state.
+    index("conversation_turns_latest_idx").on(table.conversationId, table.createdAt, table.id),
     uniqueIndex("conversation_turns_allocation_idx").on(table.allocationOperationId),
     foreignKey({
       name: "conversation_turns_retry_parent_fk",
@@ -104,6 +114,11 @@ export const conversationTurns = pgTable(
     check(
       "conversation_turns_checkpoint_valid",
       sql`${table.checkpointVersion} >= 0 AND (${table.status} = 'running' OR ${table.runningText} IS NULL)`,
+    ),
+    check("conversation_turns_retrieval_bound", sql`${table.retrievalBytes} BETWEEN 0 AND 48000`),
+    check(
+      "conversation_turns_recovery_valid",
+      sql`${table.contextRecovery} IS NULL OR ${table.contextRecovery} IN ('history_unavailable', 'context_budget', 'summary_failed', 'source_changed', 'runtime_expired')`,
     ),
     check(
       "conversation_turns_retry_distinct",
@@ -223,6 +238,7 @@ export const conversationCleanupIntents = pgTable(
   "conversation_cleanup_intents",
   {
     allocationOperationId: uuid("allocation_operation_id").primaryKey(),
+    purpose: text("purpose").$type<"answer" | "summary">().notNull().default("answer"),
     ownerId: text("owner_id").notNull(),
     conversationId: uuid("conversation_id").notNull(),
     runtimeUrl: text("runtime_url").notNull(),
@@ -237,9 +253,66 @@ export const conversationCleanupIntents = pgTable(
   (table) => [
     index("conversation_cleanup_retry_idx").on(table.retryAt),
     check("conversation_cleanup_attempts_nonnegative", sql`${table.attempts} >= 0`),
+    check("conversation_cleanup_purpose_valid", sql`${table.purpose} IN ('answer', 'summary')`),
     check(
       "conversation_cleanup_failure_code_valid",
       sql`${table.lastFailureCode} IS NULL OR ${table.lastFailureCode} IN ('allocation_unknown', 'cleanup_failed')`,
+    ),
+  ],
+);
+
+/** One replaceable checkpoint, independent of the immutable UI message history. */
+export const conversationSummaries = pgTable(
+  "conversation_summaries",
+  {
+    conversationId: uuid("conversation_id")
+      .primaryKey()
+      .references(() => conversations.id, { onDelete: "cascade" }),
+    throughSequence: integer("through_sequence").notNull(),
+    text: text("text").notNull(),
+    sources: jsonb("sources").$type<SourceDependency[]>().notNull(),
+    deferredInputIds: jsonb("deferred_input_ids").$type<string[]>().notNull().default([]),
+  },
+  (table) => [
+    index("conversation_summaries_sources_idx").using("gin", table.sources),
+    check(
+      "conversation_summaries_bounds",
+      sql`${table.throughSequence} > 0 AND octet_length(${table.text}) BETWEEN 1 AND 4000`,
+    ),
+  ],
+);
+
+/** A fixed context snapshot and durable compaction operation for one answer attempt. */
+export const conversationContexts = pgTable(
+  "conversation_contexts",
+  {
+    turnId: uuid("turn_id").primaryKey(),
+    conversationId: uuid("conversation_id").notNull(),
+    operationId: uuid("operation_id").notNull().unique(),
+    state: text("state").$type<"summarizing" | "ready" | "recovery">().notNull(),
+    throughSequence: integer("through_sequence").notNull(),
+    deferredInputIds: jsonb("deferred_input_ids").$type<string[]>().notNull().default([]),
+    recent: jsonb("recent").$type<ContextMessage[]>().notNull(),
+    summary: text("summary"),
+    summaryInput: text("summary_input"),
+    sources: jsonb("sources").$type<SourceDependency[]>().notNull(),
+    runtimeUrl: text("runtime_url").notNull(),
+    sessionId: text("session_id"),
+    deliveryId: text("delivery_id"),
+  },
+  (table) => [
+    index("conversation_contexts_sources_idx").using("gin", table.sources),
+    foreignKey({
+      columns: [table.conversationId, table.turnId],
+      foreignColumns: [conversationTurns.conversationId, conversationTurns.id],
+    }).onDelete("cascade"),
+    check(
+      "conversation_contexts_state_valid",
+      sql`${table.state} IN ('summarizing', 'ready', 'recovery')`,
+    ),
+    check(
+      "conversation_contexts_content_valid",
+      sql`(${table.state} = 'summarizing' AND ${table.summaryInput} IS NOT NULL) OR (${table.state} <> 'summarizing' AND ${table.summaryInput} IS NULL)`,
     ),
   ],
 );

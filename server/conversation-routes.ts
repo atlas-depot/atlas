@@ -86,6 +86,10 @@ export function createConversationRoutes(
     try {
       const result = await answers.retry(owner, id.data, turnId.data, key.data);
       if (result.status === "not_found") return c.json(notFound(), 404);
+      if (result.status === "rate_limited") {
+        c.header("Retry-After", String(result.retryAfterSeconds));
+        return c.json(apiError("RATE_LIMITED", "Too many messages. Try again later."), 429);
+      }
       if (result.status !== "saved")
         return c.json(conflict("This answer cannot be retried right now."), 409);
       const current = await store.read(owner, id.data);

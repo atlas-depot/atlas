@@ -22,6 +22,14 @@ import {
 import { admitConversationInput, expireConversationAdmissions } from "./conversation-admission.ts";
 import type { openDatabase } from "./connection.ts";
 import { enqueueTurnCleanup } from "./conversation-cleanup.ts";
+import { lockContextSources } from "./conversation-contexts.ts";
+import {
+  byteSize,
+  CONTEXT_LIMITS,
+  sourceDependenciesSchema,
+  unionDependencies,
+  type SourceDependency,
+} from "../conversation-context.ts";
 import { readConversationMessage } from "./conversation-messages.ts";
 import {
   conversationPayloadHash,
@@ -35,6 +43,7 @@ import {
   conversationMessages,
   conversationTurns,
   conversationTurnInputs,
+  conversationContexts,
 } from "./conversation-schema.ts";
 
 type Database = ReturnType<typeof openDatabase>["db"];
@@ -46,10 +55,10 @@ const inputSchema = z.strictObject({
 export const MAX_RUNNING_TURNS_PER_OWNER = 3;
 const MAX_TURN_INPUTS = 100;
 /**
- * UTF-8 bytes of input text one answer may combine. JSON escaping can expand text up to six
- * times, so this keeps the request well under the private runtime's 4.5 MB body limit.
+ * Combined UTF-8 input budget, leaving room for 8 KB recent context, 4 KB encoded summary
+ * and grouping/framing in the 24 KB prompt. An oversized first input gets explicit recovery.
  */
-export const MAX_TURN_INPUT_BYTES = 500_000;
+export const MAX_TURN_INPUT_BYTES = 10_000;
 const attemptSchema = z.strictObject({
   inputIds: conversationInputIdsSchema,
   retryOfId: conversationIdSchema.optional(),
@@ -63,11 +72,12 @@ async function turnInputs(tx: ConversationTransaction, turnId: string) {
     .orderBy(asc(conversationTurnInputs.ordinal));
 }
 
+/** The first input always opens an attempt on its own, even above the grouping bound. */
 function boundedOpeningCount(inputs: readonly { bytes: number }[]) {
   let bytes = 0;
   for (const [index, input] of inputs.entries()) {
     bytes += input.bytes;
-    if (bytes > MAX_TURN_INPUT_BYTES) return index;
+    if (index > 0 && bytes > MAX_TURN_INPUT_BYTES) return index;
   }
   return inputs.length;
 }
@@ -109,6 +119,106 @@ export function createConversationTurns(db: Database) {
   }
 
   return {
+    /**
+     * Record all retrieved evidence before it reaches the model, even if never cited.
+     * Search tool calls in one turn can run concurrently. Serialize them per session so each
+     * call merges its sources and byte count instead of rejecting the other call.
+     */
+    async recordSearch(sessionId: string, sources: SourceDependency[], output: unknown) {
+      return db.transaction(async (tx) => {
+        // Short lock only. No provider work runs inside this transaction.
+        await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtextextended(${sessionId}, 72))`);
+        const [snapshot] = await tx
+          .select({ turn: conversationTurns, owner: conversations.ownerId })
+          .from(conversationTurns)
+          .innerJoin(conversations, eq(conversations.id, conversationTurns.conversationId))
+          .where(
+            and(
+              eq(conversationTurns.sessionId, sessionId),
+              eq(conversationTurns.status, "running"),
+            ),
+          );
+        if (!snapshot) return { status: "unavailable" as const };
+        // Past the lineage limit the search is refused as over budget, not as an error.
+        const dependencies = unionDependencies(snapshot.turn.sourceDependencies, sources);
+        if (!sourceDependenciesSchema.safeParse(dependencies).success)
+          return { status: "budget" as const };
+        if (!(await lockContextSources(tx, snapshot.owner, dependencies)))
+          return { status: "unavailable" as const };
+        const parent = await lockOwnedConversation(
+          tx,
+          snapshot.owner,
+          snapshot.turn.conversationId,
+        );
+        if (!parent) return { status: "unavailable" as const };
+        const [context] = await tx
+          .select()
+          .from(conversationContexts)
+          .where(
+            and(
+              eq(conversationContexts.turnId, snapshot.turn.id),
+              eq(conversationContexts.state, "ready"),
+            ),
+          );
+        const [turn] = await tx
+          .select()
+          .from(conversationTurns)
+          .where(
+            and(
+              eq(conversationTurns.id, snapshot.turn.id),
+              eq(conversationTurns.status, "running"),
+            ),
+          );
+        if (!context || !turn) return { status: "unavailable" as const };
+        const merged = unionDependencies(turn.sourceDependencies, dependencies);
+        if (!sourceDependenciesSchema.safeParse(merged).success)
+          return { status: "budget" as const };
+        const bytes = turn.retrievalBytes + byteSize(output);
+        if (bytes > CONTEXT_LIMITS.retrievalBytes) return { status: "budget" as const };
+        await tx
+          .update(conversationTurns)
+          .set({ sourceDependencies: merged, retrievalBytes: bytes })
+          .where(eq(conversationTurns.id, turn.id));
+        await tx
+          .update(conversationContexts)
+          .set({ sources: merged })
+          .where(eq(conversationContexts.turnId, turn.id));
+        return { status: "recorded" as const };
+      });
+    },
+
+    /**
+     * Checked before every chat model call, including after a tool or a steer. Existence is
+     * deliberate: an in-flight answer may finish against the revision it used and is marked
+     * stale later (#71). New context reconstruction requires current versions.
+     */
+    async contextAuthorized(sessionId: string) {
+      const rows = await db
+        .select({
+          sources: conversationTurns.sourceDependencies,
+          complete: conversationTurns.provenanceComplete,
+          owner: conversations.ownerId,
+        })
+        .from(conversationTurns)
+        .innerJoin(conversations, eq(conversations.id, conversationTurns.conversationId))
+        .innerJoin(conversationContexts, eq(conversationContexts.turnId, conversationTurns.id))
+        .where(
+          and(
+            eq(conversationTurns.sessionId, sessionId),
+            eq(conversationTurns.status, "running"),
+            eq(conversationContexts.state, "ready"),
+          ),
+        )
+        .limit(2);
+      const row = rows.length === 1 ? rows[0] : undefined;
+      const sources = row ? sourceDependenciesSchema.safeParse(row.sources) : undefined;
+      return (
+        !!row &&
+        row.complete &&
+        !!sources?.success &&
+        db.transaction((tx) => lockContextSources(tx, row.owner, sources.data))
+      );
+    },
     /** Replays return the saved input; only a new message reserves an admission. */
     async acceptInput(
       owner: string,
@@ -530,6 +640,15 @@ export function createConversationTurns(db: Database) {
         }
         // A retry is a running answer like any other and counts against the owner's cap.
         if (await ownerAtCapacity(tx, owner)) return { status: "owner_busy" as const };
+        // It can also start a summary, so it spends the same send budget as a new message.
+        if (input.retryOfId) {
+          const admission = await admitConversationInput(tx, owner);
+          if (!admission.allowed)
+            return {
+              status: "rate_limited" as const,
+              retryAfterSeconds: admission.retryAfterSeconds,
+            };
+        }
         const [turn] = await tx
           .insert(conversationTurns)
           .values({
@@ -575,6 +694,12 @@ export function createConversationTurns(db: Database) {
           );
         if (!turn) return { status: "not_found" as const };
         if (turn.status !== "running") return { status: "conflict" as const };
+        // Text observed before a source was deleted must not be saved after the deletion.
+        const [context] = await tx
+          .select({ state: conversationContexts.state })
+          .from(conversationContexts)
+          .where(eq(conversationContexts.turnId, turn.id));
+        if (context?.state === "recovery") return { status: "conflict" as const };
         if (turn.checkpointVersion === expectedVersion + 1 && turn.runningText === text)
           return { status: "saved" as const, version: turn.checkpointVersion };
         if (turn.checkpointVersion !== expectedVersion) return { status: "conflict" as const };
@@ -605,6 +730,13 @@ export function createConversationTurns(db: Database) {
               eq(conversationTurns.status, "running"),
             ),
           );
+        // Capture the summary session before publication removes this attempt's context row.
+        const [summaryContext] = turn
+          ? await tx
+              .select({ operationId: conversationContexts.operationId })
+              .from(conversationContexts)
+              .where(eq(conversationContexts.turnId, turn.id))
+          : [];
         const message = turn
           ? await publishConversationAnswer(tx, parent, turn, {
               status: "incomplete",
@@ -619,7 +751,12 @@ export function createConversationTurns(db: Database) {
           .update(conversations)
           .set({ queuePaused: true, updatedAt: new Date().toISOString() })
           .where(eq(conversations.id, parent.id));
-        return { status: "paused" as const, message };
+        return {
+          status: "paused" as const,
+          message,
+          allocationOperationId: turn?.allocationOperationId ?? null,
+          summaryOperationId: summaryContext?.operationId ?? null,
+        };
       });
     },
 
