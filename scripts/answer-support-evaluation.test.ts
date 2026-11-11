@@ -49,14 +49,18 @@ function provider(limit: number, reply: (passageId: string) => Response[]) {
     if (url.endsWith("/key")) return key(limit);
     const body = JSON.parse(typeof init?.body === "string" ? init.body : "{}") as {
       messages: { role: string; content: string }[];
-      tool_choice?: unknown;
+      tools: { function: { name: string } }[];
     };
     sent.push(body);
     const tool = body.messages.find((message) => message.role === "tool");
     // The first answer call searches. Later calls, and the judge, replay the script.
-    if (!tool && !body.tool_choice) return call("search_notes", { query: "meeting" });
+    if (!tool && body.tools[0]?.function.name !== "grade")
+      return call("search_notes", { query: "meeting" });
     if (tool) {
-      const { passages } = JSON.parse(tool.content) as { passages: { id: string }[] };
+      const { passages } = JSON.parse(tool.content) as {
+        passages: { id: string; source: { blockId: string } }[];
+      };
+      expect(passages[0]!.source.blockId).not.toBe(fixture.cases[0]!.passages[0]!.label);
       script ??= reply(passages[0]!.id);
     }
     return script!.shift()!;
@@ -87,6 +91,7 @@ it("separates a valid source from a supported claim", async () => {
     checks: { provenance: true, status: true, citesRequired: true, claimsSupported: false },
     unsupportedClaims: ["The meeting is at 09:00."],
   });
+  expect(contradicting.sent.at(-1)).not.toHaveProperty("tool_choice");
   expect(report.providerReportedCostCredits).toBeCloseTo(0.03);
 });
 

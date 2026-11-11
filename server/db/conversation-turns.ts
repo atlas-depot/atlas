@@ -64,13 +64,21 @@ const attemptSchema = z.strictObject({
 });
 
 async function turnInputs(tx: ConversationTransaction, turnId: string) {
-  return (
-    await tx
-      .select()
-      .from(conversationTurnInputs)
-      .where(eq(conversationTurnInputs.turnId, turnId))
-      .orderBy(asc(conversationTurnInputs.ordinal))
-  ).map((row) => row.messageId);
+  return tx
+    .select({ messageId: conversationTurnInputs.messageId, steer: conversationTurnInputs.steer })
+    .from(conversationTurnInputs)
+    .where(eq(conversationTurnInputs.turnId, turnId))
+    .orderBy(asc(conversationTurnInputs.ordinal));
+}
+
+/** The first input always opens an attempt on its own, even above the grouping bound. */
+function boundedOpeningCount(inputs: readonly { bytes: number }[]) {
+  let bytes = 0;
+  for (const [index, input] of inputs.entries()) {
+    bytes += input.bytes;
+    if (index > 0 && bytes > MAX_TURN_INPUT_BYTES) return index;
+  }
+  return inputs.length;
 }
 
 /** Call with the conversation lock held, immediately before inserting a running attempt. */
@@ -319,15 +327,7 @@ export function createConversationTurns(db: Database) {
           .limit(MAX_TURN_INPUTS);
         if (waiting.length === 0) return { status: "idle" as const };
         if (await ownerAtCapacity(tx, owner)) return { status: "owner_busy" as const };
-        // One answer is one runtime request. Take inputs in order while they fit; the first
-        // always fits on its own, and the rest stay queued for the next answer.
-        const inputIds: string[] = [];
-        let bytes = 0;
-        for (const input of waiting) {
-          bytes += input.bytes;
-          if (inputIds.length > 0 && bytes > MAX_TURN_INPUT_BYTES) break;
-          inputIds.push(input.id);
-        }
+        const inputIds = waiting.slice(0, boundedOpeningCount(waiting)).map((input) => input.id);
         const [turn] = await tx
           .insert(conversationTurns)
           .values({
@@ -405,7 +405,7 @@ export function createConversationTurns(db: Database) {
               eq(conversationTurns.id, conversationIdSchema.parse(turnId)),
             ),
           );
-        return turn ? turnInputs(tx, turn.id) : undefined;
+        return turn ? (await turnInputs(tx, turn.id)).map((input) => input.messageId) : undefined;
       });
     },
 
@@ -571,7 +571,11 @@ export function createConversationTurns(db: Database) {
           );
         if (running) return { status: "busy" as const, turnId: running.id };
         const messages = await tx
-          .select()
+          .select({
+            id: conversationMessages.id,
+            role: conversationMessages.role,
+            bytes: sql<number>`octet_length(${conversationMessages.text})`.mapWith(Number),
+          })
           .from(conversationMessages)
           .where(
             and(
@@ -587,6 +591,7 @@ export function createConversationTurns(db: Database) {
           )
         )
           return { status: "conflict" as const };
+        let openingCount = boundedOpeningCount(messages);
         if (input.retryOfId) {
           const [original] = await tx
             .select()
@@ -597,13 +602,18 @@ export function createConversationTurns(db: Database) {
                 eq(conversationTurns.conversationId, parent.id),
               ),
             );
+          if (original?.status !== "incomplete") return { status: "conflict" as const };
+          const links = await turnInputs(tx, original.id);
           if (
-            !original ||
-            original.status !== "incomplete" ||
-            JSON.stringify(await turnInputs(tx, original.id)) !== JSON.stringify(input.inputIds)
+            links.length !== messages.length ||
+            links.some((link, index) => link.messageId !== input.inputIds[index])
           )
             return { status: "conflict" as const };
+          // Replay steers individually, including on retries of a previously flattened attempt.
+          const firstSteer = links.findIndex((link) => link.steer);
+          if (firstSteer !== -1) openingCount = Math.min(openingCount, firstSteer);
         } else {
+          if (openingCount !== messages.length) return { status: "conflict" as const };
           const consumed = await tx
             .select()
             .from(conversationTurnInputs)
@@ -643,6 +653,7 @@ export function createConversationTurns(db: Database) {
             turnId: turn!.id,
             messageId,
             ordinal,
+            steer: ordinal >= openingCount,
           })),
         );
         return { status: "saved" as const, value: turn! };
