@@ -125,15 +125,18 @@ configured these four routes return `503`. Runtime identities never appear in a 
 
 `recovery` is normally `null`. `{ turnId, reason }` identifies an incomplete attempt whose
 context could not be used: `history_unavailable`, `context_budget`, `summary_failed`,
-`source_changed` or `runtime_expired`. A read never blindly retries that question or unpauses
-the queue. Explicit retry uses the original accepted input identities and a new operation key.
+`source_changed` or `runtime_expired`. Recovery pauses the queue, as Stop does: later messages
+are saved and wait for `resume`, and `retry` returns `409` until then. A retry counts against
+the send limit and can return `429` with `Retry-After`. A read never blindly retries that
+question or unpauses the queue. Explicit retry uses the original accepted input identities and a new operation key.
 An unavailable transport is not proof of expiry and does not authorize a replacement runtime.
 
 Follow-ups use authorized recent messages and a bounded summary, not the full UI history or
 the prior runtime's hidden history. Source dependencies include uncited retrieval and inherited
 context. Deleting a source invalidates affected derived context without erasing delivered answers.
-Unknown legacy provenance or unsafe/over-budget reconstruction reports recovery rather than an
-unvalidated history fallback. See the [context contract](proposals/72-conversation-context.md).
+An answer of unknown legacy provenance, a single message above 40,000 bytes and older history
+beyond the compaction budget are left out of model context whole; they stay in the UI history.
+Missing or corrupt history reports recovery rather than an unvalidated history fallback. See the [context contract](proposals/72-conversation-context.md).
 
 ## Organize
 

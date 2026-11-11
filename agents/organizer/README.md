@@ -86,8 +86,8 @@ The private `context` principal performs bounded conversation summarization with
 tools. The API persists its operation and cleanup intent before allocation; reconnect uses the
 same delivery. The provider middleware rechecks live source authorization for every chat/summary
 model request, including automatic compaction and retries. Organize keeps its existing model path.
-Unknown history, invalid summaries, oversized context and confirmed runtime expiry return explicit
-recovery instead of unbounded history or a blind replacement. Routine tests use scripted summaries.
+Missing history, invalid summaries, an oversized question and confirmed runtime expiry return
+explicit recovery, which pauses the queue, instead of unbounded history or a blind replacement. Routine tests use scripted summaries.
 
 ## Build and verification
 

@@ -124,8 +124,8 @@ unattended continuation and session cleanup need `ORGANIZER_MAINTENANCE_ENABLED=
 ### Conversation-context migration cutover
 
 `0010_conversation-context` adds separate summary/context records and source-provenance metadata.
-Legacy answers default to unknown provenance; continuation reports recovery instead of assuming
-their citations contain every source the model saw. No historical UI messages are rewritten.
+Legacy answers default to unknown provenance; a follow-up leaves them out of model context
+instead of assuming their citations contain every source the model saw. No historical UI messages are rewritten.
 
 Stop and drain old conversation/model writers before applying the additive migration. Switch the
 API and private runtime together: the new API uses the additional `context` service principal,

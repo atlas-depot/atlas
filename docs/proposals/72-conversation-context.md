@@ -28,15 +28,17 @@ The server unions the dependencies of every supplied historical answer/summary w
 passages actually returned by `search_notes`, including uncited passages. The tool records these
 dependencies before returning evidence. A summary never chooses or narrows its own dependencies.
 Dependencies propagate transitively through subsequent answers, including no-support prose.
-Legacy answers with unknown provenance require recovery rather than trusting final citations as
-a complete lineage record.
+Legacy answers with unknown provenance are never model context: final citations are not trusted
+as a complete lineage record, and the follow-up runs without that answer instead of failing.
+Inherited lineage is capped at 500 sources per context so an attempt can still record its own
+retrieval under the 1,000 limit; an answer that would exceed the cap is left out whole.
 
 Note deletion locks the note, then affected conversations in deterministic order. It invalidates
 the whole affected context, removes its recent/summary/compaction-input text, deletes affected
 checkpoints and persists cleanup for live answer/summary sessions. Delivered answer text remains
 in UI history; the existing citation-excerpt redaction still applies. New context excludes whole
 answers derived from unavailable sources. Rebuilding from safe material is bounded; missing
-history or excessive reconstruction requires recovery, not an unsafe fallback.
+history requires recovery, not an unsafe fallback. Deletion matches note IDs case-insensitively.
 
 The model provider boundary rechecks authorization before every chat/summary request, including
 eve automatic compaction, streaming and retries. A previously authorized request already in flight
@@ -51,10 +53,13 @@ retrieval supplies the current version.
 
 ## Bounded compaction
 
-The context store scans at most 500 new history records per reconstruction, retaining at most
-8,000 UTF-8 bytes of whole recent messages. Older eligible material plus a prior checkpoint
-must fit a 48,000-byte compaction input. The summary is nonempty, schema-validated and at most
-4,000 bytes when JSON-encoded; the final context/question envelope is at most 24,000 bytes.
+The context store reads the newest 500 history records after the checkpoint, retaining at most
+8,000 UTF-8 bytes of whole recent messages. The compaction input holds the prior checkpoint and
+the newest older messages that fit 48,000 bytes. Whole earlier messages, and any single message
+above 40,000 bytes, are left out of model context and stay in UI history. Nothing is cut inside
+a message. This keeps a long conversation answerable after it loses its checkpoint; summarizing
+such material in several passes is future work. The summary is nonempty, schema-validated and at most
+4,000 bytes when JSON-encoded (the runtime schema allows 1,300 characters, which always fits); the final context/question envelope is at most 24,000 bytes.
 Queued inputs combine up to 10,000 bytes, leaving space for history and framing. An oversized
 single accepted input is retained but may require recovery. Retrieved tool output
 is separately capped at 48,000 bytes per answer, with at most 1,000 source dependencies.
@@ -69,7 +74,8 @@ Compaction uses the existing eve harness with a private `context` job principal.
 neither note retrieval nor public research tools. PostgreSQL records its fixed operation before
 allocation; the same key/session survives lost receipts and API replacement. A durable cleanup
 intent exists before dispatch, with a ten-minute execution window. Stop/deletion expedites cleanup;
-the window's expiry prevents further summary provider calls. Only a validated, authorized result
+the window's expiry prevents further summary provider calls, and a failed retirement that
+reschedules cleanup does not reopen it. Only a validated, authorized result
 may publish a checkpoint. There is no second agent loop or background memory extractor.
 
 A checkpoint records its sequence boundary and deferred input identities. A queued input may
@@ -82,7 +88,9 @@ Conversation reads and send/action responses include nullable `recovery: { turnI
 Reasons distinguish missing/unknown history, context budget, failed summary, removed sources
 and confirmed runtime expiry. The full history endpoint is unchanged. The #73 shell owns visible
 rendering and explicit retry/resume controls; #74 owns saved-history navigation. Reconnect and
-replacement never unpause a stopped queue.
+replacement never unpause a stopped queue. Recovery pauses the queue like Stop, so queued inputs
+wait for an explicit resume and the recovery stays the latest outcome. A retry is refused while
+paused and spends the same per-owner send budget as a new message.
 
 Tests use controlled runtime/model boundaries and real PostgreSQL for ordering, concurrent
 resume/retry, source changes, forced compaction, deletion, late summary publication, unknown
