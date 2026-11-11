@@ -5,7 +5,13 @@ import type { NotePassageSource } from "../../shared/passages.ts";
 import { setupIndexTestDatabase } from "./index-test-database.ts";
 import { createConversationStore } from "./conversations.ts";
 import { createConversationTurns } from "./conversation-turns.ts";
-import { conversationMessages, conversationTurns, conversations } from "./conversation-schema.ts";
+import {
+  conversationAdmissions,
+  conversationMessages,
+  conversationTurnInputs,
+  conversationTurns,
+  conversations,
+} from "./conversation-schema.ts";
 import { createNoteStore, noteTag } from "./notes.ts";
 import { notes } from "./schema.ts";
 
@@ -167,7 +173,7 @@ it("concurrent Stop and completion publish exactly one terminal answer", async (
   );
 });
 
-it("rejects input reordering, foreign identity and unsupported steer execution without rewriting policy", async () => {
+it("rejects input reordering and foreign identity, and starts a steer normally when nothing is running", async () => {
   const f = await fixture();
   const one = await f.input("One");
   const two = await f.input("Two");
@@ -178,10 +184,17 @@ it("rejects input reordering, foreign identity and unsupported steer execution w
   expect(
     await f.first.startAttempt(f.owner, f.id, randomUUID(), { inputIds: [randomUUID()] }),
   ).toEqual({ status: "conflict" });
-  expect(await f.first.startAttempt(f.owner, f.id, randomUUID(), { inputIds: [steer.id] })).toEqual(
-    { status: "policy_unsupported" },
-  );
   expect(steer).toMatchObject({ deliveryPolicy: "steer" });
+  expect(await f.first.startNext(f.owner, f.id)).toMatchObject({ status: "started" });
+  expect(await createConversationStore(database.db).read(f.owner, f.id)).toMatchObject({
+    activeTurn: { inputIds: [one.id, two.id, steer.id] },
+  });
+  // It opened the attempt, so it is delivered with the opening inputs, not as a steer.
+  expect(
+    (await database.db.select().from(conversationTurnInputs)).filter(
+      (input) => input.messageId === steer.id,
+    ),
+  ).toMatchObject([{ steer: false, deliveryId: null }]);
 });
 
 async function source(owner: string) {
@@ -282,7 +295,14 @@ it("bounds accepted input and quote text before any database write", async () =>
 it("accepts 100 grouped inputs and citations, rejects 101 before writing, and preserves the remaining queue", async () => {
   const f = await fixture();
   const inputIds: string[] = [];
-  for (let index = 0; index < 101; index++) inputIds.push((await f.input(`Question ${index}`)).id);
+  // Simulate accepted sends spanning multiple rate-limit windows.
+  for (let index = 0; index < 101; index++) {
+    if (index > 0 && index % 20 === 0)
+      await database.db
+        .delete(conversationAdmissions)
+        .where(eq(conversationAdmissions.ownerId, f.owner));
+    inputIds.push((await f.input(`Question ${index}`)).id);
+  }
   await expect(f.first.startAttempt(f.owner, f.id, randomUUID(), { inputIds })).rejects.toThrow();
   expect(
     await database.db

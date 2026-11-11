@@ -12,8 +12,20 @@ import {
 
 type Database = ReturnType<typeof openDatabase>["db"];
 export type ConversationReader = Database | Parameters<Parameters<Database["transaction"]>[0]>[0];
-export const conversationTimestamp = (value: string) =>
-  value.replace(" ", "T").replace(/\+00(?::00)?$/, "Z");
+const storedTimestamp =
+  /^(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2}:\d{2})(\.\d+)?(Z|[+-]\d{2})(?::?(\d{2}))?$/;
+
+/**
+ * PostgreSQL prints a timestamptz in the session's time zone, which is not always UTC.
+ * Convert any offset to UTC and keep the stored sub-second digits, so cursors stay exact.
+ */
+export const conversationTimestamp = (value: string) => {
+  const match = storedTimestamp.exec(value);
+  if (!match) return value;
+  const [, date, time, fraction = "", zone, minutes = "00"] = match;
+  const offset = zone === "Z" ? "Z" : `${zone}:${minutes}`;
+  return `${new Date(`${date}T${time}${offset}`).toISOString().slice(0, 19)}${fraction}Z`;
+};
 
 /** Serializes only public columns. Replays reread citations so note deletion redactions take effect. */
 export async function serializeConversationMessages(

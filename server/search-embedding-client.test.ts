@@ -21,7 +21,7 @@ it("sends a bounded query only to the pinned private runtime", async () => {
   expect(requests[0].url).toBe("https://private-runtime.example/internal/note-search/embed");
   expect(await requests[0].json()).toEqual({ query: "Bir not bul" });
   expect(requests[0].headers.get("authorization")).toBe(
-    `Basic ${Buffer.from(`atlas-api:${token}`).toString("base64")}`,
+    `Basic ${Buffer.from(`api:${token}`).toString("base64")}`,
   );
   expect(requests[0].headers.get("x-vercel-protection-bypass")).toBe("synthetic-protection");
   expect(requests[0].redirect).toBe("error");

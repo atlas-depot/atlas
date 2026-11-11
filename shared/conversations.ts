@@ -76,6 +76,17 @@ export const conversationHistorySchema = z.strictObject({
   messages: z.array(conversationMessageSchema),
   nextCursor: z.string().nullable(),
 });
+export const conversationDeliveryPolicySchema = z.enum(["queue", "steer"]);
+/** One accepted user input. `steer` redirects a running answer, `queue` waits for it. */
+export const sendConversationMessageSchema = z.strictObject({
+  text: conversationTextSchema.refine((text) => text.trim().length > 0),
+  policy: conversationDeliveryPolicySchema.default("queue"),
+});
+export const conversationSendSchema = z.strictObject({
+  message: conversationMessageSchema,
+  conversation: conversationSchema,
+  activeTurn: activeConversationTurnSchema.nullable(),
+});
 export const conversationPageSchema = z.strictObject({
   limit: z.coerce.number().int().min(1).max(100).default(50),
   cursor: z.string().min(1).max(512).optional(),
@@ -86,4 +97,5 @@ export type ConversationCitation = z.infer<typeof conversationCitationSchema>;
 export type ConversationRead = z.infer<typeof conversationReadSchema>;
 export type ConversationList = z.infer<typeof conversationListSchema>;
 export type ConversationHistory = z.infer<typeof conversationHistorySchema>;
+export type ConversationSend = z.infer<typeof conversationSendSchema>;
 export type ConversationPage = z.infer<typeof conversationPageSchema>;

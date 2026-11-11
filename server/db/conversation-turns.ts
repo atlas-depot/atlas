@@ -1,10 +1,25 @@
-import { and, asc, eq, inArray } from "drizzle-orm";
+import { randomUUID } from "node:crypto";
+import {
+  and,
+  asc,
+  count,
+  eq,
+  exists,
+  gte,
+  inArray,
+  isNull,
+  lt,
+  notExists,
+  notInArray,
+  sql,
+} from "drizzle-orm";
 import { z } from "zod";
 import {
   conversationIdSchema,
   conversationInputIdsSchema,
   conversationTextSchema,
 } from "../../shared/conversations.ts";
+import { admitConversationInput, expireConversationAdmissions } from "./conversation-admission.ts";
 import type { openDatabase } from "./connection.ts";
 import { enqueueTurnCleanup } from "./conversation-cleanup.ts";
 import { readConversationMessage } from "./conversation-messages.ts";
@@ -27,24 +42,74 @@ const inputSchema = z.strictObject({
   text: conversationTextSchema.refine((text) => text.trim().length > 0),
   policy: z.enum(["queue", "steer"]).default("queue"),
 });
+/** One owner may hold this many running answers across all conversations. */
+export const MAX_RUNNING_TURNS_PER_OWNER = 3;
+const MAX_TURN_INPUTS = 100;
+/**
+ * UTF-8 bytes of input text one answer may combine. JSON escaping can expand text up to six
+ * times, so this keeps the request well under the private runtime's 4.5 MB body limit.
+ */
+export const MAX_TURN_INPUT_BYTES = 500_000;
 const attemptSchema = z.strictObject({
   inputIds: conversationInputIdsSchema,
   retryOfId: conversationIdSchema.optional(),
 });
 
 async function turnInputs(tx: ConversationTransaction, turnId: string) {
-  return (
-    await tx
-      .select()
-      .from(conversationTurnInputs)
-      .where(eq(conversationTurnInputs.turnId, turnId))
-      .orderBy(asc(conversationTurnInputs.ordinal))
-  ).map((row) => row.messageId);
+  return tx
+    .select({ messageId: conversationTurnInputs.messageId, steer: conversationTurnInputs.steer })
+    .from(conversationTurnInputs)
+    .where(eq(conversationTurnInputs.turnId, turnId))
+    .orderBy(asc(conversationTurnInputs.ordinal));
+}
+
+function boundedOpeningCount(inputs: readonly { bytes: number }[]) {
+  let bytes = 0;
+  for (const [index, input] of inputs.entries()) {
+    bytes += input.bytes;
+    if (bytes > MAX_TURN_INPUT_BYTES) return index;
+  }
+  return inputs.length;
+}
+
+/** Call with the conversation lock held, immediately before inserting a running attempt. */
+async function ownerAtCapacity(tx: ConversationTransaction, owner: string) {
+  // Serialize the owner-wide count across conversations and API processes.
+  await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtextextended(${owner}, 71))`);
+  const active = await tx
+    .select({ id: conversationTurns.id })
+    .from(conversationTurns)
+    .innerJoin(conversations, eq(conversations.id, conversationTurns.conversationId))
+    .where(and(eq(conversations.ownerId, owner), eq(conversationTurns.status, "running")))
+    .limit(MAX_RUNNING_TURNS_PER_OWNER);
+  return active.length >= MAX_RUNNING_TURNS_PER_OWNER;
 }
 
 /** Internal persistence only. Callers execute models after durable admission/runtime binding. */
 export function createConversationTurns(db: Database) {
+  function unconsumedInputs(
+    reader: Pick<Database, "select">,
+    id: string | typeof conversations.id,
+  ) {
+    return reader
+      .select({ id: conversationMessages.id })
+      .from(conversationMessages)
+      .where(
+        and(
+          eq(conversationMessages.conversationId, id),
+          eq(conversationMessages.role, "user"),
+          notExists(
+            reader
+              .select({ id: conversationTurnInputs.messageId })
+              .from(conversationTurnInputs)
+              .where(eq(conversationTurnInputs.messageId, conversationMessages.id)),
+          ),
+        ),
+      );
+  }
+
   return {
+    /** Replays return the saved input; only a new message reserves an admission. */
     async acceptInput(
       owner: string,
       conversationId: string,
@@ -54,6 +119,7 @@ export function createConversationTurns(db: Database) {
       const input = inputSchema.parse(value);
       const operation = conversationIdSchema.parse(operationId);
       const payloadHash = conversationPayloadHash([input.text, input.policy]);
+      await expireConversationAdmissions(db);
       return db.transaction(async (tx) => {
         const parent = await lockOwnedConversation(tx, owner, conversationId);
         if (!parent) return { status: "not_found" as const };
@@ -73,6 +139,27 @@ export function createConversationTurns(db: Database) {
                 value: (await readConversationMessage(tx, parent.id, existing.id))!,
               }
             : { status: "conflict" as const };
+        const [running] =
+          input.policy === "steer"
+            ? await tx
+                .select({ id: conversationTurns.id })
+                .from(conversationTurns)
+                .where(
+                  and(
+                    eq(conversationTurns.conversationId, parent.id),
+                    eq(conversationTurns.status, "running"),
+                  ),
+                )
+            : [];
+        const joined = running ? await turnInputs(tx, running.id) : [];
+        // Refuse rather than quietly queue a steer the running attempt cannot take.
+        if (joined.length >= MAX_TURN_INPUTS) return { status: "policy_unsupported" as const };
+        const admission = await admitConversationInput(tx, owner);
+        if (!admission.allowed)
+          return {
+            status: "rate_limited" as const,
+            retryAfterSeconds: admission.retryAfterSeconds,
+          };
         const [message] = await tx
           .insert(conversationMessages)
           .values({
@@ -89,11 +176,265 @@ export function createConversationTurns(db: Database) {
           .update(conversations)
           .set({ nextSequence: parent.nextSequence + 1, updatedAt: new Date().toISOString() })
           .where(eq(conversations.id, parent.id));
+        if (input.policy === "steer" && running) {
+          // The input joins the running attempt here, under the conversation lock, so it can
+          // never also be picked up as a queued input for a later answer.
+          await tx.insert(conversationTurnInputs).values({
+            conversationId: parent.id,
+            turnId: running.id,
+            messageId: message!.id,
+            ordinal: joined.length,
+            steer: true,
+          });
+          // Any reader that inspected the attempt before this input must not publish: its
+          // observation predates the steer. The version bump fences that finalization.
+          await tx
+            .update(conversationTurns)
+            .set({ checkpointVersion: sql`${conversationTurns.checkpointVersion} + 1` })
+            .where(eq(conversationTurns.id, running.id));
+        }
         return {
           status: "saved" as const,
           value: (await readConversationMessage(tx, parent.id, message!.id))!,
         };
       });
+    },
+
+    /**
+     * Starts one attempt over every accepted input no attempt has consumed yet. The running
+     * index and this lock make a repeated or concurrent call resolve to the same attempt.
+     */
+    async startNext(owner: string, conversationId: string) {
+      return db.transaction(async (tx) => {
+        const parent = await lockOwnedConversation(tx, owner, conversationId);
+        if (!parent) return { status: "not_found" as const };
+        const [running] = await tx
+          .select()
+          .from(conversationTurns)
+          .where(
+            and(
+              eq(conversationTurns.conversationId, parent.id),
+              eq(conversationTurns.status, "running"),
+            ),
+          );
+        if (running) return { status: "busy" as const, turn: running };
+        if (parent.queuePaused) return { status: "paused" as const };
+        const waiting = await tx
+          .select({
+            id: conversationMessages.id,
+            bytes: sql<number>`octet_length(${conversationMessages.text})`.mapWith(Number),
+          })
+          .from(conversationMessages)
+          .where(inArray(conversationMessages.id, unconsumedInputs(tx, parent.id)))
+          .orderBy(asc(conversationMessages.sequence))
+          .limit(MAX_TURN_INPUTS);
+        if (waiting.length === 0) return { status: "idle" as const };
+        if (await ownerAtCapacity(tx, owner)) return { status: "owner_busy" as const };
+        const inputIds = waiting.slice(0, boundedOpeningCount(waiting)).map((input) => input.id);
+        const [turn] = await tx
+          .insert(conversationTurns)
+          .values({
+            conversationId: parent.id,
+            operationId: randomUUID(),
+            payloadHash: conversationPayloadHash([inputIds, null]),
+            status: "running",
+            runningText: "",
+          })
+          .returning();
+        await tx.insert(conversationTurnInputs).values(
+          inputIds.map((messageId, ordinal) => ({
+            conversationId: parent.id,
+            turnId: turn!.id,
+            messageId,
+            ordinal,
+          })),
+        );
+        return { status: "started" as const, turn: turn! };
+      });
+    },
+
+    /** The running attempt with the input text its runtime deliveries are rebuilt from. */
+    async dispatchState(owner: string, conversationId: string) {
+      return db.transaction(async (tx) => {
+        const [parent] = await tx
+          .select()
+          .from(conversations)
+          .where(
+            and(
+              eq(conversations.id, conversationIdSchema.parse(conversationId)),
+              eq(conversations.ownerId, owner),
+            ),
+          );
+        if (!parent) return undefined;
+        const [turn] = await tx
+          .select()
+          .from(conversationTurns)
+          .where(
+            and(
+              eq(conversationTurns.conversationId, parent.id),
+              eq(conversationTurns.status, "running"),
+            ),
+          );
+        if (!turn) return undefined;
+        const inputs = await tx
+          .select({
+            id: conversationMessages.id,
+            text: conversationMessages.text,
+            steer: conversationTurnInputs.steer,
+            deliveryId: conversationTurnInputs.deliveryId,
+          })
+          .from(conversationTurnInputs)
+          .innerJoin(
+            conversationMessages,
+            eq(conversationMessages.id, conversationTurnInputs.messageId),
+          )
+          .where(eq(conversationTurnInputs.turnId, turn.id))
+          .orderBy(asc(conversationTurnInputs.ordinal));
+        return { turn, inputs };
+      });
+    },
+
+    /** Input identities of one owned attempt, in the order it consumed them. */
+    async attemptInputs(owner: string, conversationId: string, turnId: string) {
+      return db.transaction(async (tx) => {
+        const [turn] = await tx
+          .select({ id: conversationTurns.id })
+          .from(conversationTurns)
+          .innerJoin(conversations, eq(conversations.id, conversationTurns.conversationId))
+          .where(
+            and(
+              eq(conversations.ownerId, owner),
+              eq(conversations.id, conversationIdSchema.parse(conversationId)),
+              eq(conversationTurns.id, conversationIdSchema.parse(turnId)),
+            ),
+          );
+        return turn ? (await turnInputs(tx, turn.id)).map((input) => input.messageId) : undefined;
+      });
+    },
+
+    /** Records a runtime receipt only while the attempt is still the running one. */
+    async recordDelivery(
+      owner: string,
+      conversationId: string,
+      turnId: string,
+      deliveryId: string,
+      steerMessageId?: string,
+    ) {
+      const delivery = z.string().min(1).max(512).parse(deliveryId);
+      return db.transaction(async (tx) => {
+        const parent = await lockOwnedConversation(tx, owner, conversationId);
+        if (!parent) return false;
+        const [turn] = await tx
+          .select()
+          .from(conversationTurns)
+          .where(
+            and(
+              eq(conversationTurns.id, conversationIdSchema.parse(turnId)),
+              eq(conversationTurns.conversationId, parent.id),
+              eq(conversationTurns.status, "running"),
+            ),
+          );
+        if (!turn) return false;
+        if (steerMessageId)
+          await tx
+            .update(conversationTurnInputs)
+            .set({ deliveryId: delivery })
+            .where(
+              and(
+                eq(conversationTurnInputs.turnId, turn.id),
+                eq(conversationTurnInputs.messageId, conversationIdSchema.parse(steerMessageId)),
+                eq(conversationTurnInputs.steer, true),
+                isNull(conversationTurnInputs.deliveryId),
+              ),
+            );
+        else if (turn.deliveryId === null)
+          await tx
+            .update(conversationTurns)
+            .set({ deliveryId: delivery })
+            .where(eq(conversationTurns.id, turn.id));
+        return true;
+      });
+    },
+
+    /**
+     * Resolves the verified owner of the running attempt bound to a runtime session. The
+     * runtime uses this instead of any owner or note identity a model could supply.
+     */
+    async ownerOfSession(sessionId: string) {
+      const rows = await db
+        .select({ ownerId: conversations.ownerId })
+        .from(conversationTurns)
+        .innerJoin(conversations, eq(conversations.id, conversationTurns.conversationId))
+        .where(
+          and(
+            eq(conversationTurns.sessionId, z.string().min(1).max(512).parse(sessionId)),
+            eq(conversationTurns.status, "running"),
+          ),
+        )
+        .limit(2);
+      return rows.length === 1 ? rows[0]!.ownerId : undefined;
+    },
+
+    /** A saved input may have no running turn yet, including after the owner reached the cap. */
+    async runnableQueues(limit: number) {
+      const running = db
+        .select({ id: conversationTurns.conversationId })
+        .from(conversationTurns)
+        .where(eq(conversationTurns.status, "running"));
+      const fullOwners = db
+        .select({ owner: conversations.ownerId })
+        .from(conversations)
+        .where(inArray(conversations.id, running))
+        .groupBy(conversations.ownerId)
+        .having(gte(count(), MAX_RUNNING_TURNS_PER_OWNER));
+      return db
+        .select({ conversationId: conversations.id, ownerId: conversations.ownerId })
+        .from(conversations)
+        .where(
+          and(
+            eq(conversations.queuePaused, false),
+            notInArray(conversations.id, running),
+            notInArray(conversations.ownerId, fullOwners),
+            exists(unconsumedInputs(db, conversations.id)),
+          ),
+        )
+        .orderBy(asc(conversations.updatedAt), asc(conversations.id))
+        .limit(z.number().int().min(1).max(100).parse(limit));
+    },
+
+    /** Running attempts nobody has observed recently, oldest first, for maintenance. */
+    async unobserved(limit: number, idleMs: number) {
+      const size = z.number().int().min(1).max(100).parse(limit);
+      const idle = z.number().int().min(0).parse(idleMs);
+      return db
+        .select({
+          ownerId: conversations.ownerId,
+          conversationId: conversations.id,
+          turnId: conversationTurns.id,
+        })
+        .from(conversationTurns)
+        .innerJoin(conversations, eq(conversations.id, conversationTurns.conversationId))
+        .where(
+          and(
+            eq(conversationTurns.status, "running"),
+            lt(conversationTurns.updatedAt, sql`now() - make_interval(secs => ${idle / 1000})`),
+          ),
+        )
+        .orderBy(asc(conversationTurns.updatedAt))
+        .limit(size);
+    },
+
+    /** Marks an attempt as observed so maintenance rotates to older work. */
+    async touch(turnId: string) {
+      await db
+        .update(conversationTurns)
+        .set({ updatedAt: new Date().toISOString() })
+        .where(
+          and(
+            eq(conversationTurns.id, conversationIdSchema.parse(turnId)),
+            eq(conversationTurns.status, "running"),
+          ),
+        );
     },
 
     async startAttempt(
@@ -133,7 +474,11 @@ export function createConversationTurns(db: Database) {
           );
         if (running) return { status: "busy" as const, turnId: running.id };
         const messages = await tx
-          .select()
+          .select({
+            id: conversationMessages.id,
+            role: conversationMessages.role,
+            bytes: sql<number>`octet_length(${conversationMessages.text})`.mapWith(Number),
+          })
           .from(conversationMessages)
           .where(
             and(
@@ -149,8 +494,7 @@ export function createConversationTurns(db: Database) {
           )
         )
           return { status: "conflict" as const };
-        if (messages.some((message) => message.deliveryPolicy === "steer"))
-          return { status: "policy_unsupported" as const };
+        let openingCount = boundedOpeningCount(messages);
         if (input.retryOfId) {
           const [original] = await tx
             .select()
@@ -161,13 +505,18 @@ export function createConversationTurns(db: Database) {
                 eq(conversationTurns.conversationId, parent.id),
               ),
             );
+          if (original?.status !== "incomplete") return { status: "conflict" as const };
+          const links = await turnInputs(tx, original.id);
           if (
-            !original ||
-            original.status !== "incomplete" ||
-            JSON.stringify(await turnInputs(tx, original.id)) !== JSON.stringify(input.inputIds)
+            links.length !== messages.length ||
+            links.some((link, index) => link.messageId !== input.inputIds[index])
           )
             return { status: "conflict" as const };
+          // Replay steers individually, including on retries of a previously flattened attempt.
+          const firstSteer = links.findIndex((link) => link.steer);
+          if (firstSteer !== -1) openingCount = Math.min(openingCount, firstSteer);
         } else {
+          if (openingCount !== messages.length) return { status: "conflict" as const };
           const consumed = await tx
             .select()
             .from(conversationTurnInputs)
@@ -179,6 +528,8 @@ export function createConversationTurns(db: Database) {
             );
           if (consumed.length) return { status: "conflict" as const };
         }
+        // A retry is a running answer like any other and counts against the owner's cap.
+        if (await ownerAtCapacity(tx, owner)) return { status: "owner_busy" as const };
         const [turn] = await tx
           .insert(conversationTurns)
           .values({
@@ -196,6 +547,7 @@ export function createConversationTurns(db: Database) {
             turnId: turn!.id,
             messageId,
             ordinal,
+            steer: ordinal >= openingCount,
           })),
         );
         return { status: "saved" as const, value: turn! };

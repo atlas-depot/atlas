@@ -72,6 +72,8 @@ export const conversationTurns = pgTable(
     allocationOperationId: uuid("allocation_operation_id"),
     runtimeUrl: text("runtime_url"),
     sessionId: text("session_id"),
+    /** Runtime receipt for the opening input. Private, like the session identity. */
+    deliveryId: text("delivery_id"),
     createdAt: timestamp("created_at", { withTimezone: true, mode: "string" })
       .notNull()
       .defaultNow(),
@@ -162,6 +164,10 @@ export const conversationTurnInputs = pgTable(
     turnId: uuid("turn_id").notNull(),
     messageId: uuid("message_id").notNull(),
     ordinal: integer("ordinal").notNull(),
+    /** True when the input joined an attempt that was already running. */
+    steer: boolean("steer").notNull().default(false),
+    /** Runtime receipt once a steering input reached the bound session. */
+    deliveryId: text("delivery_id"),
   },
   (table) => [
     primaryKey({ columns: [table.turnId, table.messageId] }),
@@ -177,6 +183,10 @@ export const conversationTurnInputs = pgTable(
       foreignColumns: [conversationMessages.conversationId, conversationMessages.id],
     }).onDelete("cascade"),
     check("conversation_turn_inputs_ordinal_nonnegative", sql`${table.ordinal} >= 0`),
+    check(
+      "conversation_turn_inputs_delivery_steer",
+      sql`${table.steer} OR ${table.deliveryId} IS NULL`,
+    ),
   ],
 );
 
@@ -231,5 +241,24 @@ export const conversationCleanupIntents = pgTable(
       "conversation_cleanup_failure_code_valid",
       sql`${table.lastFailureCode} IS NULL OR ${table.lastFailureCode} IN ('allocation_unknown', 'cleanup_failed')`,
     ),
+  ],
+);
+
+/** Sliding window of accepted message sends per verified owner, shared by all API processes. */
+export const conversationAdmissions = pgTable(
+  "conversation_admissions",
+  {
+    ownerId: text("owner_id").primaryKey(),
+    admittedAt: timestamp("admitted_at", { withTimezone: true, mode: "string" })
+      .array()
+      .notNull()
+      .default(sql`ARRAY[]::timestamptz[]`),
+    expiresAt: timestamp("expires_at", { withTimezone: true, mode: "string" })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    index("conversation_admissions_expiry_idx").on(table.expiresAt),
+    check("conversation_admissions_bounded", sql`cardinality(${table.admittedAt}) <= 20`),
   ],
 );

@@ -22,7 +22,7 @@ export function createSearchEmbeddingClient(options: {
         {
           method: "POST",
           headers: {
-            authorization: `Basic ${Buffer.from(`atlas-api:${token}`).toString("base64")}`,
+            authorization: `Basic ${Buffer.from(`api:${token}`).toString("base64")}`,
             "content-type": "application/json",
             ...(options.deploymentProtectionSecret
               ? { "x-vercel-protection-bypass": options.deploymentProtectionSecret }

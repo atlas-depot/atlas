@@ -15,6 +15,7 @@ import {
 } from "./auth.ts";
 import { createNoteRoutes, type NoteService } from "./notes.ts";
 import { createConversationRoutes, type ConversationService } from "./conversation-routes.ts";
+import type { ConversationAnswerService } from "./conversation-answers.ts";
 import { createOrganizeRoutes, type OrganizeService } from "./organize-routes.ts";
 import {
   createNoteSearchRoutes,
@@ -29,6 +30,7 @@ export type AppOptions = Readonly<{
   organizer?: OrganizeService;
   notes?: NoteService;
   conversations?: ConversationService;
+  answers?: ConversationAnswerService;
   indexing?: NoteIndexService;
   search?: NoteSearchService;
   embedSearch?: (query: string) => Promise<number[]>;
@@ -51,7 +53,7 @@ export function createApp(authenticateRequest: AuthenticateRequest, options: App
 
   const api = new Hono<AuthEnv>();
   api.use("*", requireAuth(authenticateRequest));
-  api.route("/conversations", createConversationRoutes(options.conversations));
+  api.route("/conversations", createConversationRoutes(options.conversations, options.answers));
   api.route("/notes", createNoteRoutes(options.notes, options.onNoteSaved));
   api.route("/notes", createNoteIndexRoutes(options.indexing));
   api.route(
