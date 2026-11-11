@@ -12,6 +12,7 @@ import {
   conversationCleanupIntents,
   conversations,
   conversationTurns,
+  conversationTurnInputs,
 } from "./conversation-schema.ts";
 import { createConversationStore } from "./conversations.ts";
 import { createConversationTurns } from "./conversation-turns.ts";
@@ -504,6 +505,47 @@ it("keeps one answer's combined input within the runtime request limit and fails
     { inputIds: [ids[0]] },
     { inputIds: [ids[1]] },
   ]);
+});
+
+it.each([
+  { size: 10, legacy: false },
+  { size: 85_000, legacy: false },
+  { size: 85_000, legacy: true },
+])("retries with separate deliveries for size $size (legacy $legacy)", async ({ size, legacy }) => {
+  const f = await fixture();
+  const text = "例".repeat(size);
+  const question = await f.first.send(f.owner, f.id, randomUUID(), { text });
+  const steer = await f.first.send(f.owner, f.id, randomUUID(), { text, policy: "steer" });
+  if (question.status !== "saved" || steer.status !== "saved") throw new Error("Inputs not saved");
+  const stopped = await f.first.stop(f.owner, f.id);
+  if (stopped.status !== "paused" || stopped.message?.role !== "assistant")
+    throw new Error("Nothing stopped");
+  if (legacy) {
+    // Old retries stored every input as part of the opening.
+    await database.db
+      .update(conversationTurnInputs)
+      .set({ steer: false, deliveryId: null })
+      .where(eq(conversationTurnInputs.turnId, stopped.message.turnId));
+  }
+  await f.first.resume(f.owner, f.id);
+  f.fake.observe(f.result([], [], "No support"));
+  expect(await f.second.retry(f.owner, f.id, stopped.message.turnId, randomUUID())).toMatchObject({
+    status: "saved",
+  });
+
+  const sessions = f.fake.calls.submit.map((call) => call.sessionId);
+  expect(new Set(sessions).size).toBe(2);
+  expect(f.fake.calls.submit.map((call) => Buffer.byteLength(call.message))).toEqual([
+    Buffer.byteLength(text),
+    Buffer.byteLength(text),
+  ]);
+  expect(f.fake.calls.steer.map(({ sessionId, key }) => [sessionId, key])).toEqual(
+    sessions.map((sessionId) => [sessionId, steer.value.id]),
+  );
+  expect((await f.history()).at(-1)).toMatchObject({
+    status: "no-support",
+    inputIds: [question.value.id, steer.value.id],
+  });
 });
 
 it("counts an explicit retry against the owner's running answers", async () => {
