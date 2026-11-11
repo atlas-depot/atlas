@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import type { SessionEvent, SessionStreamEvent } from "eve/client";
+import { ClientError, type SessionEvent, type SessionStreamEvent } from "eve/client";
 import { createDurableEveCompactor, observeSummary } from "./context-client.ts";
+import type { ReaderClient } from "./eve-transport.ts";
 import { isChatSession, isContextSession, isOrganizeSession } from "./job.ts";
 
 const event = (input: object) =>
@@ -106,6 +107,25 @@ await test("expired compaction delivery is not silently replaced", async () => {
     status: "expired",
   });
   assert.equal(calls, 1);
+});
+
+await test("an expired summary session is reported as expiry, not a malformed summary", async () => {
+  const client = {
+    sessions: {
+      attach: () => ({
+        snapshot: async () => {
+          throw new ClientError(410, JSON.stringify({ code: "session_expired" }));
+        },
+        end: async () => ({}),
+      }),
+    },
+  } as unknown as ReaderClient;
+  const compactor = createDurableEveCompactor({
+    baseUrl: "https://runtime.example.test",
+    serviceToken: "synthetic-context-service-credential",
+    client,
+  });
+  assert.deepEqual(await compactor.inspect("session", "delivery"), { status: "expired" });
 });
 
 await test("context jobs have neither chat retrieval nor public research capabilities", () => {

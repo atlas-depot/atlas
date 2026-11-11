@@ -224,7 +224,11 @@ describe("conversation answer HTTP boundary", () => {
     const { app, answers } = answering();
     const post = (path: string, headers: Record<string, string> = {}) =>
       app.request(`/api/conversations/${id}/${path}`, { method: "POST", headers });
-    answers.stop.mockResolvedValueOnce({ status: "paused", message: undefined });
+    answers.stop.mockResolvedValueOnce({
+      status: "paused",
+      message: undefined,
+      allocationOperationId: null,
+    });
     for (const action of ["stop", "resume"] as const) {
       const response = await post(action);
       expect([response.status, await response.json()]).toEqual([

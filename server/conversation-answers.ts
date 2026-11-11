@@ -115,6 +115,11 @@ export function createConversationAnswers({
       return undefined;
     }
     if (context.state === "summarizing") {
+      if (!(await contexts.summaryWindowOpen(context.operationId))) {
+        await contexts.recover(owner, conversationId, turn.id, "summary_failed");
+        await fail(owner, conversationId, turn);
+        return undefined;
+      }
       const compactor = compactorFor(context.runtimeUrl);
       const sessionId = context.sessionId ?? (await compactor.allocate(context.operationId));
       if (!(await contexts.bindSummary(owner, context, sessionId))) return undefined;
@@ -126,7 +131,12 @@ export function createConversationAnswers({
           context.summaryInput!,
         );
         if (receipt.status !== "delivered") {
-          await contexts.recover(owner, conversationId, turn.id, "summary_failed");
+          await contexts.recover(
+            owner,
+            conversationId,
+            turn.id,
+            receipt.status === "expired" ? "runtime_expired" : "context_budget",
+          );
           await fail(owner, conversationId, turn);
           return undefined;
         }
@@ -138,12 +148,32 @@ export function createConversationAnswers({
         await turns.touch(turn.id);
         return undefined;
       }
-      if (observation.status === "failed") {
-        await contexts.recover(owner, conversationId, turn.id, "summary_failed");
+      if (observation.status === "failed" || observation.status === "expired") {
+        await contexts.recover(
+          owner,
+          conversationId,
+          turn.id,
+          observation.status === "expired" ? "runtime_expired" : "summary_failed",
+        );
         await fail(owner, conversationId, turn);
-      } else await contexts.publishSummary(owner, context, observation.result);
-      // Reread the durable ready context next pass; never send an uncommitted summary.
-      return undefined;
+        return undefined;
+      }
+      if (!(await contexts.publishSummary(owner, context, observation.result))) {
+        // A concurrent reader may have published this summary first. Continue only when the
+        // durable context is ready; otherwise surface the concrete recovery state.
+        const latest = await contexts.prepare(owner, conversationId, turn.id, context.runtimeUrl);
+        if (latest?.state === "ready") return { summaryPublished: true } as const;
+        if (latest?.state === "recovery") {
+          await contexts.recover(owner, conversationId, turn.id, "source_changed");
+          await fail(owner, conversationId, turn);
+          return undefined;
+        }
+        const updated = await turns.dispatchState(owner, conversationId);
+        if (updated?.turn.contextRecovery) await fail(owner, conversationId, updated.turn);
+        return undefined;
+      }
+      // Continue the same attempt on the next bounded pass; never send an uncommitted summary.
+      return { summaryPublished: true } as const;
     }
     const opening = inputs.filter((input) => !input.steer).map((input) => input.text);
     const question = composeContext(context.summary, context.recent, composeQuestion(opening));
@@ -226,6 +256,7 @@ export function createConversationAnswers({
       if (next.status !== "busy" && next.status !== "started") return;
       const bound = await dispatch(owner, conversationId);
       if (!bound) return;
+      if ("summaryPublished" in bound) continue;
       const { turn, runtime, sessionId, deliveryId, steerDeliveryIds } = bound;
       const observation = await runtime.inspect(sessionId, { deliveryId, steerDeliveryIds });
       if (observation.status === "running") {
@@ -318,7 +349,12 @@ export function createConversationAnswers({
     async stop(owner: string, conversationId: string) {
       const stopped = await turns.stop(owner, conversationId);
       if (stopped.status === "paused") {
-        for (const intent of await cleanup.expedite(owner, conversationId)) await retire(intent);
+        for (const intent of await cleanup.expedite(
+          owner,
+          conversationId,
+          stopped.allocationOperationId ?? undefined,
+        ))
+          await retire(intent);
       }
       return stopped;
     },

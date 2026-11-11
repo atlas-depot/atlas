@@ -21,7 +21,7 @@ export function isChatSession(session: SessionAuth): boolean {
   );
 }
 
-/** Organize keeps its tools unless the chat principal touched the session at all. */
+/** Organize keeps its tools only when neither chat nor context touched the session. */
 export function isOrganizeSession(session: SessionAuth): boolean {
   return (
     session.auth.initiator?.principalId !== CHAT_PRINCIPAL &&

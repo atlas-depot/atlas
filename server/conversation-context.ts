@@ -5,16 +5,17 @@ import { conversationRecoveryReasonSchema } from "../shared/conversations.ts";
 export const sourceDependenciesSchema = z
   .array(
     z.strictObject({
-      noteId: z.uuid(),
+      noteId: z.uuid().transform((value) => value.toLowerCase()),
       version: z.string().min(1).max(512),
     }),
   )
   .max(1_000);
 export type SourceDependency = z.infer<typeof sourceDependenciesSchema>[number];
 
-/** Byte ceilings are conservative text-input limits, not character-to-token conversions. */
+/** Text ceilings are conservative limits, not character-to-token conversions. */
 export const CONTEXT_LIMITS = {
   recentBytes: 8_000,
+  /** The runtime schema's 1,300 characters fit this byte limit; the server rechecks bytes. */
   summaryBytes: 4_000,
   promptBytes: 24_000,
   reconstructionBytes: 48_000,
@@ -50,7 +51,10 @@ export type ContextCompactor = {
     sessionId: string,
     deliveryId: string,
   ): Promise<
-    { status: "running" } | { status: "failed" } | { status: "completed"; result: unknown }
+    | { status: "running" }
+    | { status: "failed" }
+    | { status: "expired" }
+    | { status: "completed"; result: unknown }
   >;
   retire(sessionId: string): Promise<{ status: "ended" | "expired" }>;
 };

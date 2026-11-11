@@ -1,5 +1,5 @@
 {
-  "id": "643bbd13-dc06-4762-afc4-18b7678c628b",
+  "id": "41a7e150-5184-40be-9ef1-79f555b41483",
   "prevId": "bdf4f379-b842-4997-8a07-a85279207a58",
   "version": "7",
   "dialect": "postgresql",
@@ -1695,6 +1695,33 @@
           ],
           "isUnique": true,
           "where": "\"conversation_turns\".\"status\" = 'running'",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "conversation_turns_latest_idx": {
+          "name": "conversation_turns_latest_idx",
+          "columns": [
+            {
+              "expression": "conversation_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "created_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
           "concurrently": false,
           "method": "btree",
           "with": {}

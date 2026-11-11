@@ -38,16 +38,20 @@ export async function lockContextSources(
   tx: ConversationTransaction,
   owner: string,
   sources: SourceDependency[],
+  options: { requireCurrentVersion?: boolean } = {},
 ) {
   const ids = [...new Set(sources.map((source) => source.noteId))].sort();
   if (ids.length === 0) return true;
   const available = await tx
-    .select({ id: notes.id })
+    .select({ id: notes.id, revision: notes.revision })
     .from(notes)
     .where(and(inArray(notes.id, ids), eq(notes.ownerId, owner)))
     .orderBy(asc(notes.id))
     .for("share");
-  return available.length === ids.length;
+  if (available.length !== ids.length) return false;
+  if (!options.requireCurrentVersion) return true;
+  const versions = new Map(available.map((note) => [note.id, noteTag(note.id, note.revision)]));
+  return sources.every((source) => versions.get(source.noteId) === source.version);
 }
 
 /** Note mutations already hold the source lock. Preserve UI answers, erase derived context. */
@@ -184,6 +188,38 @@ export function createConversationContextStore(db: Database) {
 
   return {
     recover,
+    /** A tool failure still belongs to a running attempt; persist why its context is unusable. */
+    async recoverBySession(sessionId: string, code: ContextRecovery) {
+      const [row] = await db
+        .select({
+          owner: conversations.ownerId,
+          conversationId: conversationTurns.conversationId,
+          turnId: conversationTurns.id,
+        })
+        .from(conversationTurns)
+        .innerJoin(conversations, eq(conversations.id, conversationTurns.conversationId))
+        .where(
+          and(eq(conversationTurns.sessionId, sessionId), eq(conversationTurns.status, "running")),
+        );
+      if (!row) return false;
+      await recover(row.owner, row.conversationId, row.turnId, code);
+      return true;
+    },
+    /** The durable intent's retryAt is the summary provider window, not just cleanup metadata. */
+    async summaryWindowOpen(operationId: string) {
+      const [intent] = await db
+        .select({ id: conversationCleanupIntents.allocationOperationId })
+        .from(conversationCleanupIntents)
+        .where(
+          and(
+            eq(conversationCleanupIntents.allocationOperationId, z.uuid().parse(operationId)),
+            gt(conversationCleanupIntents.retryAt, sql`now()`),
+            // A failed retirement moves retryAt forward; it must not reopen the window.
+            eq(conversationCleanupIntents.attempts, 0),
+          ),
+        );
+      return !!intent;
+    },
     async summaryAuthorized(sessionId: string) {
       const rows = await db
         .select({ sources: conversationContexts.sources, owner: conversations.ownerId })
@@ -210,7 +246,9 @@ export function createConversationContextStore(db: Database) {
       return (
         !!row &&
         db.transaction((tx) =>
-          lockContextSources(tx, row.owner, sourceDependenciesSchema.parse(row.sources)),
+          lockContextSources(tx, row.owner, sourceDependenciesSchema.parse(row.sources), {
+            requireCurrentVersion: true,
+          }),
         )
       );
     },
@@ -219,7 +257,12 @@ export function createConversationContextStore(db: Database) {
       if (saved) {
         if (
           saved.state !== "recovery" &&
-          !(await db.transaction((tx) => lockContextSources(tx, owner, saved.sources)))
+          !(await db.transaction((tx) =>
+            lockContextSources(tx, owner, saved.sources, {
+              // Summaries are new derived context; a ready answer may finish its used revision.
+              requireCurrentVersion: saved.state === "summarizing",
+            }),
+          ))
         ) {
           await recover(owner, conversationId, turnId, "source_changed");
           return undefined;
@@ -399,7 +442,8 @@ export function createConversationContextStore(db: Database) {
         .map(({ message }) => message.id);
       const summaryInput = compactionInput(checkpoint?.text ?? null, older);
       return db.transaction(async (tx) => {
-        if (!(await lockContextSources(tx, owner, sources))) return undefined;
+        if (!(await lockContextSources(tx, owner, sources, { requireCurrentVersion: true })))
+          return undefined;
         const locked = await lockOwnedConversation(tx, owner, conversationId);
         if (!locked || locked.nextSequence !== parent.nextSequence) return undefined;
         const [turn] = await tx
@@ -498,7 +542,10 @@ export function createConversationContextStore(db: Database) {
         return false;
       }
       return db.transaction(async (tx) => {
-        if (!(await lockContextSources(tx, owner, context.sources))) return false;
+        if (
+          !(await lockContextSources(tx, owner, context.sources, { requireCurrentVersion: true }))
+        )
+          return false;
         const parent = await lockOwnedConversation(tx, owner, context.conversationId);
         if (!parent) return false;
         const [turn] = await tx

@@ -63,6 +63,7 @@ it("upgrades existing history without rewriting identities or inventing complete
       id: answerId,
       sequence: 2,
       role: "assistant",
+      turnId,
       text: "An already delivered historical answer.",
       inputIds: [inputId],
     },

@@ -68,21 +68,24 @@ export async function publishConversationAnswer(
   turn: typeof conversationTurns.$inferSelect,
   input: Finalization,
 ) {
+  // Stop publishes without the newer defaulted fields while finalization parses them first.
+  // Normalize here so equivalent terminal retries share one payload hash.
+  const data = finalizationSchema.parse(input);
   const [message] = await tx
     .insert(conversationMessages)
     .values({
       conversationId: parent.id,
       operationId: randomUUID(),
-      payloadHash: conversationPayloadHash(input),
+      payloadHash: conversationPayloadHash(data),
       sequence: parent.nextSequence,
       role: "assistant",
       turnId: turn.id,
-      text: input.text,
+      text: data.text,
     })
     .returning();
-  if (input.citations.length)
+  if (data.citations.length)
     await tx.insert(conversationCitations).values(
-      input.citations.map((citation, ordinal) => ({
+      data.citations.map((citation, ordinal) => ({
         conversationId: parent.id,
         messageId: message!.id,
         ordinal,
@@ -95,14 +98,11 @@ export async function publishConversationAnswer(
   await tx
     .update(conversationTurns)
     .set({
-      status: input.status,
-      reason: input.reason ?? null,
+      status: data.status,
+      reason: data.reason ?? null,
       runningText: null,
-      sourceDependencies: mergeDependencies(
-        turn.sourceDependencies,
-        input.sourceDependencies ?? [],
-      ),
-      provenanceComplete: input.provenanceComplete ?? false,
+      sourceDependencies: mergeDependencies(turn.sourceDependencies, data.sourceDependencies),
+      provenanceComplete: data.provenanceComplete,
       updatedAt: new Date().toISOString(),
     })
     .where(eq(conversationTurns.id, turn.id));

@@ -137,15 +137,16 @@ export function createConversationTurns(db: Database) {
               eq(conversationTurns.status, "running"),
             ),
           );
-        if (!snapshot) return false;
+        if (!snapshot) return { status: "unavailable" as const };
         const dependencies = mergeDependencies(snapshot.turn.sourceDependencies, sources);
-        if (!(await lockContextSources(tx, snapshot.owner, dependencies))) return false;
+        if (!(await lockContextSources(tx, snapshot.owner, dependencies)))
+          return { status: "unavailable" as const };
         const parent = await lockOwnedConversation(
           tx,
           snapshot.owner,
           snapshot.turn.conversationId,
         );
-        if (!parent) return false;
+        if (!parent) return { status: "unavailable" as const };
         const [context] = await tx
           .select()
           .from(conversationContexts)
@@ -164,10 +165,10 @@ export function createConversationTurns(db: Database) {
               eq(conversationTurns.status, "running"),
             ),
           );
-        if (!context || !turn) return false;
+        if (!context || !turn) return { status: "unavailable" as const };
         const merged = mergeDependencies(turn.sourceDependencies, dependencies);
         const bytes = turn.retrievalBytes + byteSize(output);
-        if (bytes > CONTEXT_LIMITS.retrievalBytes) return false;
+        if (bytes > CONTEXT_LIMITS.retrievalBytes) return { status: "budget" as const };
         await tx
           .update(conversationTurns)
           .set({ sourceDependencies: merged, retrievalBytes: bytes })
@@ -176,11 +177,15 @@ export function createConversationTurns(db: Database) {
           .update(conversationContexts)
           .set({ sources: merged })
           .where(eq(conversationContexts.turnId, turn.id));
-        return true;
+        return { status: "recorded" as const };
       });
     },
 
-    /** Checked before every chat model call, including after a tool or a steer. */
+    /**
+     * Checked before every chat model call, including after a tool or a steer. Existence is
+     * deliberate: an in-flight answer may finish against the revision it used and is marked
+     * stale later (#71). New context reconstruction requires current versions.
+     */
     async contextAuthorized(sessionId: string) {
       const rows = await db
         .select({
@@ -725,7 +730,11 @@ export function createConversationTurns(db: Database) {
           .update(conversations)
           .set({ queuePaused: true, updatedAt: new Date().toISOString() })
           .where(eq(conversations.id, parent.id));
-        return { status: "paused" as const, message };
+        return {
+          status: "paused" as const,
+          message,
+          allocationOperationId: turn?.allocationOperationId,
+        };
       });
     },
 
