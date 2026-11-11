@@ -116,8 +116,9 @@ export function createConversationAnswers({
     }
     if (context.state === "summarizing") {
       if (!(await contexts.summaryWindowOpen(context.operationId))) {
-        if (await contexts.recoverSummarizing(owner, conversationId, turn.id, "summary_failed"))
-          await fail(owner, conversationId, turn);
+        if (!(await contexts.recoverSummarizing(owner, conversationId, turn.id, "summary_failed")))
+          return { summaryPublished: true } as const;
+        await fail(owner, conversationId, turn);
         return undefined;
       }
       const compactor = compactorFor(context.runtimeUrl);
@@ -128,8 +129,11 @@ export function createConversationAnswers({
         // The snapshot predates allocation. A deletion or edit since then must not place
         // historical text in the new session.
         if (!(await contexts.summaryAuthorized(sessionId))) {
-          if (await contexts.recoverSummarizing(owner, conversationId, turn.id, "source_changed"))
-            await fail(owner, conversationId, turn);
+          if (
+            !(await contexts.recoverSummarizing(owner, conversationId, turn.id, "source_changed"))
+          )
+            return { summaryPublished: true } as const;
+          await fail(owner, conversationId, turn);
           return undefined;
         }
         const receipt = await compactor.submit(
@@ -139,14 +143,15 @@ export function createConversationAnswers({
         );
         if (receipt.status !== "delivered") {
           if (
-            await contexts.recoverSummarizing(
+            !(await contexts.recoverSummarizing(
               owner,
               conversationId,
               turn.id,
               receipt.status === "expired" ? "runtime_expired" : "context_budget",
-            )
+            ))
           )
-            await fail(owner, conversationId, turn);
+            return { summaryPublished: true } as const;
+          await fail(owner, conversationId, turn);
           return undefined;
         }
         deliveryId = receipt.deliveryId;
@@ -159,14 +164,15 @@ export function createConversationAnswers({
       }
       if (observation.status === "failed" || observation.status === "expired") {
         if (
-          await contexts.recoverSummarizing(
+          !(await contexts.recoverSummarizing(
             owner,
             conversationId,
             turn.id,
             observation.status === "expired" ? "runtime_expired" : "summary_failed",
-          )
+          ))
         )
-          await fail(owner, conversationId, turn);
+          return { summaryPublished: true } as const;
+        await fail(owner, conversationId, turn);
         return undefined;
       }
       if (!(await contexts.publishSummary(owner, context, observation.result))) {

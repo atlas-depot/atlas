@@ -1171,6 +1171,13 @@ it("does not let stale summary recovery overwrite a ready context", async () => 
       .where(eq(conversationContexts.turnId, active.id)),
   ).toMatchObject([{ state: "ready", summary: "Valid summary." }]);
   expect((await f.store.read(f.owner, f.id))?.conversation.queuePaused).toBe(false);
+  // The stale reader continues through the ready context instead of failing the turn.
+  f.fake.observe(f.result([], [], "Recovered answer."));
+  await f.second.refresh(f.owner, f.id);
+  expect((await f.history()).at(-1)).toMatchObject({
+    role: "assistant",
+    text: "Recovered answer.",
+  });
 });
 
 it("persists a failed search context as a visible recovery state", async () => {
