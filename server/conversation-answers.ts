@@ -349,11 +349,10 @@ export function createConversationAnswers({
     async stop(owner: string, conversationId: string) {
       const stopped = await turns.stop(owner, conversationId);
       if (stopped.status === "paused") {
-        for (const intent of await cleanup.expedite(
-          owner,
-          conversationId,
-          stopped.allocationOperationId ?? undefined,
-        ))
+        const operations = [stopped.allocationOperationId, stopped.summaryOperationId].filter(
+          (id): id is string => id !== null,
+        );
+        for (const intent of await cleanup.retireExact(owner, conversationId, operations))
           await retire(intent);
       }
       return stopped;

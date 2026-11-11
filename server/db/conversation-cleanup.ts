@@ -1,4 +1,4 @@
-import { and, asc, eq, lte, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, lte, sql } from "drizzle-orm";
 import { z } from "zod";
 import { noteTextSchema } from "../../shared/document.ts";
 import { indexRuntimeUrlSchema } from "../../shared/index-jobs.ts";
@@ -74,38 +74,28 @@ export async function enqueueConversationCleanup(
 /** Internal runtime bookkeeping. No method performs or claims an external retirement itself. */
 export function createConversationCleanupStore(db: Database) {
   return {
-    async expedite(owner: string, conversationId: string, prioritize?: string) {
-      const first = prioritize ? uuidSchema.parse(prioritize) : undefined;
+    /** Stop retires only the sessions captured for its active attempt, never newer work. */
+    async retireExact(owner: string, conversationId: string, operations: readonly string[]) {
+      const ids = operations.map((id) => uuidSchema.parse(id));
+      if (ids.length === 0) return [];
+      const scope = and(
+        eq(conversationCleanupIntents.ownerId, owner),
+        eq(conversationCleanupIntents.conversationId, conversationId),
+        inArray(conversationCleanupIntents.allocationOperationId, ids),
+      );
       await db
         .update(conversationCleanupIntents)
         .set({ retryAt: sql`now()` })
-        .where(
-          and(
-            eq(conversationCleanupIntents.ownerId, owner),
-            eq(conversationCleanupIntents.conversationId, conversationId),
-          ),
-        );
-      const rows = db
+        .where(scope);
+      return db
         .select()
         .from(conversationCleanupIntents)
-        .where(
-          and(
-            eq(conversationCleanupIntents.ownerId, owner),
-            eq(conversationCleanupIntents.conversationId, conversationId),
-          ),
-        );
-      return (
-        first
-          ? rows.orderBy(
-              sql`(${conversationCleanupIntents.allocationOperationId} = ${first}) DESC`,
-              asc(conversationCleanupIntents.retryAt),
-              asc(conversationCleanupIntents.allocationOperationId),
-            )
-          : rows.orderBy(
-              asc(conversationCleanupIntents.retryAt),
-              asc(conversationCleanupIntents.allocationOperationId),
-            )
-      ).limit(100);
+        .where(scope)
+        .orderBy(
+          asc(conversationCleanupIntents.retryAt),
+          asc(conversationCleanupIntents.allocationOperationId),
+        )
+        .limit(100);
     },
     /** Late receipts can only bind an existing intent, never recreate conversation data. */
     async bindIntent(allocationOperationId: string, sessionId: string) {

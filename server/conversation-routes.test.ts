@@ -228,6 +228,7 @@ describe("conversation answer HTTP boundary", () => {
       status: "paused",
       message: undefined,
       allocationOperationId: null,
+      summaryOperationId: "synthetic-summary",
     });
     for (const action of ["stop", "resume"] as const) {
       const response = await post(action);

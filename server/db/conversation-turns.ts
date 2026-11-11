@@ -730,6 +730,13 @@ export function createConversationTurns(db: Database) {
               eq(conversationTurns.status, "running"),
             ),
           );
+        // Capture the summary session before publication removes this attempt's context row.
+        const [summaryContext] = turn
+          ? await tx
+              .select({ operationId: conversationContexts.operationId })
+              .from(conversationContexts)
+              .where(eq(conversationContexts.turnId, turn.id))
+          : [];
         const message = turn
           ? await publishConversationAnswer(tx, parent, turn, {
               status: "incomplete",
@@ -747,7 +754,8 @@ export function createConversationTurns(db: Database) {
         return {
           status: "paused" as const,
           message,
-          allocationOperationId: turn?.allocationOperationId,
+          allocationOperationId: turn?.allocationOperationId ?? null,
+          summaryOperationId: summaryContext?.operationId ?? null,
         };
       });
     },
