@@ -132,6 +132,42 @@ function validContext(context: Context): boolean {
 
 /** Durable snapshots prevent a reconnect from changing a delivery's prompt or summary job. */
 export function createConversationContextStore(db: Database) {
+  async function applyRecovery(
+    tx: ConversationTransaction,
+    parent: typeof conversations.$inferSelect,
+    turnId: string,
+    code: ContextRecovery,
+  ) {
+    const marked = await tx
+      .update(conversationTurns)
+      .set({ contextRecovery: sql`coalesce(${conversationTurns.contextRecovery}, ${code})` })
+      .where(
+        and(
+          eq(conversationTurns.id, turnId),
+          eq(conversationTurns.conversationId, parent.id),
+          eq(conversationTurns.status, "running"),
+        ),
+      )
+      .returning({ id: conversationTurns.id });
+    // Like Stop: queued inputs wait for an explicit resume, so the recovery stays the
+    // latest outcome and the queue cannot drain into repeated failures.
+    if (marked.length)
+      await tx
+        .update(conversations)
+        .set({ queuePaused: true })
+        .where(eq(conversations.id, parent.id));
+    const [context] = await tx
+      .update(conversationContexts)
+      .set({ state: "recovery", summary: null, summaryInput: null, recent: [] })
+      .where(eq(conversationContexts.turnId, turnId))
+      .returning();
+    if (context)
+      await tx
+        .update(conversationCleanupIntents)
+        .set({ retryAt: sql`now()` })
+        .where(eq(conversationCleanupIntents.allocationOperationId, context.operationId));
+  }
+
   async function recover(
     owner: string,
     conversationId: string,
@@ -140,35 +176,33 @@ export function createConversationContextStore(db: Database) {
   ) {
     return db.transaction(async (tx) => {
       const parent = await lockOwnedConversation(tx, owner, conversationId);
-      if (!parent) return;
-      const marked = await tx
-        .update(conversationTurns)
-        .set({ contextRecovery: sql`coalesce(${conversationTurns.contextRecovery}, ${code})` })
-        .where(
-          and(
-            eq(conversationTurns.id, turnId),
-            eq(conversationTurns.conversationId, parent.id),
-            eq(conversationTurns.status, "running"),
-          ),
-        )
-        .returning({ id: conversationTurns.id });
-      // Like Stop: queued inputs wait for an explicit resume, so the recovery stays the
-      // latest outcome and the queue cannot drain into repeated failures.
-      if (marked.length)
-        await tx
-          .update(conversations)
-          .set({ queuePaused: true })
-          .where(eq(conversations.id, parent.id));
+      if (!parent) return false;
+      await applyRecovery(tx, parent, turnId, code);
+      return true;
+    });
+  }
+
+  /**
+   * A reader can hold a summarizing snapshot while another reader publishes. Only apply
+   * recovery while the context is still summarizing; a ready context must continue.
+   */
+  async function recoverSummarizing(
+    owner: string,
+    conversationId: string,
+    turnId: string,
+    code: ContextRecovery,
+  ) {
+    return db.transaction(async (tx) => {
+      const parent = await lockOwnedConversation(tx, owner, conversationId);
+      if (!parent) return false;
       const [context] = await tx
-        .update(conversationContexts)
-        .set({ state: "recovery", summary: null, summaryInput: null, recent: [] })
+        .select({ state: conversationContexts.state })
+        .from(conversationContexts)
         .where(eq(conversationContexts.turnId, turnId))
-        .returning();
-      if (context)
-        await tx
-          .update(conversationCleanupIntents)
-          .set({ retryAt: sql`now()` })
-          .where(eq(conversationCleanupIntents.allocationOperationId, context.operationId));
+        .for("update");
+      if (context?.state !== "summarizing") return false;
+      await applyRecovery(tx, parent, turnId, code);
+      return true;
     });
   }
 
@@ -199,6 +233,7 @@ export function createConversationContextStore(db: Database) {
 
   return {
     recover,
+    recoverSummarizing,
     /** A tool failure still belongs to a running attempt; persist why its context is unusable. */
     async recoverBySession(sessionId: string, code: ContextRecovery) {
       const [row] = await db
@@ -275,7 +310,11 @@ export function createConversationContextStore(db: Database) {
             }),
           ))
         ) {
-          await recover(owner, conversationId, turnId, "source_changed");
+          if (saved.state === "summarizing") {
+            await recoverSummarizing(owner, conversationId, turnId, "source_changed");
+          } else {
+            await recover(owner, conversationId, turnId, "source_changed");
+          }
           return undefined;
         }
         return saved;
@@ -549,7 +588,7 @@ export function createConversationContextStore(db: Database) {
     async publishSummary(owner: string, context: Context, result: unknown) {
       const parsed = summaryResultSchema.safeParse(result);
       if (!parsed.success) {
-        await recover(owner, context.conversationId, context.turnId, "summary_failed");
+        await recoverSummarizing(owner, context.conversationId, context.turnId, "summary_failed");
         return false;
       }
       return db.transaction(async (tx) => {

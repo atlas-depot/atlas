@@ -1149,6 +1149,30 @@ it("replays a stopped terminal result with the same normalized publication hash"
   ).toMatchObject({ status: "saved" });
 });
 
+it("does not let stale summary recovery overwrite a ready context", async () => {
+  const f = await fixture();
+  f.fake.observe(f.result([], [], "old ".repeat(3_000)));
+  await f.first.send(f.owner, f.id, randomUUID(), { text: "First" });
+  f.fake.compactor.inspect = async () => ({ status: "running" });
+  await f.second.send(f.owner, f.id, randomUUID(), { text: "Follow-up" });
+  const active = (await f.store.read(f.owner, f.id))!.activeTurn!;
+  const contexts = createConversationContextStore(database.db);
+  const [context] = await database.db
+    .select()
+    .from(conversationContexts)
+    .where(eq(conversationContexts.turnId, active.id));
+  if (!context) throw new Error("Missing summarizing context");
+  expect(await contexts.publishSummary(f.owner, context, { summary: "Valid summary." })).toBe(true);
+  expect(await contexts.recoverSummarizing(f.owner, f.id, active.id, "summary_failed")).toBe(false);
+  expect(
+    await database.db
+      .select()
+      .from(conversationContexts)
+      .where(eq(conversationContexts.turnId, active.id)),
+  ).toMatchObject([{ state: "ready", summary: "Valid summary." }]);
+  expect((await f.store.read(f.owner, f.id))?.conversation.queuePaused).toBe(false);
+});
+
 it("persists a failed search context as a visible recovery state", async () => {
   const f = await fixture();
   await f.first.send(f.owner, f.id, randomUUID(), { text: "Question" });
