@@ -37,7 +37,7 @@ Usage is captured from durable model/research events before remote retirement, i
 
 Running views expose durable `phaseStartedAt`/`lastProgressAt` when available. Polling does not reset them. `stalled` uses the existing 180-second research and 600-second model silence bounds; it signals the UI without restarting work. While `start` returns `cleanup_pending`, keep the returned handle and poll `read` to finish/retry cleanup. Only a later explicit Organize action after a terminal result starts a new run. A bounded database lock timeout is retryable and must not be displayed as a successful cancellation.
 
-The only model tool is `research`. Its `question` input is trimmed and must be 1 to 500 characters (`researchInputSchema` in `agent/tools/research.ts`). It uses OpenRouter and returns provider source records, which remain separate from model prose. Research retries 429/502/503/504 at most three attempts with full jitter and `Retry-After`; broken streams and uncertain network failures are not blindly replayed. An opaque research call has a 180-second runtime deadline. A durable eve hook rejects the seventeenth model request. The installed eve model caller has a native 600-second first/chunk silence timeout. These runtime safeguards work without an attached browser; polling does not own cancellation timers.
+The Organize job's `research` tool takes a trimmed 1-500 character question (`researchInputSchema` in `agent/tools/research.ts`). It uses OpenRouter and returns provider source records, separate from model prose. Research retries 429/502/503/504 at most three attempts with full jitter and `Retry-After`; broken streams and uncertain network failures are not blindly replayed. An Organize research call has a 180-second runtime deadline. Chat reuses this path only after backend query generalization or a hash-bound disclosure approval; its approval wait expires after two minutes and the overall tool deadline is 300 seconds. A durable eve hook rejects the seventeenth model request. The installed eve model caller has a native 600-second first/chunk silence timeout. These runtime safeguards work without an attached browser; polling does not own cancellation timers.
 
 Outer/research output limits are 16,384/8,192 tokens. Truncation or invalid output is rejected. Markdown must fit the 100,000-character note contract. The session token backstop pauses at 1,000,000 input or 65,536 output tokens; paused work is not a completed draft. No per-note dollar cutoff is imposed. GPT-6 Luna is the default when `ORGANIZER_MODEL` is omitted. An explicit value overrides it. Synthetic answer, research and compaction checks informed this choice; model outputs still require the existing validation.
 
@@ -66,17 +66,28 @@ can call the provider.
 
 ## Question answering
 
-Implements [#71](https://github.com/atlas-depot/atlas/issues/71); the decisions are in the
-[proposal](../../docs/proposals/71-grounded-chat-turn.md). The same agent answers questions
-over the user's notes. The service username fixes the job: `api` runs Organize and indexing,
-`chat` runs answers. `job.ts` holds the rule. A chat session gets `instructions/answer.ts`
-and the `search_notes` tool only; `research` and the Organize instructions are withheld.
-A session touched by both principals gets neither tool.
+Implements [#71](https://github.com/atlas-depot/atlas/issues/71); its accepted baseline is in the
+[proposal](../../docs/proposals/71-grounded-chat-turn.md). This branch proposes the bounded #75
+exception described in [the public-research proposal](../../docs/proposals/75-chat-public-research.md);
+it changes the #71 tool-separation decision and is pending Efe review. The service username fixes
+the job: `api` runs Organize and indexing, `chat` runs answers. A chat session gets
+`instructions/answer.ts`, `search_notes` and the existing `research` tool. Context jobs get no
+retrieval or research tools, and a session touched by both principals gets neither job's tools.
 
 `search_notes` accepts a query and a limit. It finds the owner through the running attempt
 bound to its own session ID, embeds the query with the index profile and returns current
 owned passages with a server-computed ID. It needs `DATABASE_URL` and `OPENROUTER_API_KEY`
-in the runtime. `answer-client.ts` sends inputs with an idempotency key and the reply schema,
+in the runtime. Chat research scans the turn's current note and transcript context before any
+provider call. Detectable private names, identifiers, numbers and copied phrases are removed from
+autonomous queries; an unhelpfully vague query, uncertain context or explicit private-detail request
+creates a two-minute approval request. The owner can read the exact proposed query and approve or
+deny it through the conversation API. Approval binds the owner, conversation, running turn, exact
+query hash and context snapshot; Stop, account mismatch, expiry or changed context prevents egress.
+No note or transcript is appended to the existing research helper input. Web citations use a distinct
+URL/title/retrieval-time source type; note deletion redacts note excerpts only. The API exposes the
+approval contract, but this repository has no conversation UI to render the request yet.
+
+`answer-client.ts` sends inputs with an idempotency key and the reply schema,
 uses `turnPolicy: "steer"` only for an explicit steer, and reads results from bounded
 snapshots. `eve-transport.ts` carries the request code both clients share.
 

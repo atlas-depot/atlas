@@ -3,6 +3,11 @@
 Status: Efe decided the four choices below on 11 November 2026. The storage contract is
 [#70](70-conversation-persistence.md); the search contract is [#68](68-search-contract.md).
 
+This records the accepted #71 baseline. Issue [#75](https://github.com/atlas-depot/atlas/issues/75)
+proposes a bounded public-research exception in a chat session; see the separate
+[#75 proposal](75-chat-public-research.md). The #71 decision remains authoritative until Efe
+accepts that change.
+
 ## Decisions
 
 | Choice | Decision |

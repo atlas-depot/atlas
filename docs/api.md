@@ -8,6 +8,7 @@ The Hono API serves JSON under `/api`. The Zod schemas in `shared/` are the sour
 - [Draft schemas](../shared/drafts.ts): temporary drafts and reconnect state.
 - [Session schemas](../shared/auth.ts): the identity returned by `GET /api/auth/session`. The browser sign-in routes are described in [development](development.md#local-api).
 - [Conversation schemas](../shared/conversations.ts): persistent conversation, history and citation responses.
+- [Research approval schemas](../shared/research.ts): owner-scoped pending disclosures and hash-bound decisions.
 
 ## Common rules
 
@@ -67,6 +68,9 @@ are removed in bounded batches as subsequent requests arrive.
 | `POST /api/conversations`, `{}` plus UUID `Idempotency-Key` | `201` server-generated conversation |
 | `GET /api/conversations?limit=50&cursor=...` | `200 { conversations, nextCursor }`, newest creation first |
 | `GET /api/conversations/:id` | `200 { conversation, activeTurn, recovery }`, including the current checkpoint when running |
+| `GET /api/conversations/:id/research-requests` | `200 { requests }` with pending exact queries, payload hashes and expiry |
+| `POST /api/conversations/:id/research-requests/:requestId/approve`, `{ queryHash }` | `200 { status: "approved" }` for the current owner's exact pending request |
+| `POST /api/conversations/:id/research-requests/:requestId/deny`, `{ queryHash }` | `200 { status: "denied" }`, with the pending payload cleared |
 | `GET /api/conversations/:id/messages?limit=50&cursor=...` | `200 { messages, nextCursor }`, ascending immutable sequence |
 | `DELETE /api/conversations/:id`, empty body | `204` after content deletion and durable cleanup-intent recording |
 | `POST /api/conversations/:id/messages`, `{ text, policy? }` plus UUID `Idempotency-Key` | `202 { message, conversation, activeTurn, recovery }` |
@@ -85,9 +89,11 @@ of all consumed inputs and distinguish `completed`, `no-support`, and `incomplet
 `failed` or `cancelled` reason. Partial history is not verified context for later answers.
 Each answer may reference at most 100 accepted inputs and 100 citations. Additional queued
 inputs stay available for later answers. Citation excerpts are at most 1,000 UTF-16 code units.
-Note deletion clears their stored
-excerpts, retaining delivered answer text and deleted-source references. Changed source
-versions are marked stale. No previous full note revision is archived.
+Note citations identify revision-bound block or Markdown sources. Web citations identify a separate
+provider-returned HTTP(S) URL/title/retrieval-time record; they have no note ID or note-stale state.
+Note deletion clears only that note citation's stored excerpt, retaining delivered answer text and
+deleted-source reference. It does not remove a web citation. Changed note source versions are
+marked stale. No previous full note revision is archived.
 
 Sending a message accepts one input and returns before the answer exists. `policy` is
 `queue` (default) or `steer`. A queued input waits for the running answer. Up to 100 waiting inputs
@@ -109,19 +115,30 @@ not counted. Once a slot opens, a read or the maintenance sweep can start the qu
 saves progress or publishes the finished answer, and starts the next queued inputs. It never
 starts a second run for the same inputs. Runtime trouble does not fail the read.
 
-An answer is `completed` only when every citation names a passage the attempt retrieved from
-the owner's notes and quotes it exactly. A malformed result or an unknown source becomes an
-`incomplete` answer with reason `failed`. `no-support` means the attempt found no supporting passage; it carries
-no citations. It is not proof that no note covers the question: search returns a bounded
-set of candidates and some notes may not be indexed yet. If a source is deleted before publication, the generated text is suppressed. History keeps
-an empty `incomplete` answer with reason `failed`.
-A source edited meanwhile keeps its old-revision citation, marked `stale`. These checks
-establish where a quote came from, not that it supports the claim.
+An answer is `completed` only when every citation names note or web evidence returned by a tool
+for this attempt and quotes its returned text exactly. Web source identity is recomputed from the
+server tool result, never supplied by the final model response. A malformed result or unknown
+source becomes an `incomplete` answer with reason `failed`. `no-support` means the attempt found
+no supporting retrieved evidence; it carries no citations. It is not proof that no note covers the
+question: note search returns a bounded candidate set and some notes may not be indexed yet. If a
+note source is deleted before publication, generated text is suppressed. History keeps an empty
+`incomplete` answer with reason `failed`. A source edited meanwhile keeps its old-revision citation,
+marked `stale`. These checks establish where a quote came from, not that it supports the claim.
 
 Stop cancels the running answer as `incomplete` with reason `cancelled`, ends its runtime
 session and pauses the queue. Queued inputs stay until resume. Retry starts a new attempt
 over the same inputs and keeps the incomplete answer in history. With no private runtime
 configured these four routes return `503`. Runtime identities never appear in a response.
+
+Chat research uses the existing OpenRouter helper only after backend query generalization. If
+private specifics are necessary, a pending request exposes the exact proposed query to the
+authenticated conversation owner and blocks the running tool until approval. Approval is bound to
+`queryHash`, owner, conversation, turn and a digest of the private context; it expires after two
+minutes. A mismatched hash, changed context, expired request, Stop or another account cannot
+authorize a provider call. The helper receives only the generalized query or the exact approved
+query, never the full note or transcript. Pending query text is cleared on denial, expiry,
+cancellation, staleness or when a provider call starts. This API exposes the approval contract; no
+conversation UI currently consumes it. Without an answer runtime, the approval routes return `503`.
 
 `recovery` is normally `null`. `{ turnId, reason }` identifies an incomplete attempt whose
 context could not be used: `history_unavailable`, `context_budget`, `summary_failed`,
