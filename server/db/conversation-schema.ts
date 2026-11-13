@@ -14,7 +14,7 @@ import {
   uniqueIndex,
   uuid,
 } from "drizzle-orm/pg-core";
-import type { NotePassageSource } from "../../shared/passages.ts";
+import type { AnswerEvidenceSource } from "../../shared/evidence.ts";
 import type { ContextMessage, ContextRecovery, SourceDependency } from "../conversation-context.ts";
 
 export type ConversationTurnStatus =
@@ -23,6 +23,17 @@ export type ConversationTurnStatus =
   | "completed"
   | "no-support"
   | "incomplete";
+
+export type ConversationResearchRequestStatus =
+  | "pending"
+  | "approved"
+  | "started"
+  | "completed"
+  | "denied"
+  | "expired"
+  | "cancelled"
+  | "stale"
+  | "failed";
 
 export const conversations = pgTable(
   "conversations",
@@ -205,15 +216,61 @@ export const conversationTurnInputs = pgTable(
   ],
 );
 
-/** No note foreign key: deleting a source removes its excerpt, not the delivered answer. */
+/** Private disclosure payloads are kept only while a decision can still authorize this turn. */
+export const conversationResearchRequests = pgTable(
+  "conversation_research_requests",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    conversationId: uuid("conversation_id").notNull(),
+    turnId: uuid("turn_id").notNull(),
+    proposedQuery: text("proposed_query"),
+    queryHash: text("query_hash").notNull(),
+    contextHash: text("context_hash").notNull(),
+    status: text("status").$type<ConversationResearchRequestStatus>().notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true, mode: "string" }).notNull(),
+    decidedAt: timestamp("decided_at", { withTimezone: true, mode: "string" }),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "string" })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    foreignKey({
+      name: "conversation_research_requests_turn_parent_fk",
+      columns: [table.conversationId, table.turnId],
+      foreignColumns: [conversationTurns.conversationId, conversationTurns.id],
+    }).onDelete("cascade"),
+    index("conversation_research_requests_turn_idx").on(
+      table.conversationId,
+      table.turnId,
+      table.createdAt,
+    ),
+    uniqueIndex("conversation_research_requests_active_query_idx")
+      .on(table.turnId, table.queryHash)
+      .where(sql`${table.status} IN ('pending', 'approved')`),
+    check(
+      "conversation_research_requests_status_valid",
+      sql`${table.status} IN ('pending', 'approved', 'started', 'completed', 'denied', 'expired', 'cancelled', 'stale', 'failed')`,
+    ),
+    check(
+      "conversation_research_requests_payload_valid",
+      sql`(${table.status} IN ('pending', 'approved') AND ${table.proposedQuery} IS NOT NULL AND length(${table.proposedQuery}) BETWEEN 1 AND 500) OR (${table.status} NOT IN ('pending', 'approved') AND ${table.proposedQuery} IS NULL)`,
+    ),
+    check(
+      "conversation_research_requests_hash_valid",
+      sql`${table.queryHash} ~ '^[0-9a-f]{64}$' AND ${table.contextHash} ~ '^[0-9a-f]{64}$'`,
+    ),
+  ],
+);
+
+/** No note foreign key: deleting a source removes only its own excerpt, not the delivered answer. */
 export const conversationCitations = pgTable(
   "conversation_citations",
   {
     conversationId: uuid("conversation_id").notNull(),
     messageId: uuid("message_id").notNull(),
     ordinal: integer("ordinal").notNull(),
-    noteId: uuid("note_id").notNull(),
-    source: jsonb("source").$type<NotePassageSource>().notNull(),
+    noteId: uuid("note_id"),
+    source: jsonb("source").$type<AnswerEvidenceSource>().notNull(),
     excerpt: text("excerpt"),
     deleted: boolean("deleted").notNull().default(false),
   },
@@ -226,6 +283,10 @@ export const conversationCitations = pgTable(
       foreignColumns: [conversationMessages.conversationId, conversationMessages.id],
     }).onDelete("cascade"),
     check("conversation_citations_ordinal_nonnegative", sql`${table.ordinal} >= 0`),
+    check(
+      "conversation_citations_source_identity",
+      sql`(${table.source}->>'kind' = 'web' AND ${table.noteId} IS NULL) OR (${table.source}->>'kind' IN ('block', 'markdown') AND ${table.noteId} IS NOT NULL AND ${table.source}->>'noteId' = ${table.noteId}::text)`,
+    ),
     check(
       "conversation_citations_redaction_valid",
       sql`(${table.deleted} AND ${table.excerpt} IS NULL) OR (NOT ${table.deleted} AND ${table.excerpt} IS NOT NULL AND length(${table.excerpt}) > 0)`,

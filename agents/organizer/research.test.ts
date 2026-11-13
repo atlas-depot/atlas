@@ -179,9 +179,22 @@ await test("an overlong research question is rejected before any provider reques
     throw new Error("No provider call expected.");
   };
   try {
-    const { researchInputSchema } = await import("./agent/tools/research.ts");
+    const { chatResearchInputSchema, researchInputSchema } =
+      await import("./agent/tools/research.ts");
     assert.equal(researchInputSchema.safeParse({ question: "x".repeat(501) }).success, false);
     assert.equal(researchInputSchema.safeParse({ question: ` ${"x".repeat(500)} ` }).success, true);
+    assert.equal(
+      chatResearchInputSchema.safeParse({
+        question: "Public question",
+        requiresPrivateDisclosure: true,
+      }).success,
+      true,
+    );
+    assert.equal(
+      chatResearchInputSchema.safeParse({ question: "Public question", ownerId: "untrusted" })
+        .success,
+      false,
+    );
   } finally {
     globalThis.fetch = realFetch;
   }

@@ -1,6 +1,11 @@
 import { expect, it } from "vite-plus/test";
 import type { NotePassageSource } from "../shared/passages.ts";
-import { evidenceId, readSearchEvidence, resolveAnswer } from "./conversation-answer.ts";
+import {
+  evidenceId,
+  readResearchEvidence,
+  readSearchEvidence,
+  resolveAnswer,
+} from "./conversation-answer.ts";
 
 const source: NotePassageSource = {
   kind: "block",
@@ -26,6 +31,50 @@ it("publishes the server's own source record for a citation that quotes retrieve
       text: "It is at 14:00.",
       citations: [{ source, excerpt: "library at 14:00", deleted: false }],
     },
+  });
+});
+
+it("validates public citations separately and persists only the provider's web source record", () => {
+  const webSource = {
+    kind: "web" as const,
+    url: "https://example.test/release",
+    title: "Official release",
+    retrievedAt: "2026-11-13T12:00:00.000Z",
+  };
+  const webPassage = {
+    id: evidenceId(webSource),
+    text: "The release is on 14 October.",
+    source: webSource,
+  };
+  expect(
+    resolveAnswer(answer([{ passageId: webPassage.id, excerpt: "release is on 14 October" }]), [
+      webPassage,
+    ]),
+  ).toEqual({
+    ok: true,
+    answer: {
+      status: "completed",
+      text: "It is at 14:00.",
+      citations: [
+        {
+          source: webSource,
+          excerpt: "release is on 14 October",
+          deleted: false,
+        },
+      ],
+    },
+  });
+  expect(
+    readResearchEvidence({
+      status: "completed",
+      question: "What is the release date?",
+      text: webPassage.text,
+      sources: [{ id: "p_0000000000000000", source: webSource }],
+    }),
+  ).toBeUndefined();
+  expect(readResearchEvidence({ status: "not_performed", reason: "denied" })).toEqual({
+    status: "not_performed",
+    reason: "denied",
   });
 });
 

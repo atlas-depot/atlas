@@ -137,6 +137,12 @@ describe("conversation answer HTTP boundary", () => {
         .fn<ConversationAnswerService["send"]>()
         .mockResolvedValue({ status: "saved", value: message }),
       refresh: vi.fn<ConversationAnswerService["refresh"]>().mockResolvedValue(undefined),
+      researchRequests: vi
+        .fn<ConversationAnswerService["researchRequests"]>()
+        .mockResolvedValue({ requests: [] }),
+      decideResearchRequest: vi
+        .fn<ConversationAnswerService["decideResearchRequest"]>()
+        .mockResolvedValue({ status: "approved" }),
       stop: vi.fn<ConversationAnswerService["stop"]>().mockResolvedValue({ status: "not_found" }),
       resume: vi.fn<ConversationAnswerService["resume"]>().mockResolvedValue({ status: "resumed" }),
       retry: vi.fn<ConversationAnswerService["retry"]>().mockResolvedValue({ status: "paused" }),
@@ -159,7 +165,14 @@ describe("conversation answer HTTP boundary", () => {
 
   it("authorizes before any answer work and passes only the verified owner and the caller's policy", async () => {
     const denied = answering(false);
-    for (const path of ["messages", "stop", "resume", `turns/${id}/retry`])
+    for (const path of [
+      "messages",
+      "stop",
+      "resume",
+      "research-requests",
+      `research-requests/${id}/approve`,
+      `turns/${id}/retry`,
+    ])
       expect(
         (await denied.app.request(`/api/conversations/${id}/${path}`, send({ text: "x" }))).status,
       ).toBe(401);
@@ -271,5 +284,40 @@ describe("conversation answer HTTP boundary", () => {
     });
     expect(answers.send).not.toHaveBeenCalled();
     expect(answers.retry).not.toHaveBeenCalled();
+  });
+
+  it("presents the exact pending disclosure and binds decisions to its payload hash", async () => {
+    const { app, answers } = answering();
+    const requestId = "f23f4482-7f6c-48e5-90c7-07a3bb7bce35";
+    const queryHash = "b".repeat(64);
+    const requests = {
+      requests: [
+        {
+          id: requestId,
+          proposedQuery: "What did Northstar Labs announce?",
+          queryHash,
+          expiresAt: "2026-11-13T12:02:00.000Z",
+        },
+      ],
+    };
+    answers.researchRequests.mockResolvedValueOnce(requests);
+    const listed = await app.request(`/api/conversations/${id}/research-requests`);
+    expect([listed.status, await listed.json()]).toEqual([200, requests]);
+    expect(answers.researchRequests).toHaveBeenCalledExactlyOnceWith("verified-owner", id);
+
+    const path = `/api/conversations/${id}/research-requests/${requestId}`;
+    const approved = await app.request(`${path}/approve`, send({ queryHash }));
+    expect([approved.status, await approved.json()]).toEqual([200, { status: "approved" }]);
+    expect(answers.decideResearchRequest).toHaveBeenCalledExactlyOnceWith(
+      "verified-owner",
+      id,
+      requestId,
+      queryHash,
+      "approve",
+    );
+
+    answers.decideResearchRequest.mockResolvedValueOnce({ status: "stale" });
+    expect((await app.request(`${path}/approve`, send({ queryHash }))).status).toBe(409);
+    expect((await app.request(`${path}/deny`, send({ queryHash: "wrong" }))).status).toBe(400);
   });
 });

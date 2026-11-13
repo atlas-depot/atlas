@@ -1,10 +1,15 @@
 import { createHash } from "node:crypto";
 import { z } from "zod";
 import { noteTextSchema } from "../shared/document.ts";
-import { notePassageSourceSchema, type NotePassageSource } from "../shared/passages.ts";
+import {
+  answerEvidenceSourceSchema,
+  researchToolResultSchema,
+  type AnswerEvidenceSource,
+} from "../shared/evidence.ts";
+import { notePassageSourceSchema } from "../shared/passages.ts";
 
 /** Evidence the server itself returned to the model during one attempt. */
-export type AnswerEvidence = { id: string; text: string; source: NotePassageSource };
+export type AnswerEvidence = { id: string; text: string; source: AnswerEvidenceSource };
 
 /** What one bounded read of the runtime shows. `result` is still unvalidated model output. */
 export type AnswerObservation =
@@ -82,7 +87,7 @@ export const answerOutputSchema = {
           passageId: {
             type: "string",
             pattern: "^p_[0-9a-f]{16}$",
-            description: "The id of a passage search_notes returned.",
+            description: "An evidence id returned by search_notes or research.",
           },
           excerpt: {
             type: "string",
@@ -97,12 +102,12 @@ export const answerOutputSchema = {
 } as const;
 
 /** Stable for one source location and revision, so repeated searches name a passage once. */
-export function evidenceId(source: NotePassageSource): string {
-  const canonical = notePassageSourceSchema.parse(source);
+export function evidenceId(source: AnswerEvidenceSource): string {
+  const canonical = answerEvidenceSourceSchema.parse(source);
   const key = JSON.stringify(
     Object.keys(canonical)
       .sort()
-      .map((name) => [name, canonical[name as keyof NotePassageSource]]),
+      .map((name) => [name, canonical[name as keyof AnswerEvidenceSource]]),
   );
   return `p_${createHash("sha256").update(key).digest("hex").slice(0, 16)}`;
 }
@@ -124,11 +129,30 @@ export function readSearchEvidence(output: unknown): AnswerEvidence[] | undefine
   }));
 }
 
+/** Recomputes web source IDs and accepts only successful, provider-backed research output. */
+export function readResearchEvidence(
+  output: unknown,
+):
+  | { status: "completed"; evidence: AnswerEvidence[] }
+  | { status: "not_performed"; reason: "denied" | "expired" | "cancelled" | "stale" }
+  | undefined {
+  const parsed = researchToolResultSchema.safeParse(output);
+  if (!parsed.success) return undefined;
+  if (parsed.data.status === "not_performed") return parsed.data;
+  const evidence: AnswerEvidence[] = [];
+  for (const source of parsed.data.sources) {
+    const id = evidenceId(source.source);
+    if (source.id !== id) return undefined;
+    evidence.push({ id, text: parsed.data.text, source: source.source });
+  }
+  return { status: "completed", evidence };
+}
+
 export type ResolvedAnswer =
   | {
       status: "completed";
       text: string;
-      citations: { source: NotePassageSource; excerpt: string; deleted: false }[];
+      citations: { source: AnswerEvidenceSource; excerpt: string; deleted: false }[];
     }
   | { status: "no-support"; text: string; citations: [] };
 export type AnswerRejection = "malformed_result" | "unknown_source" | "excerpt_mismatch";
@@ -146,7 +170,7 @@ export function resolveAnswer(
   if (parsed.data.status === "no-support")
     return { ok: true, answer: { status: "no-support", text: parsed.data.text, citations: [] } };
   const known = new Map(evidence.map((passage) => [passage.id, passage]));
-  const citations: { source: NotePassageSource; excerpt: string; deleted: false }[] = [];
+  const citations: { source: AnswerEvidenceSource; excerpt: string; deleted: false }[] = [];
   const seen = new Set<string>();
   for (const citation of parsed.data.citations) {
     const passage = known.get(citation.passageId);
