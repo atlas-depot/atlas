@@ -189,6 +189,12 @@ export function ChatWorkspace({
   const chatHeadingRef = useRef<HTMLHeadingElement>(null);
   const deleteTriggerRef = useRef<HTMLButtonElement | null>(null);
 
+  useEffect(() => {
+    // Focus the committed result, after React has mounted and enabled its control.
+    if (deleteFailure) retryDeleteRef.current?.focus();
+    else if (deleteNotice) newConversationRef.current?.focus();
+  }, [deleteFailure, deleteNotice]);
+
   const hasUnsentInput = unsentMessage.trim().length > 0;
 
   useEffect(() => {
@@ -836,7 +842,6 @@ export function ChatWorkspace({
           id,
           message: "Could not delete conversation. The conversation was retained so you can retry.",
         });
-        requestAnimationFrame(() => retryDeleteRef.current?.focus());
         return;
       }
     }
@@ -858,7 +863,6 @@ export function ChatWorkspace({
       setActionFailure(null);
     }
     setDeleteNotice("Conversation deleted.");
-    requestAnimationFrame(() => newConversationRef.current?.focus());
   }
 
   const addressedInputIds = useMemo(() => {
