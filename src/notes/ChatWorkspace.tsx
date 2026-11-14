@@ -1567,7 +1567,7 @@ export function ChatWorkspace({
               onDragOver={allowNoteCopy}
               rows={1}
               maxLength={100_000}
-              placeholder="Message Atlas"
+              placeholder="Message"
               value={unsentMessage}
               disabled={!enabled || sending || creating || deletingId !== null}
               onChange={(event) => setUnsentMessage(event.target.value)}

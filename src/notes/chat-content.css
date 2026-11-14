@@ -242,6 +242,11 @@
   box-shadow: none;
 }
 
+.chat-composer-input:placeholder-shown {
+  field-sizing: fixed;
+  height: var(--chat-action-size);
+}
+
 .chat-composer-input::placeholder {
   color: var(--chat-ink);
 }
