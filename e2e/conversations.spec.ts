@@ -592,6 +592,7 @@ for (const width of [1280, 375]) {
     const discard = page.getByRole("alertdialog", { name: "Discard unsent message?" });
     await expect(discard.getByRole("button", { name: "Keep message", exact: true })).toBeFocused();
     await page.keyboard.press("Escape");
+    await expect(discard).toBeHidden();
     await expect(input).toBeFocused();
     const trigger = chat(page).getByRole("button", { name: "Delete conversation", exact: true });
     await trigger.focus();
@@ -601,21 +602,30 @@ for (const width of [1280, 375]) {
       dialog.getByRole("button", { name: "Keep conversation", exact: true }),
     ).toBeFocused();
     await page.keyboard.press("Escape");
+    await expect(dialog).toBeHidden();
     await expect(trigger).toBeFocused();
     await page.keyboard.press("Enter");
     await expect(dialog).toBeVisible();
+    // Visibility precedes the dialog's initial-focus effect. Send Tab only once
+    // the safe action owns focus, otherwise Enter can activate Keep instead.
+    await expect(
+      dialog.getByRole("button", { name: "Keep conversation", exact: true }),
+    ).toBeFocused();
     const deleting = gate();
-    const started = gate();
+    let deleteStarted = false;
     api.intercept = async (route) => {
       if (route.request().method() === "DELETE") {
-        started.release();
+        deleteStarted = true;
         await deleting.promise;
       }
       return false;
     };
     await page.keyboard.press("Tab");
+    await expect(
+      dialog.getByRole("button", { name: "Delete permanently", exact: true }),
+    ).toBeFocused();
     await page.keyboard.press("Enter");
-    await started.promise;
+    await expect.poll(() => deleteStarted).toBe(true);
     await expect(dialog).toBeHidden();
     await expect(
       chat(page).getByRole("heading", { name: "Saved conversations", exact: true }),
