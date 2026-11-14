@@ -65,10 +65,48 @@ await test("one real provider request uses server search and preserves cited evi
   });
   assert.deepEqual(await research("When is the public release?", new AbortController().signal), {
     text,
-    sources: [{ id: url, url, title: "Official release" }],
+    sources: [
+      {
+        id: url,
+        url,
+        title: "Official release",
+      },
+    ],
     usage: { inputTokens: 20, outputTokens: 10, costUsd: 0.012 },
   });
   assert.equal(calls, 1);
+});
+
+await test("caps provider sources at the 50-source chat evidence contract", async () => {
+  const annotations = Array.from({ length: 51 }, (_, index) => ({
+    type: "url_citation",
+    url_citation: {
+      url: `https://example.com/${index}`,
+      title: `Source ${index}`,
+      start_index: 0,
+      end_index: 5,
+    },
+  }));
+  const research = setup(async () => response({ annotations }));
+  const result = await research("Public question", new AbortController().signal);
+  assert.equal(result.sources.length, 50);
+});
+
+await test("keeps a later non-empty title for a duplicated source", async () => {
+  const research = setup(async () =>
+    response({
+      annotations: [
+        { type: "url_citation", url_citation: { url, title: "", start_index: 0, end_index: 5 } },
+        {
+          type: "url_citation",
+          url_citation: { url, title: "Official release", start_index: 6, end_index: 12 },
+        },
+      ],
+    }),
+  );
+  const result = await research("Public question", new AbortController().signal);
+  assert.equal(result.sources.length, 1);
+  assert.equal(result.sources[0]?.title, "Official release");
 });
 
 await test("an absent reported cost stays absent rather than becoming a zero-cost claim", async () => {
@@ -82,6 +120,22 @@ await test("links written in prose do not substitute for provider citation evide
   await assert.rejects(research("Public question", new AbortController().signal), {
     message: "Research returned no verified sources.",
   });
+});
+
+await test("a source without provider content keeps its record but no snippet", async () => {
+  const research = setup(async () =>
+    response({
+      annotations: [
+        {
+          ...annotation,
+          url_citation: { ...annotation.url_citation, start_index: 0, end_index: 0 },
+        },
+      ],
+    }),
+  );
+  const result = await research("Public question", new AbortController().signal);
+  assert.equal(result.sources.length, 1);
+  assert.equal(result.sources[0]?.snippet, undefined);
 });
 
 for (const sourceUrl of ["javascript:alert(1)", "https://user:password@example.com", "not a URL"]) {
@@ -179,9 +233,22 @@ await test("an overlong research question is rejected before any provider reques
     throw new Error("No provider call expected.");
   };
   try {
-    const { researchInputSchema } = await import("./agent/tools/research.ts");
+    const { chatResearchInputSchema, researchInputSchema } =
+      await import("./agent/tools/research.ts");
     assert.equal(researchInputSchema.safeParse({ question: "x".repeat(501) }).success, false);
     assert.equal(researchInputSchema.safeParse({ question: ` ${"x".repeat(500)} ` }).success, true);
+    assert.equal(
+      chatResearchInputSchema.safeParse({
+        question: "Public question",
+        requiresPrivateDisclosure: true,
+      }).success,
+      true,
+    );
+    assert.equal(
+      chatResearchInputSchema.safeParse({ question: "Public question", ownerId: "untrusted" })
+        .success,
+      false,
+    );
   } finally {
     globalThis.fetch = realFetch;
   }

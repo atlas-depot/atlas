@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vite-plus/test";
 import type { ConversationCitation } from "../../shared/conversations";
+import type { NotePassageSource } from "../../shared/passages";
 import type { NoteSnapshot } from "./notes-store";
 import {
   createCitationSourceTarget,
@@ -13,6 +14,13 @@ import {
 } from "./source-location";
 
 const noteId = "f0a10b01-4b98-4d4a-aabb-000000000001";
+const noteSource: NotePassageSource = {
+  kind: "block",
+  noteId,
+  version: `"${noteId}:2"`,
+  blockId: "block-1",
+  headingPath: ["Storage"],
+};
 
 function createBlockSnapshot(etag = `"${noteId}:2"`): NoteSnapshot {
   return {
@@ -285,19 +293,14 @@ describe("source location resolution and search outcome classification", () => {
 
   it("supports reusable chat citations including deleted sources with no retained excerpt", () => {
     const deletedCitation: ConversationCitation = {
-      source: {
-        kind: "block",
-        noteId,
-        version: `"${noteId}:2"`,
-        blockId: "block-1",
-        headingPath: ["Storage"],
-      },
+      source: noteSource,
       excerpt: null,
       stale: false,
       deleted: true,
     };
 
     const target = createCitationSourceTarget(deletedCitation);
+    if (!target) throw new Error("A note citation should open a note location.");
     const resolved = resolveDeletedSource(target);
     expect(resolved.status).toBe("deleted");
     expect(resolved.excerpt).toBeNull();
@@ -308,13 +311,28 @@ describe("source location resolution and search outcome classification", () => {
         {
           text: "Cached search excerpt",
           score: 0.77,
-          source: deletedCitation.source,
+          source: noteSource,
         },
         "storage",
       ),
     );
     expect(unavailable.status).toBe("unavailable");
     expect(unavailable.excerpt).toBe("Cached search excerpt");
+  });
+
+  it("does not treat a public web citation as a private note location", () => {
+    const citation: ConversationCitation = {
+      source: {
+        kind: "web",
+        url: "https://example.test/release",
+        title: "Official release",
+        retrievedAt: "2026-11-13T12:00:00.000Z",
+      },
+      excerpt: "The release is on 14 October.",
+      stale: false,
+      deleted: false,
+    };
+    expect(createCitationSourceTarget(citation)).toBeNull();
   });
 
   it("distinguishes matches, no-match, index-updating, and index-failed outcomes", () => {

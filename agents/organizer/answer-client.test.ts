@@ -16,6 +16,23 @@ const source: NotePassageSource = {
   headingPath: [],
 };
 const passage = { id: evidenceId(source), text: "Meeting at the library at 14:00.", source };
+const webSource = {
+  kind: "web" as const,
+  url: "https://example.test/meeting",
+  title: "Official meeting notice",
+  retrievedAt: "2026-11-11T00:00:00.000Z",
+};
+const webEvidence = {
+  id: evidenceId(webSource),
+  text: "The public meeting is on Friday.",
+  source: webSource,
+};
+const researchOutput = {
+  status: "completed",
+  question: "When is the public meeting?",
+  text: webEvidence.text,
+  sources: [{ id: webEvidence.id, source: webSource, snippet: webEvidence.text }],
+};
 const answer = {
   status: "completed",
   text: "At 14:00.",
@@ -62,8 +79,129 @@ await test("evidence is the recorded search output of Atlas's own turn, not what
       }),
       consumed("delivery-1", "turn-1"),
       ...search("turn-1", "search-1", "search_notes", { passages: [passage] }),
-      ...search("turn-1", "other-1", "research", {
+      ...search("turn-1", "other-1", "unavailable_tool", {
         passages: [{ id: evidenceId(other), text: "Not a note search", source: other }],
+      }),
+      reply("turn-1", answer),
+      turnSettled("turn-1"),
+      settled("delivery-1", "turn-1"),
+    ],
+    deliveries,
+  );
+  assert.deepEqual(observation, { status: "result", result: answer, evidence: [passage] });
+});
+
+await test("a successful research tool contributes distinct, server-verified web evidence", () => {
+  const mixedAnswer = {
+    status: "completed",
+    text: "The note has the time and the public notice has the date.",
+    citations: [
+      { passageId: passage.id, excerpt: "library at 14:00" },
+      { passageId: webEvidence.id, excerpt: "public meeting is on Friday" },
+    ],
+  };
+  const observation = observeAnswer(
+    [
+      consumed("delivery-1", "turn-1"),
+      ...search("turn-1", "notes-1", "search_notes", { passages: [passage] }),
+      ...search("turn-1", "research-1", "research", researchOutput),
+      reply("turn-1", mixedAnswer),
+      turnSettled("turn-1"),
+      settled("delivery-1", "turn-1"),
+    ],
+    deliveries,
+  );
+  assert.deepEqual(observation, {
+    status: "result",
+    result: mixedAnswer,
+    evidence: [passage, webEvidence],
+  });
+});
+
+await test("a declined research request permits a no-support reply but adds no web evidence", () => {
+  const noSupport = { status: "no-support", text: "No source supports this yet.", citations: [] };
+  const observation = observeAnswer(
+    [
+      consumed("delivery-1", "turn-1"),
+      ...search("turn-1", "notes-1", "search_notes", { passages: [] }),
+      ...search("turn-1", "research-1", "research", {
+        status: "not_performed",
+        reason: "denied",
+      }),
+      reply("turn-1", noSupport),
+      turnSettled("turn-1"),
+      settled("delivery-1", "turn-1"),
+    ],
+    deliveries,
+  );
+  assert.deepEqual(observation, { status: "result", result: noSupport, evidence: [] });
+});
+
+await test("a research-only answer cannot bypass the required note search", () => {
+  const observation = observeAnswer(
+    [
+      consumed("delivery-1", "turn-1"),
+      ...search("turn-1", "research-1", "research", researchOutput),
+      reply("turn-1", {
+        status: "completed",
+        text: "The public meeting is on Friday.",
+        citations: [{ passageId: webEvidence.id, excerpt: "public meeting is on Friday" }],
+      }),
+      turnSettled("turn-1"),
+      settled("delivery-1", "turn-1"),
+    ],
+    deliveries,
+  );
+  assert.deepEqual(observation, { status: "failed", text: "" });
+});
+
+await test("a failed research call does not discard a note-supported answer", () => {
+  const supported = {
+    status: "completed",
+    text: "The note has the time.",
+    citations: [{ passageId: passage.id, excerpt: "library at 14:00" }],
+  };
+  const observation = observeAnswer(
+    [
+      consumed("delivery-1", "turn-1"),
+      ...search("turn-1", "notes-1", "search_notes", { passages: [passage] }),
+      event({
+        type: "call.requested",
+        scope: { turnId: "turn-1" },
+        data: {
+          callId: "research-1",
+          owner: { runId: "model-1" },
+          capability: { kind: "tool", name: "research" },
+        },
+      }),
+      event({
+        type: "call.settled",
+        scope: { turnId: "turn-1" },
+        data: { callId: "research-1", outcome: "failed", output: undefined },
+      }),
+      reply("turn-1", supported),
+      turnSettled("turn-1"),
+      settled("delivery-1", "turn-1"),
+    ],
+    deliveries,
+  );
+  assert.deepEqual(observation, { status: "result", result: supported, evidence: [passage] });
+});
+
+await test("research output with an invented source ID cannot become answer evidence", () => {
+  const observation = observeAnswer(
+    [
+      consumed("delivery-1", "turn-1"),
+      ...search("turn-1", "notes-1", "search_notes", { passages: [passage] }),
+      ...search("turn-1", "research-1", "research", {
+        ...researchOutput,
+        sources: [
+          {
+            id: "p_0000000000000000",
+            source: webSource,
+            snippet: webEvidence.text,
+          },
+        ],
       }),
       reply("turn-1", answer),
       turnSettled("turn-1"),

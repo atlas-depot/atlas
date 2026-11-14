@@ -42,5 +42,5 @@ const tool = defineTool({
   },
 });
 
-/** The only tool a question-answering session has. Organize sessions never see it. */
+/** Note retrieval is chat-only; Organize sessions never see it. */
 export default defineDynamic((ctx) => (isChatSession(ctx.session) ? tool : null));

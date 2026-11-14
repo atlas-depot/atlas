@@ -327,7 +327,8 @@ function observeDraft(
         const result = researchResultSchema.safeParse(event.data.output);
         if (!result.success) return { status: "failed", reason: "invalid_draft" };
         completedResearch = true;
-        for (const source of result.data.sources) sources.set(source.url, source);
+        for (const source of result.data.sources)
+          sources.set(source.url, { id: source.id, url: source.url, title: source.title });
       }
     }
   }

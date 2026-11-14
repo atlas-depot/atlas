@@ -313,6 +313,58 @@ it("treats an injected note as evidence only and fails an answer citing a source
   expect(next).toMatchObject({ status: "saved", value: { deliveryPolicy: "queue" } });
 });
 
+it("persists web citations separately from note citations and keeps public evidence after note deletion", async () => {
+  const f = await fixture();
+  const note = await f.note("Meeting", "The internal meeting starts at 14:00.");
+  const webSource = {
+    kind: "web" as const,
+    url: "https://example.test/meeting",
+    title: "Official public notice",
+    retrievedAt: "2026-11-13T12:00:00.000Z",
+  };
+  await f.first.send(f.owner, f.id, randomUUID(), { text: "When is the meeting?" });
+  f.fake.observe({
+    status: "result",
+    result: {
+      status: "completed",
+      text: "The note says 14:00 and the public notice says Friday.",
+      citations: [
+        { passageId: evidenceId(note.source), excerpt: "starts at 14:00" },
+        { passageId: evidenceId(webSource), excerpt: "public notice says Friday" },
+      ],
+    },
+    evidence: [
+      { id: evidenceId(note.source), text: note.text, source: note.source },
+      {
+        id: evidenceId(webSource),
+        text: "The public notice says Friday.",
+        source: webSource,
+      },
+    ],
+  });
+  await f.first.refresh(f.owner, f.id);
+  expect((await f.history()).at(-1)).toMatchObject({
+    status: "completed",
+    citations: [
+      { source: note.source, excerpt: "starts at 14:00", deleted: false, stale: false },
+      { source: webSource, excerpt: "public notice says Friday", deleted: false, stale: false },
+    ],
+  });
+  const [turn] = await database.db
+    .select()
+    .from(conversationTurns)
+    .where(eq(conversationTurns.conversationId, f.id));
+  expect(turn?.sourceDependencies).toEqual([{ noteId: note.noteId, version: note.source.version }]);
+
+  await createNoteStore(database.db).delete(f.owner, note.noteId, note.revision);
+  expect((await f.history()).at(-1)).toMatchObject({
+    citations: [
+      { source: note.source, excerpt: null, deleted: true, stale: false },
+      { source: webSource, excerpt: "public notice says Friday", deleted: false, stale: false },
+    ],
+  });
+});
+
 it("fails a malformed result and keeps a cancelled partial answer incomplete", async () => {
   const f = await fixture();
   await f.first.send(f.owner, f.id, randomUUID(), { text: "Question" });

@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { z } from "zod";
 import {
   conversationCitationInputsSchema,
@@ -12,6 +12,7 @@ import { readConversationMessage } from "./conversation-messages.ts";
 import {
   conversationCitations,
   conversationMessages,
+  conversationResearchRequests,
   conversations,
   conversationTurns,
 } from "./conversation-schema.ts";
@@ -89,7 +90,7 @@ export async function publishConversationAnswer(
         conversationId: parent.id,
         messageId: message!.id,
         ordinal,
-        noteId: citation.source.noteId,
+        noteId: citation.source.kind === "web" ? null : citation.source.noteId,
         source: citation.source,
         excerpt: citation.excerpt,
         deleted: false,
@@ -110,6 +111,19 @@ export async function publishConversationAnswer(
     .update(conversations)
     .set({ nextSequence: parent.nextSequence + 1, updatedAt: new Date().toISOString() })
     .where(eq(conversations.id, parent.id));
+  await tx
+    .update(conversationResearchRequests)
+    .set({
+      status: "cancelled",
+      proposedQuery: null,
+      decidedAt: sql`clock_timestamp()`,
+    })
+    .where(
+      and(
+        eq(conversationResearchRequests.turnId, turn.id),
+        inArray(conversationResearchRequests.status, ["pending", "approved", "started"]),
+      ),
+    );
   // Only running attempts need a replayable prompt snapshot. Lineage stays on the turn,
   // and the replaceable summary checkpoint is independent of this transient content.
   await tx.delete(conversationContexts).where(eq(conversationContexts.turnId, turn.id));
@@ -137,7 +151,9 @@ export function finalizeConversationTurn(db: ReturnType<typeof openDatabase>["db
       let sourcesAvailable = true;
       const sourceIds = [
         ...new Set([
-          ...input.citations.map((citation) => citation.source.noteId.toLowerCase()),
+          ...input.citations.flatMap((citation) =>
+            citation.source.kind === "web" ? [] : [citation.source.noteId.toLowerCase()],
+          ),
           ...dependencies.map((source) => source.noteId),
         ]),
       ].sort();

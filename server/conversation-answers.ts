@@ -48,10 +48,9 @@ function finalization(observation: Exclude<AnswerObservation, { status: "running
         provenanceComplete: true,
         sourceDependencies: mergeDependencies(
           turn.sourceDependencies,
-          observation.evidence.map(({ source }) => ({
-            noteId: source.noteId,
-            version: source.version,
-          })),
+          observation.evidence.flatMap(({ source }) =>
+            source.kind === "web" ? [] : [{ noteId: source.noteId, version: source.version }],
+          ),
         ),
       }
     : incomplete("failed", "");
@@ -365,6 +364,17 @@ export function createConversationAnswers({
       return accepted;
     },
 
+    researchRequests: (owner: string, conversationId: string) =>
+      turns.research.list(owner, conversationId),
+
+    decideResearchRequest: (
+      owner: string,
+      conversationId: string,
+      requestId: string,
+      expectedHash: string,
+      decision: "approve" | "deny",
+    ) => turns.research.decide(owner, conversationId, requestId, expectedHash, decision),
+
     /** Called by reads so a reconnect continues existing work instead of starting more. */
     refresh: advanceQuietly,
 
@@ -401,6 +411,7 @@ export function createConversationAnswers({
 
     /** Maintenance: continue attempts no reader is watching, then retire finished sessions. */
     async sweep(limit: number) {
+      await turns.research.expire();
       for (const { ownerId, conversationId, turnId } of await turns.unobserved(limit, 30_000)) {
         // Rotate first, so an attempt whose runtime keeps failing cannot starve the others.
         await turns.touch(turnId);

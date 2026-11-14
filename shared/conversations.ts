@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { noteTextSchema } from "./document.ts";
-import { notePassageSourceSchema } from "./passages.ts";
+import { answerEvidenceSourceSchema } from "./evidence.ts";
 
 export const conversationIdSchema = z.uuid().transform((value) => value.toLowerCase());
 export const conversationOperationKeySchema = conversationIdSchema;
@@ -12,16 +12,28 @@ export const conversationInputIdsSchema = z
 export const createConversationSchema = z.strictObject({});
 /** All conversation text bounds use UTF-16 code units, preserving valid source text. */
 export const conversationTextSchema = noteTextSchema.refine((value) => value.length <= 100_000);
-export const conversationCitationInputSchema = z
-  .strictObject({
-    source: notePassageSourceSchema,
-    excerpt: noteTextSchema.refine((value) => value.length > 0 && value.length <= 1_000).nullable(),
-    deleted: z.boolean(),
-  })
-  .refine((citation) => citation.deleted === (citation.excerpt === null));
-export const conversationCitationSchema = conversationCitationInputSchema.safeExtend({
-  stale: z.boolean(),
+const citationFieldsSchema = z.strictObject({
+  source: answerEvidenceSourceSchema,
+  excerpt: noteTextSchema.refine((value) => value.length > 0 && value.length <= 1_000).nullable(),
+  deleted: z.boolean(),
 });
+type CitationFields = z.infer<typeof citationFieldsSchema>;
+function validateCitation(citation: CitationFields, ctx: z.RefinementCtx) {
+  if (citation.source.kind === "web") {
+    if (citation.deleted || citation.excerpt === null)
+      ctx.addIssue({ code: "custom", message: "Web citations must retain their excerpt." });
+  } else if (citation.deleted !== (citation.excerpt === null)) {
+    ctx.addIssue({ code: "custom", message: "Deleted note citations cannot retain excerpts." });
+  }
+}
+export const conversationCitationInputSchema = citationFieldsSchema.superRefine(validateCitation);
+export const conversationCitationSchema = z
+  .strictObject({ ...citationFieldsSchema.shape, stale: z.boolean() })
+  .superRefine((citation, ctx) => {
+    validateCitation(citation, ctx);
+    if (citation.source.kind === "web" && citation.stale)
+      ctx.addIssue({ code: "custom", message: "Web citations do not use note staleness." });
+  });
 const maximumCitations = 100;
 export const conversationCitationInputsSchema = z
   .array(conversationCitationInputSchema)

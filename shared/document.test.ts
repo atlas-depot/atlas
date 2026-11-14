@@ -4,6 +4,7 @@ import {
   canonicalJson,
   canonicalNoteContent,
   documentContentSchema,
+  noteContentPlainText,
   organizerContent,
 } from "./document.ts";
 
@@ -68,6 +69,86 @@ describe("stored note documents", () => {
     expect(value.blocks.map((block) => block.id)).toEqual(["parent", "code", "table", "divider"]);
     expect(value.blocks[0].children[0].id).toBe("child");
     expect(organizerContent(value)).toContain("const text = '<script>';\\n");
+  });
+
+  it("extracts plain block text across spans and line breaks without serialization fields", () => {
+    const value = blockNoteDocumentSchema.parse(
+      document([
+        {
+          ...paragraph("split", "The quarterly budget "),
+          content: [
+            { type: "text", text: "The quarterly budget ", styles: {} },
+            { type: "text", text: "freeze", styles: { bold: true } },
+          ],
+          children: [paragraph("nested", "horizon child")],
+        },
+        paragraph("next", "for the bluebird acquisition"),
+        {
+          id: "link",
+          type: "paragraph",
+          props: {},
+          content: [
+            {
+              type: "link",
+              href: "https://internal.example.com/secret/roadmap",
+              content: [{ type: "text", text: "dashboard", styles: {} }],
+            },
+          ],
+          children: [],
+        },
+        {
+          id: "table",
+          type: "table",
+          props: {},
+          content: {
+            type: "tableContent",
+            columnWidths: [180, 180],
+            rows: [
+              {
+                cells: [
+                  [{ type: "text", text: "secret cell", styles: {} }],
+                  [{ type: "text", text: "code", styles: {} }],
+                ],
+              },
+            ],
+          },
+          children: [],
+        },
+      ]),
+    );
+    const text = noteContentPlainText(value);
+    expect(text).toContain("The quarterly budget freeze");
+    expect(text).toContain("freeze\nhorizon child");
+    expect(text).toContain("freeze\nhorizon child\nfor the bluebird acquisition");
+    expect(text).toContain("secret cell\ncode\n");
+    expect(text).toContain("https://internal.example.com/secret/roadmap\ndashboard");
+    expect(text).not.toContain('"type"');
+    expect(text).not.toContain("columnWidths");
+  });
+
+  it("keeps text immediately before a link from merging into the destination", () => {
+    const value = blockNoteDocumentSchema.parse(
+      document([
+        {
+          id: "para",
+          type: "paragraph",
+          props: {},
+          content: [
+            { type: "text", text: "bluebird", styles: {} },
+            {
+              type: "link",
+              href: "https://example.com",
+              content: [{ type: "text", text: "Read", styles: {} }],
+            },
+          ],
+          children: [],
+        },
+      ]),
+    );
+    const text = noteContentPlainText(value);
+    expect(text).toContain("bluebird");
+    expect(text).toContain("https://example.com");
+    expect(text).not.toContain("bluebirdhttps");
   });
 
   it("distinguishes a structured document from a literal string containing the same JSON", () => {

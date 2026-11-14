@@ -45,6 +45,7 @@ import {
   conversationTurnInputs,
   conversationContexts,
 } from "./conversation-schema.ts";
+import { createConversationResearchStore } from "./conversation-research.ts";
 
 type Database = ReturnType<typeof openDatabase>["db"];
 const inputSchema = z.strictObject({
@@ -97,6 +98,7 @@ async function ownerAtCapacity(tx: ConversationTransaction, owner: string) {
 
 /** Internal persistence only. Callers execute models after durable admission/runtime binding. */
 export function createConversationTurns(db: Database) {
+  const research = createConversationResearchStore(db);
   function unconsumedInputs(
     reader: Pick<Database, "select">,
     id: string | typeof conversations.id,
@@ -119,6 +121,7 @@ export function createConversationTurns(db: Database) {
   }
 
   return {
+    research,
     /**
      * Record all retrieved evidence before it reaches the model, even if never cited.
      * Search tool calls in one turn can run concurrently. Serialize them per session so each

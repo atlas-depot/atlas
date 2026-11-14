@@ -53,6 +53,14 @@ const database = setupIndexTestDatabase(async ({ db }) => {
       ),
     ),
   );
+  await db.execute(
+    sql.raw(
+      await readFile(
+        new URL("../../drizzle/0011_conversation-public-research.sql", import.meta.url),
+        "utf8",
+      ),
+    ),
+  );
 });
 
 it("upgrades existing history without rewriting identities or inventing complete source provenance", async () => {
