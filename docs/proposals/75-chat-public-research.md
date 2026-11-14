@@ -13,11 +13,14 @@ recent history, summary, and version-bound note sources before the helper can ru
 
 The screen fails closed. After NFKC normalization and Turkish-safe case folding, a query is sent
 without approval only when it shares no non-stopword token with that private context and contains
-no direct identifier. Any shared distinctive term, direct identifier, explicit private-detail
-request, or context that cannot be inspected creates an approval request. The screen does not
-redact or rewrite the query; the exact outbound text is what the owner sees and decides on. An
-email, UUID, IBAN, phone-like or card-like digit run, non-year number of four or more digits, or
-private URL therefore requires approval.
+no direct identifier. Any shared distinctive term, direct identifier, or context that cannot be
+inspected creates an approval request. The model can escalate a query by setting
+`requiresPrivateDisclosure` when it believes an exact private detail is essential; that advisory
+flag is the only signal for intent that leaves no lexical trace, so a zero-overlap,
+identifier-free query is treated as public. The screen does not redact or rewrite the query; the
+exact outbound text is what the owner sees and decides on. An email, UUID, IBAN, phone-like or
+card-like digit run, non-year number of four or more digits, Unicode decimal digits or private URL
+therefore requires approval.
 
 This is a conservative lexical screen, not semantic entity recognition. It will require approval
 for some public proper nouns and cannot promise detection of every alias or paraphrase. The
@@ -29,7 +32,8 @@ permission. A failed or uncertain screen never sends the query autonomously.
 - The backend persists the exact proposed query, its SHA-256 hash, the owner-bound conversation
   and turn, a digest of the current private context, and a two-minute expiry.
 - `GET /api/conversations/:id/research-requests` returns the exact query and hash only to the
-  authenticated conversation owner. The approve and deny endpoints require that hash.
+  authenticated conversation owner, including approved requests that have not started. The approve
+  and deny endpoints require that hash.
 - Approval is accepted only for the same pending or approved request, owner, live turn, query
   hash, and unchanged context digest. A different account receives the same `404` as a missing
   request. Repeating an approve after a lost response returns the same approved result.
@@ -38,9 +42,9 @@ permission. A failed or uncertain screen never sends the query autonomously.
   private payload is cleared on those terminal decisions and when an approved request is claimed
   for execution. Conversation deletion cascades the remaining content-free outcome record.
 - A terminal research decision in a turn forces every later query in that turn to a new approval
-  request, even when the new wording has no private overlap. Every attempt, including denied and
-  expired ones, counts toward the per-turn request limit, so a denial cannot be re-asked without
-  bound.
+  request, even when the new wording has no private overlap. Every attempt, including denied,
+  expired and autonomous ones, counts toward the per-turn request limit, so a denial cannot be
+  re-asked and autonomous calls cannot loop without bound.
 - The chat tool waits on the durable request. It rechecks the decision and context immediately
   before research. A Stop while approval is pending cancels the request; an in-flight provider
   request is aborted when possible but cannot be recalled after network transmission.

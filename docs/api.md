@@ -68,7 +68,7 @@ are removed in bounded batches as subsequent requests arrive.
 | `POST /api/conversations`, `{}` plus UUID `Idempotency-Key` | `201` server-generated conversation |
 | `GET /api/conversations?limit=50&cursor=...` | `200 { conversations, nextCursor }`, newest creation first |
 | `GET /api/conversations/:id` | `200 { conversation, activeTurn, recovery }`, including the current checkpoint when running |
-| `GET /api/conversations/:id/research-requests` | `200 { requests }` with pending exact queries, payload hashes and expiry |
+| `GET /api/conversations/:id/research-requests` | `200 { requests }` with open exact queries, status (`pending`/`approved`), payload hashes and expiry |
 | `POST /api/conversations/:id/research-requests/:requestId/approve`, `{ queryHash }` | `200 { status: "approved" }` for the current owner's exact pending request |
 | `POST /api/conversations/:id/research-requests/:requestId/deny`, `{ queryHash }` | `200 { status: "denied" }`, with the pending payload cleared |
 | `GET /api/conversations/:id/messages?limit=50&cursor=...` | `200 { messages, nextCursor }`, ascending immutable sequence |
@@ -138,12 +138,16 @@ owner and blocks the running tool until approval; the query is never rewritten o
 Approval is bound to `queryHash`, owner, conversation, turn and a digest of the private context;
 it expires after two minutes. A mismatched hash, changed context, expired request, Stop, terminal
 research decision in the same turn or another account cannot authorize a provider call. Denial
-remains available after approval until execution starts. The helper receives only the zero-overlap
-query or the exact approved query, never the full note or transcript. Pending query text is cleared
-on denial, expiry, cancellation, staleness or when a provider call starts. A failed research call
-does not invalidate a note-supported answer, but a web citation without recorded research evidence
-fails server resolution. This API exposes the approval contract; no conversation UI currently
-consumes it. Without an answer runtime, the approval routes return `503`.
+remains available after approval until execution starts, and the listing keeps approved requests
+visible for that reason. Every research attempt, including denied, expired and autonomous ones,
+counts toward the per-turn limit. The helper receives only the zero-overlap query or the exact
+approved query, never the full note or transcript. Pending query text is cleared on denial, expiry,
+cancellation, staleness or when a provider call starts. The approval covers the helper question;
+the current OpenRouter server tool may derive its own downstream search queries, and Atlas does not
+receive that text, so exact downstream-query approval would require a provider-contract change. A
+failed research call does not invalidate a note-supported answer, but a web citation without
+recorded research evidence fails server resolution. This API exposes the approval contract; no
+conversation UI currently consumes it. Without an answer runtime, the approval routes return `503`.
 
 `recovery` is normally `null`. `{ turnId, reason }` identifies an incomplete attempt whose
 context could not be used: `history_unavailable`, `context_budget`, `summary_failed`,

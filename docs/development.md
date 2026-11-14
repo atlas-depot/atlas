@@ -146,9 +146,10 @@ citations and settles research requests, while an older API cannot parse a `kind
 and will fail messages that contain one. Existing note-only citations remain readable. Do not roll
 back to an older API while any conversation contains a web citation, and do not leave an older API
 handling approvals or denials: it cannot clear a pending research payload on denial, expiry or
-cancellation. To roll back, stop chat research first, let pending requests expire or drain them,
-and keep the migrated schema. Apply migrations only through the existing authorized
-environment/operator procedure; local tests do not apply anything to staging.
+cancellation. To roll back, stop chat research first, make every research request terminal, and
+confirm no chat runtime has an in-flight provider call, then keep the migrated schema. Apply
+migrations only through the existing authorized environment/operator procedure; local tests do not
+apply anything to staging.
 
 ### Note-index migration cutover
 

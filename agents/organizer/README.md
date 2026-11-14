@@ -84,8 +84,10 @@ text creates a two-minute approval request instead of being rewritten. The owner
 exact proposed query and approve or deny it through the conversation API. Approval binds the
 owner, conversation, running turn, exact query hash and context snapshot; Stop, denial, expiry,
 account mismatch, a terminal decision earlier in the turn or changed context prevents egress.
-Denial stays available after approval until execution starts. Every attempt counts toward the
-per-turn request limit. No note or transcript is appended to the existing research helper input.
+Denial stays available after approval until execution starts, and approved requests stay listed
+until then so a reconnecting owner can still deny them. Every autonomous or approval-gated attempt
+counts toward the per-turn limit. No note or transcript is appended to the existing research helper
+input.
 Web citations use a distinct URL/title/retrieval-time source type and carry the provider-attributed
 snippet used for excerpt validation; note deletion redacts note excerpts only. A failed research
 call does not discard a note-supported answer, and the #71 successful `search_notes` requirement
