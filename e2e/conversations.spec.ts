@@ -681,7 +681,14 @@ test("keeping a draft from compact history returns focus to the selected convers
   await page.getByRole("button", { name: "Open chat", exact: true }).click();
   const input = chat(page).getByRole("textbox", { name: "Message", exact: true });
   await input.fill("Keep this unsent draft");
-  await showHistory(page);
+  const historyButton = chat(page).getByRole("button", { name: "Conversation history" });
+  await historyButton.press("Enter");
+  await expect(
+    chat(page)
+      .locator(".chat-history-column")
+      .getByRole("button", { name: "Conversation history" }),
+  ).toBeFocused();
+  await expect(historyButton).toHaveAttribute("aria-expanded", "true");
   const row = chat(page).getByRole("button", { name: label, exact: true });
   const keep = page.getByRole("alertdialog").getByRole("button", { name: "Keep message" });
   for (const key of ["Escape", "Enter"]) {
@@ -690,7 +697,11 @@ test("keeping a draft from compact history returns focus to the selected convers
     await page.keyboard.press(key);
     await expect(row).toBeFocused();
   }
-  await chat(page).getByRole("button", { name: "Conversation history", exact: true }).click();
+  await historyButton.press("Enter");
+  await expect(
+    chat(page).locator("header").getByRole("button", { name: "Conversation history" }),
+  ).toBeFocused();
+  await expect(historyButton).toHaveAttribute("aria-expanded", "false");
   await expect(input).toHaveValue("Keep this unsent draft");
 });
 
@@ -984,4 +995,43 @@ test("long mobile conversations follow new consent at the bottom and keep a read
   showConsent = true;
   await expect(allow).toBeVisible();
   expect(await transcript.evaluate((el) => el.scrollTop)).toBe(oldTop);
+});
+
+test("composer aligns a single line with its actions and keeps multiline controls at the bottom", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 320, height: 650 });
+  const api = await setupChat(page);
+  await openChat(page);
+  const input = chat(page).getByRole("textbox", { name: "Message", exact: true });
+  const submit = chat(page).getByRole("button", { name: "Send message", exact: true });
+  const box = async (target: typeof submit) => {
+    const bounds = await target.boundingBox();
+    if (!bounds) throw new Error("The composer control must be visible.");
+    return bounds;
+  };
+  const send = await box(submit);
+  expect(Math.abs(send.width - send.height)).toBeLessThanOrEqual(1);
+  api.activeTurn = running(1);
+  await page.reload();
+  await page.getByRole("button", { name: "Open chat", exact: true }).click();
+  await showHistory(page);
+  await chat(page).getByRole("button", { name: label, exact: true }).click();
+  const queue = chat(page).getByRole("button", { name: "Queue message", exact: true });
+  const steer = chat(page).getByRole("button", { name: "Steer answer", exact: true });
+  const initial = await box(input);
+  for (const action of [queue, steer]) {
+    const bounds = await box(action);
+    expect(bounds.height).toBeGreaterThanOrEqual(44);
+    expect(
+      Math.abs(initial.y + initial.height / 2 - bounds.y - bounds.height / 2),
+    ).toBeLessThanOrEqual(1);
+  }
+  await input.fill("A thought");
+  expect((await box(input)).height).toBe(initial.height);
+  await input.fill("A longer thought\n".repeat(5));
+  const longer = await box(input);
+  const action = await box(queue);
+  expect(longer.height).toBeGreaterThan(initial.height);
+  expect(Math.abs(longer.y + longer.height - action.y - action.height)).toBeLessThanOrEqual(1);
 });

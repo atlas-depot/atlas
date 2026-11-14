@@ -121,8 +121,26 @@ export function ChatWorkspace({
   const [compactHistoryOpen, setCompactHistoryOpen] = useState(false);
   const [railOpen, setRailOpen] = useState(true);
   const historyOpen = compact ? compactHistoryOpen : railOpen;
-  const toggleHistory = () =>
-    compact ? setCompactHistoryOpen(!compactHistoryOpen) : setRailOpen(!railOpen);
+  const historyToggleRef = useRef<HTMLButtonElement>(null);
+  const focusHistoryToggle = useRef(false);
+  const attachHistoryToggle = useCallback((button: HTMLButtonElement | null) => {
+    if (!button && historyToggleRef.current === document.activeElement) {
+      focusHistoryToggle.current = true;
+    }
+    historyToggleRef.current = button;
+  }, []);
+  function toggleHistory() {
+    focusHistoryToggle.current = true;
+    if (compact) setCompactHistoryOpen(!compactHistoryOpen);
+    else setRailOpen(!railOpen);
+  }
+  useLayoutEffect(() => {
+    if (focusHistoryToggle.current) {
+      focusHistoryToggle.current = false;
+      historyToggleRef.current?.focus();
+    }
+  }, [historyOpen, compact]);
+
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [listState, setListState] = useState<"loading" | "ready" | "failed">("loading");
   const [listNextCursor, setListNextCursor] = useState<string | null>(null);
@@ -1083,6 +1101,42 @@ export function ChatWorkspace({
     );
   }
 
+  const activeTitle = messages
+    .find((message) => message.sequence === 1 && message.role === "user")
+    ?.text.trim()
+    .slice(0, 120);
+  const historyToggle = (
+    <Button
+      ref={attachHistoryToggle}
+      type="button"
+      size="icon"
+      variant="ghost"
+      aria-label="Conversation history"
+      title="Conversation history"
+      aria-expanded={historyOpen}
+      aria-controls={historyId}
+      onClick={toggleHistory}
+    >
+      <SidebarSimpleIcon aria-hidden="true" />
+    </Button>
+  );
+  const newConversation = (
+    <Button
+      ref={newConversationRef}
+      type="button"
+      variant="ghost"
+      size={historyOpen ? "default" : "icon"}
+      className={historyOpen ? "chat-new-conversation" : undefined}
+      title="New conversation"
+      aria-label="New conversation"
+      disabled={controlsBusy}
+      onClick={() => requestConversationSwitch({ kind: "new" })}
+    >
+      <NotePencilIcon aria-hidden="true" />
+      {historyOpen && "New chat"}
+    </Button>
+  );
+
   return (
     <section
       aria-label="Chat workspace"
@@ -1095,24 +1149,9 @@ export function ChatWorkspace({
       onFocusCapture={onFocusChat}
     >
       <header className="chat-workspace-header">
-        <Button
-          type="button"
-          size="icon"
-          variant="ghost"
-          aria-label="Conversation history"
-          title="Conversation history"
-          aria-expanded={historyOpen}
-          aria-controls={historyId}
-          onClick={toggleHistory}
-        >
-          <SidebarSimpleIcon aria-hidden="true" />
-        </Button>
+        {!historyOpen && historyToggle}
         <h2 ref={chatHeadingRef} tabIndex={-1}>
-          {compact && historyOpen
-            ? "Conversations"
-            : messages
-                .find((message) => message.sequence === 1 && message.role === "user")
-                ?.text.slice(0, 120) || "Chat"}
+          {compact && historyOpen ? "Conversations" : activeTitle || "Chat"}
         </h2>
         <div className="chat-workspace-actions">
           {activeRead && !hidden && !(compact && historyOpen) && (
@@ -1131,18 +1170,7 @@ export function ChatWorkspace({
               <TrashSimpleIcon aria-hidden="true" />
             </Button>
           )}
-          <Button
-            ref={newConversationRef}
-            type="button"
-            variant="ghost"
-            size="icon"
-            title="New conversation"
-            aria-label="New conversation"
-            disabled={controlsBusy}
-            onClick={() => requestConversationSwitch({ kind: "new" })}
-          >
-            <NotePencilIcon aria-hidden="true" />
-          </Button>
+          {!historyOpen && newConversation}
           <Button
             type="button"
             variant="ghost"
@@ -1199,13 +1227,16 @@ export function ChatWorkspace({
 
       <div className="chat-workspace-body">
         <div id={historyId} className="chat-history-column" hidden={!historyOpen}>
+          <div className="chat-history-header">
+            {!compact && <strong className="chat-history-brand">Atlas</strong>}
+            {compact && historyOpen && newConversation}
+            {historyOpen && historyToggle}
+          </div>
+          {!compact && historyOpen && newConversation}
           {!compact && (
-            <>
-              <strong className="chat-history-brand">Atlas</strong>
-              <Button type="button" variant="ghost" className="chat-back-notes" onClick={onClose}>
-                <NotebookIcon aria-hidden="true" /> Notes
-              </Button>
-            </>
+            <Button type="button" variant="ghost" className="chat-back-notes" onClick={onClose}>
+              <NotebookIcon aria-hidden="true" /> Notes
+            </Button>
           )}
           <h3 className="chat-history-title">Conversations</h3>
           <p className="sr-only" aria-live="polite" aria-atomic="true">
@@ -1243,18 +1274,20 @@ export function ChatWorkspace({
                 {conversations.map((item) => {
                   const label = formatConversationLabel(item);
                   const isSelected = activeConversationId === item.id;
+                  const title = isSelected && activeTitle ? activeTitle : label;
                   return (
                     <li key={item.id} className="chat-conversation-item">
                       <Button
                         type="button"
-                        variant={isSelected ? "secondary" : "ghost"}
+                        variant="ghost"
                         aria-current={isSelected ? "true" : undefined}
                         disabled={controlsBusy}
                         className="chat-conversation-select"
-                        title={label}
+                        title={title}
+                        aria-label={title === label ? label : `${label}: ${title}`}
                         onClick={() => requestConversationSwitch({ kind: "open", id: item.id })}
                       >
-                        <span className="chat-conversation-label">{label}</span>
+                        <span className="chat-conversation-label">{title}</span>
                         {item.queuePaused ? (
                           <span className="chat-conversation-badge">Paused</span>
                         ) : null}
@@ -1263,8 +1296,8 @@ export function ChatWorkspace({
                         type="button"
                         variant="ghost"
                         disabled={controlsBusy}
-                        aria-label={`Delete ${label}`}
-                        title={`Delete ${label}`}
+                        aria-label={`Delete ${label}${title === label ? "" : `: ${title}`}`}
+                        title={`Delete ${title}`}
                         className="chat-conversation-delete"
                         size="icon"
                         onClick={(event) => {
@@ -1386,7 +1419,7 @@ export function ChatWorkspace({
                                 <strong className="sr-only">You</strong>
                                 <span
                                   className={
-                                    isAddressed && !isRunning ? "sr-only" : "chat-message-badge"
+                                    isAddressed || isRunning ? "sr-only" : "chat-message-badge"
                                   }
                                 >
                                   {userStatus}
@@ -1410,7 +1443,13 @@ export function ChatWorkspace({
                           >
                             <div className="chat-message-meta">
                               <strong className="sr-only">Atlas</strong>
-                              <span className="chat-message-badge">{presentationState.badge}</span>
+                              <span
+                                className={
+                                  presentationState.isComplete ? "sr-only" : "chat-message-badge"
+                                }
+                              >
+                                {presentationState.badge}
+                              </span>
                               {message.inputIds.length > 1 ? (
                                 <span className="chat-message-badge">
                                   Addresses {message.inputIds.length} messages
@@ -1457,24 +1496,20 @@ export function ChatWorkspace({
                   ) : null}
                   {activeRead.activeTurn ? (
                     <div role="note" className="chat-running-banner">
-                      <div className="chat-running-details">
-                        <strong>Answer in progress</strong>
-                        {activeRead.activeTurn.text ? (
-                          <p className="chat-running-checkpoint">{activeRead.activeTurn.text}</p>
-                        ) : (
-                          <p className="chat-running-fallback">
-                            Searching notes and preparing a grounded answer...
-                          </p>
-                        )}
-                      </div>
+                      <span className="chat-running-label">Working…</span>
                       <Button
                         type="button"
-                        variant="outline"
+                        variant="ghost"
+                        className="chat-stop"
+                        aria-label="Stop answer"
                         disabled={controlsBusy}
                         onClick={() => void handleStopOrResume("stop")}
                       >
-                        Stop answer
+                        Stop
                       </Button>
+                      {activeRead.activeTurn.text && (
+                        <p className="chat-running-checkpoint">{activeRead.activeTurn.text}</p>
+                      )}
                     </div>
                   ) : null}
 
@@ -1558,7 +1593,7 @@ export function ChatWorkspace({
                 title={activeRead?.activeTurn ? "Queue message" : "Send message"}
                 disabled={controlsBusy || !hasUnsentInput}
               >
-                {activeRead?.activeTurn ? "Queue" : null}
+                {activeRead?.activeTurn ? <span className="chat-send-label">Queue</span> : null}
                 <ArrowUpIcon weight="bold" aria-hidden="true" />
               </Button>
             </div>
