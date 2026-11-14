@@ -466,12 +466,17 @@ test("saved conversations reopen across reload, redact deleted note excerpts, en
   await page.goto("/");
 
   const chatRegion = page.getByRole("region", { name: "Chat workspace" });
-  const messageInput = chatRegion.getByLabel("Message");
+  await page.getByRole("button", { name: "Open chat", exact: true }).click();
+  const messageInput = chatRegion.getByRole("textbox", { name: "Message", exact: true });
   await messageInput.focus();
   await page.keyboard.type("How does pgvector durability work?");
   await chatRegion.getByRole("button", { name: "Send message", exact: true }).click();
 
-  await expect(chatRegion.getByText("How does pgvector durability work?")).toBeVisible();
+  await expect(
+    chatRegion
+      .getByRole("list", { name: "Conversation messages" })
+      .getByText("How does pgvector durability work?"),
+  ).toBeVisible();
   await expect(
     chatRegion.getByText(
       "Grounded answer from your notes: PostgreSQL pgvector durability relies on synchronous WAL flushing.",
@@ -494,6 +499,8 @@ test("saved conversations reopen across reload, redact deleted note excerpts, en
   // Reload and reopen the persisted conversation on narrow mobile using keyboard.
   await page.reload();
   const reopenedChat = page.getByRole("region", { name: "Chat workspace" });
+  await page.getByRole("button", { name: "Open chat", exact: true }).click();
+  await reopenedChat.getByRole("button", { name: "Conversation history", exact: true }).click();
   const convButton = reopenedChat
     .getByRole("navigation", { name: "Saved conversations" })
     .getByRole("button")
@@ -501,7 +508,11 @@ test("saved conversations reopen across reload, redact deleted note excerpts, en
   await convButton.focus();
   await page.keyboard.press("Enter");
 
-  await expect(reopenedChat.getByText("How does pgvector durability work?")).toBeVisible();
+  await expect(
+    reopenedChat
+      .getByRole("list", { name: "Conversation messages" })
+      .getByText("How does pgvector durability work?"),
+  ).toBeVisible();
   await expect(
     reopenedChat.getByText("PostgreSQL pgvector durability relies on synchronous WAL flushing.", {
       exact: true,
@@ -516,6 +527,10 @@ test("saved conversations reopen across reload, redact deleted note excerpts, en
 
   await page.reload();
   const afterNoteDeleteChat = page.getByRole("region", { name: "Chat workspace" });
+  await page.getByRole("button", { name: "Open chat", exact: true }).click();
+  await afterNoteDeleteChat
+    .getByRole("button", { name: "Conversation history", exact: true })
+    .click();
   await afterNoteDeleteChat
     .getByRole("navigation", { name: "Saved conversations" })
     .getByRole("button")
@@ -557,6 +572,10 @@ test("saved conversations reopen across reload, redact deleted note excerpts, en
   // Switch browser focus to Bob and confirm Alice's conversation history is cleared.
   await page.evaluate("window.dispatchEvent(new Event('focus'))");
   await expect(page.getByText(`Signed in as ${bob}@example.test`)).toBeVisible();
+  await page.getByRole("button", { name: "Open chat", exact: true }).click();
+  await afterNoteDeleteChat
+    .getByRole("button", { name: "Conversation history", exact: true })
+    .click();
   await expect(
     afterNoteDeleteChat.getByText(
       "No saved conversations yet. Start a new conversation to ask about your notes.",

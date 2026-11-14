@@ -10,14 +10,18 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardAction,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { ArrowsInSimpleIcon } from "@phosphor-icons/react/dist/csr/ArrowsInSimple";
+import { ArrowsOutSimpleIcon } from "@phosphor-icons/react/dist/csr/ArrowsOutSimple";
+import { NotePencilIcon } from "@phosphor-icons/react/dist/csr/NotePencil";
+import { NotebookIcon } from "@phosphor-icons/react/dist/csr/Notebook";
+import { SidebarSimpleIcon } from "@phosphor-icons/react/dist/csr/SidebarSimple";
+import { TrashSimpleIcon } from "@phosphor-icons/react/dist/csr/TrashSimple";
+import { XIcon } from "@phosphor-icons/react/dist/csr/X";
+import "./chat-shell.css";
+import { ArrowUpIcon } from "@phosphor-icons/react/dist/csr/ArrowUp";
+import { FileTextIcon } from "@phosphor-icons/react/dist/csr/FileText";
+import { GlobeIcon } from "@phosphor-icons/react/dist/csr/Globe";
+import "./chat-content.css";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import type {
@@ -78,6 +82,10 @@ export function ChatWorkspace({
   activeSourceTarget,
   presentation,
   onPresentationChange,
+  compact,
+  hidden,
+  onClose,
+  onFocusChat,
   onOpenSource,
   onUnauthenticated,
 }: {
@@ -88,11 +96,21 @@ export function ChatWorkspace({
   canOpenSource: boolean;
   activeSourceTarget: SourceTarget | null;
   presentation: "sidebar" | "fullscreen";
+  compact: boolean;
+  hidden: boolean;
+  onClose: () => void;
+  onFocusChat: () => void;
   onPresentationChange: (mode: "sidebar" | "fullscreen") => void;
   onOpenSource: (target: SourceTarget) => void;
   onUnauthenticated: () => void;
 }) {
   const composerId = useId();
+  const historyId = useId();
+  const [compactHistoryOpen, setCompactHistoryOpen] = useState(false);
+  const [railOpen, setRailOpen] = useState(true);
+  const historyOpen = compact ? compactHistoryOpen : railOpen;
+  const toggleHistory = () =>
+    compact ? setCompactHistoryOpen(!compactHistoryOpen) : setRailOpen(!railOpen);
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [listState, setListState] = useState<"loading" | "ready" | "failed">("loading");
   const [listNextCursor, setListNextCursor] = useState<string | null>(null);
@@ -211,6 +229,11 @@ export function ChatWorkspace({
   const retryDeleteRef = useRef<HTMLButtonElement>(null);
   const chatHeadingRef = useRef<HTMLHeadingElement>(null);
   const deleteTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const previouslyHidden = useRef(hidden);
+  useEffect(() => {
+    if (previouslyHidden.current && !hidden) chatHeadingRef.current?.focus();
+    previouslyHidden.current = hidden;
+  }, [hidden]);
 
   useEffect(() => {
     // Focus the committed result, after React has mounted and enabled its control.
@@ -670,6 +693,8 @@ export function ChatWorkspace({
 
   function executeSwitch(target: PendingSwitch) {
     setPendingSwitch(null);
+    setCompactHistoryOpen(false);
+    if (compactHistoryOpen) chatHeadingRef.current?.focus();
     setUnsentMessage("");
     pendingSendKeyRef.current = null;
     if (target.kind === "open") {
@@ -687,6 +712,8 @@ export function ChatWorkspace({
       activeRead !== null &&
       openFailure === null
     ) {
+      setCompactHistoryOpen(false);
+      if (compactHistoryOpen) chatHeadingRef.current?.focus();
       return;
     }
     if (hasUnsentInput) {
@@ -929,18 +956,18 @@ export function ChatWorkspace({
       return (
         <li key={`web:${source.url}:${index}`} className="chat-citation-item">
           <div className="chat-citation-card">
-            <p className="text-sm text-muted-foreground">
-              Web source · {new URL(source.url).hostname}
+            <p className="chat-citation-meta">
+              <GlobeIcon aria-hidden="true" /> Web source · {new URL(source.url).hostname}
             </p>
             <a
               href={source.url}
               target="_blank"
               rel="noopener noreferrer"
-              className="break-words underline"
+              className="chat-citation-link"
             >
               {source.title}
             </a>
-            <blockquote className="note-search-excerpt">{citation.excerpt}</blockquote>
+            <blockquote className="chat-citation-excerpt">{citation.excerpt}</blockquote>
           </div>
         </li>
       );
@@ -967,6 +994,7 @@ export function ChatWorkspace({
         >
           <div className="chat-citation-header">
             <div className="chat-citation-meta">
+              <FileTextIcon aria-hidden="true" />
               <strong>{noteTitle}</strong>
               <span>
                 {headingPath ? `${headingPath} - ` : ""}
@@ -980,7 +1008,8 @@ export function ChatWorkspace({
             </div>
             <Button
               type="button"
-              variant="outline"
+              variant="ghost"
+              className="chat-open-source"
               disabled={!enabled || !canOpenSource}
               aria-current={isActive ? "location" : undefined}
               onClick={() => {
@@ -1003,7 +1032,7 @@ export function ChatWorkspace({
               Source note was deleted; stored excerpt was removed.
             </p>
           ) : citation.excerpt ? (
-            <blockquote className="note-search-excerpt">{citation.excerpt}</blockquote>
+            <blockquote className="chat-citation-excerpt">{citation.excerpt}</blockquote>
           ) : null}
         </div>
       </li>
@@ -1015,32 +1044,90 @@ export function ChatWorkspace({
       aria-label="Chat workspace"
       className="chat-workspace"
       data-chat-presentation={presentation}
+      data-compact={compact}
+      data-history-open={historyOpen}
+      hidden={hidden}
+      inert={hidden}
+      onFocusCapture={onFocusChat}
     >
-      <div className="chat-workspace-header">
+      <header className="chat-workspace-header">
+        <Button
+          type="button"
+          size="icon"
+          variant="ghost"
+          aria-label="Conversation history"
+          title="Conversation history"
+          aria-expanded={historyOpen}
+          aria-controls={historyId}
+          onClick={toggleHistory}
+        >
+          <SidebarSimpleIcon aria-hidden="true" />
+        </Button>
         <h2 ref={chatHeadingRef} tabIndex={-1}>
-          Saved conversations
+          {compact && historyOpen
+            ? "Conversations"
+            : messages
+                .find((message) => message.sequence === 1 && message.role === "user")
+                ?.text.slice(0, 120) || "Chat"}
         </h2>
         <div className="chat-workspace-actions">
+          {activeRead && !hidden && !(compact && historyOpen) && (
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              title="Delete conversation"
+              aria-label="Delete conversation"
+              disabled={controlsBusy}
+              onClick={(event) => {
+                deleteTriggerRef.current = event.currentTarget;
+                setConfirmDeleteId(activeRead.conversation.id);
+              }}
+            >
+              <TrashSimpleIcon aria-hidden="true" />
+            </Button>
+          )}
           <Button
             ref={newConversationRef}
             type="button"
-            variant="outline"
+            variant="ghost"
+            size="icon"
+            title="New conversation"
+            aria-label="New conversation"
             disabled={controlsBusy}
             onClick={() => requestConversationSwitch({ kind: "new" })}
           >
-            New conversation
+            <NotePencilIcon aria-hidden="true" />
           </Button>
           <Button
             type="button"
             variant="ghost"
+            size="icon"
+            className="chat-layout-toggle"
+            title={presentation === "sidebar" ? "Full screen chat" : "Sidebar chat"}
+            aria-label={presentation === "sidebar" ? "Full screen chat" : "Sidebar chat"}
             onClick={() =>
               onPresentationChange(presentation === "sidebar" ? "fullscreen" : "sidebar")
             }
           >
-            {presentation === "sidebar" ? "Full screen chat" : "Sidebar chat"}
+            {presentation === "sidebar" ? (
+              <ArrowsOutSimpleIcon aria-hidden="true" />
+            ) : (
+              <ArrowsInSimpleIcon aria-hidden="true" />
+            )}
+          </Button>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            title="Close chat"
+            aria-label="Close chat"
+            onClick={onClose}
+          >
+            <XIcon aria-hidden="true" />
           </Button>
         </div>
-      </div>
+      </header>
 
       <div aria-live="polite" className="chat-workspace-status">
         {deleteNotice ? (
@@ -1067,7 +1154,16 @@ export function ChatWorkspace({
       </div>
 
       <div className="chat-workspace-body">
-        <div className="chat-history-column">
+        <div id={historyId} className="chat-history-column" hidden={!historyOpen}>
+          {!compact && (
+            <>
+              <strong className="chat-history-brand">Atlas</strong>
+              <Button type="button" variant="ghost" className="chat-back-notes" onClick={onClose}>
+                <NotebookIcon aria-hidden="true" /> Notes
+              </Button>
+            </>
+          )}
+          <h3 className="chat-history-title">Conversations</h3>
           <p className="sr-only" aria-live="polite" aria-atomic="true">
             {listState === "loading"
               ? "Loading saved conversations."
@@ -1111,6 +1207,7 @@ export function ChatWorkspace({
                         aria-current={isSelected ? "true" : undefined}
                         disabled={controlsBusy}
                         className="chat-conversation-select"
+                        title={label}
                         onClick={() => requestConversationSwitch({ kind: "open", id: item.id })}
                       >
                         <span className="chat-conversation-label">{label}</span>
@@ -1123,13 +1220,15 @@ export function ChatWorkspace({
                         variant="ghost"
                         disabled={controlsBusy}
                         aria-label={`Delete ${label}`}
-                        className="chat-conversation-delete text-destructive"
+                        title={`Delete ${label}`}
+                        className="chat-conversation-delete"
+                        size="icon"
                         onClick={(event) => {
                           deleteTriggerRef.current = event.currentTarget;
                           setConfirmDeleteId(item.id);
                         }}
                       >
-                        Delete
+                        <TrashSimpleIcon aria-hidden="true" />
                       </Button>
                     </li>
                   );
@@ -1156,7 +1255,7 @@ export function ChatWorkspace({
           )}
         </div>
 
-        <div className="chat-thread-column">
+        <div className="chat-thread-column" hidden={compact && historyOpen}>
           <p className="sr-only" aria-live="polite" aria-atomic="true">
             {openingId
               ? "Opening conversation."
@@ -1189,172 +1288,153 @@ export function ChatWorkspace({
           ) : null}
 
           {activeRead ? (
-            <Card size="sm" className="chat-active-card">
-              <CardHeader>
-                <CardTitle>{formatConversationLabel(activeRead.conversation)}</CardTitle>
-                <CardDescription>
-                  {activeRead.activeTurn
-                    ? "Answer in progress"
-                    : activeRead.conversation.queuePaused
-                      ? "Queue paused"
-                      : "Saved conversation history"}
-                </CardDescription>
-                <CardAction>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    className="text-destructive"
-                    disabled={controlsBusy}
-                    onClick={(event) => {
-                      deleteTriggerRef.current = event.currentTarget;
-                      setConfirmDeleteId(activeRead.conversation.id);
-                    }}
-                  >
-                    Delete conversation
-                  </Button>
-                </CardAction>
-              </CardHeader>
-              <CardContent className="chat-active-body">
-                {activeRead.conversation.queuePaused || recoveryDescription ? (
-                  <div role="note" className="chat-queue-banner">
-                    <p>
-                      {recoveryDescription ??
-                        "Queue is paused. Pending messages wait until you explicitly resume."}
-                    </p>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      disabled={controlsBusy}
-                      onClick={() => void handleStopOrResume("resume")}
-                    >
-                      Resume queue
-                    </Button>
-                  </div>
-                ) : null}
-
-                {activeRead.activeTurn ? (
-                  <div role="note" className="chat-running-banner">
-                    <div className="chat-running-details">
-                      <strong>Answer in progress</strong>
-                      {activeRead.activeTurn.text ? (
-                        <p className="chat-running-checkpoint">{activeRead.activeTurn.text}</p>
-                      ) : (
-                        <p>Searching notes and preparing a grounded answer...</p>
-                      )}
-                    </div>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      disabled={controlsBusy}
-                      onClick={() => void handleStopOrResume("stop")}
-                    >
-                      Stop answer
-                    </Button>
-                  </div>
-                ) : null}
-
-                {enabled &&
-                  activeRead.activeTurn &&
-                  activeRead.conversation.id === activeConversationId && (
-                    <ResearchRequests
-                      key={`${cacheResetToken}:${activeRead.activeTurn.id}`}
-                      conversationId={activeRead.conversation.id}
-                      client={client}
-                      onUnauthenticated={onUnauthenticated}
-                    />
-                  )}
-
-                {messages.length === 0 ? (
-                  <p className="chat-empty-messages">
-                    No messages in this conversation yet. Send a question below.
+            <div className="chat-active-body">
+              {activeRead.conversation.queuePaused || recoveryDescription ? (
+                <div role="note" className="chat-queue-banner">
+                  <p>
+                    {recoveryDescription ??
+                      "Queue is paused. Pending messages wait until you explicitly resume."}
                   </p>
-                ) : (
-                  <ol aria-label="Conversation messages" className="chat-message-list">
-                    {messages.map((message) => {
-                      if (message.role === "user") {
-                        const isAddressed = addressedInputIds.has(message.id);
-                        const isRunning = runningInputIds.has(message.id);
-                        const userStatus = isRunning
-                          ? "Running"
-                          : isAddressed
-                            ? "Answered"
-                            : activeRead.conversation.queuePaused
-                              ? "Queued (paused)"
-                              : "Queued";
-                        return (
-                          <li
-                            key={message.id}
-                            className="chat-message-item is-user"
-                            data-message-role="user"
-                            data-message-status={userStatus}
-                          >
-                            <div className="chat-message-meta">
-                              <strong>You</strong>
-                              <span className="chat-message-badge">{userStatus}</span>
-                              {message.deliveryPolicy === "steer" ? (
-                                <span className="chat-message-badge">Steer</span>
-                              ) : null}
-                            </div>
-                            <p className="chat-message-text">{message.text}</p>
-                          </li>
-                        );
-                      }
-
-                      const presentationState = describeAssistantMessageState(message);
-                      return (
-                        <li
-                          key={message.id}
-                          className="chat-message-item is-assistant"
-                          data-message-role="assistant"
-                          data-answer-status={message.status}
-                        >
-                          <div className="chat-message-meta">
-                            <strong>Atlas</strong>
-                            <span className="chat-message-badge">{presentationState.badge}</span>
-                            {message.inputIds.length > 1 ? (
-                              <span className="chat-message-badge">
-                                Addresses {message.inputIds.length} messages
-                              </span>
-                            ) : null}
-                          </div>
-
-                          {presentationState.warning ? (
-                            <p role="note" className="chat-incomplete-warning">
-                              {presentationState.warning}
-                            </p>
-                          ) : null}
-
-                          {message.text.trim().length > 0 ? (
-                            <p className="chat-message-text">{message.text}</p>
-                          ) : presentationState.emptyFallback ? (
-                            <p className="chat-message-empty">{presentationState.emptyFallback}</p>
-                          ) : null}
-
-                          {message.citations.length > 0 ? (
-                            <ul aria-label="Answer citations" className="chat-citation-list">
-                              {message.citations.map((citation, index) =>
-                                renderCitation(citation, index),
-                              )}
-                            </ul>
-                          ) : null}
-                        </li>
-                      );
-                    })}
-                  </ol>
-                )}
-
-                {messagesNextCursor ? (
                   <Button
                     type="button"
                     variant="outline"
-                    disabled={!enabled || loadingMoreMessages}
-                    onClick={() => void loadMoreMessages()}
+                    disabled={controlsBusy}
+                    onClick={() => void handleStopOrResume("resume")}
                   >
-                    {loadingMoreMessages ? "Loading messages..." : "Load more messages"}
+                    Resume queue
                   </Button>
-                ) : null}
-              </CardContent>
-            </Card>
+                </div>
+              ) : null}
+
+              {messages.length === 0 ? (
+                <p className="chat-empty-messages">
+                  No messages in this conversation yet. Send a question below.
+                </p>
+              ) : (
+                <ol aria-label="Conversation messages" className="chat-message-list">
+                  {messages.map((message) => {
+                    if (message.role === "user") {
+                      const isAddressed = addressedInputIds.has(message.id);
+                      const isRunning = runningInputIds.has(message.id);
+                      const userStatus = isRunning
+                        ? "Running"
+                        : isAddressed
+                          ? "Answered"
+                          : activeRead.conversation.queuePaused
+                            ? "Queued (paused)"
+                            : "Queued";
+                      return (
+                        <li
+                          key={message.id}
+                          className="chat-message-item is-user"
+                          data-message-role="user"
+                          data-message-status={userStatus}
+                        >
+                          <div className="chat-message-meta">
+                            <strong className="sr-only">You</strong>
+                            <span
+                              className={
+                                isAddressed && !isRunning ? "sr-only" : "chat-message-badge"
+                              }
+                            >
+                              {userStatus}
+                            </span>
+                            {message.deliveryPolicy === "steer" ? (
+                              <span className="chat-message-badge">Steer</span>
+                            ) : null}
+                          </div>
+                          <p className="chat-message-text">{message.text}</p>
+                        </li>
+                      );
+                    }
+
+                    const presentationState = describeAssistantMessageState(message);
+                    return (
+                      <li
+                        key={message.id}
+                        className="chat-message-item is-assistant"
+                        data-message-role="assistant"
+                        data-answer-status={message.status}
+                      >
+                        <div className="chat-message-meta">
+                          <strong className="sr-only">Atlas</strong>
+                          <span className="chat-message-badge">{presentationState.badge}</span>
+                          {message.inputIds.length > 1 ? (
+                            <span className="chat-message-badge">
+                              Addresses {message.inputIds.length} messages
+                            </span>
+                          ) : null}
+                        </div>
+
+                        {presentationState.warning ? (
+                          <p role="note" className="chat-incomplete-warning">
+                            {presentationState.warning}
+                          </p>
+                        ) : null}
+
+                        {message.text.trim().length > 0 ? (
+                          <p className="chat-message-text">{message.text}</p>
+                        ) : presentationState.emptyFallback ? (
+                          <p className="chat-message-empty">{presentationState.emptyFallback}</p>
+                        ) : null}
+
+                        {message.citations.length > 0 ? (
+                          <ul aria-label="Answer citations" className="chat-citation-list">
+                            {message.citations.map((citation, index) =>
+                              renderCitation(citation, index),
+                            )}
+                          </ul>
+                        ) : null}
+                      </li>
+                    );
+                  })}
+                </ol>
+              )}
+
+              {messagesNextCursor ? (
+                <Button
+                  type="button"
+                  variant="outline"
+                  disabled={!enabled || loadingMoreMessages}
+                  onClick={() => void loadMoreMessages()}
+                >
+                  {loadingMoreMessages ? "Loading messages..." : "Load more messages"}
+                </Button>
+              ) : null}
+              {activeRead.activeTurn ? (
+                <div role="note" className="chat-running-banner">
+                  <div className="chat-running-details">
+                    <strong>Answer in progress</strong>
+                    {activeRead.activeTurn.text ? (
+                      <p className="chat-running-checkpoint">{activeRead.activeTurn.text}</p>
+                    ) : (
+                      <p className="chat-running-fallback">
+                        Searching notes and preparing a grounded answer...
+                      </p>
+                    )}
+                  </div>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    disabled={controlsBusy}
+                    onClick={() => void handleStopOrResume("stop")}
+                  >
+                    Stop answer
+                  </Button>
+                </div>
+              ) : null}
+
+              {enabled &&
+                activeRead.activeTurn &&
+                activeRead.conversation.id === activeConversationId && (
+                  <ResearchRequests
+                    key={`${cacheResetToken}:${activeRead.activeTurn.id}`}
+                    conversationId={activeRead.conversation.id}
+                    client={client}
+                    onUnauthenticated={onUnauthenticated}
+                  />
+                )}
+            </div>
           ) : !openingId && !openFailure ? (
             <p className="chat-no-selection">
               Select a saved conversation to inspect its history, or compose a message below.
@@ -1386,33 +1466,44 @@ export function ChatWorkspace({
           ) : null}
 
           <form className="chat-composer-form" onSubmit={handleFormSubmit}>
-            <div className="chat-composer-field">
-              <Label htmlFor={composerId}>Message</Label>
-              <Textarea
-                ref={composerRef}
-                id={composerId}
-                rows={3}
-                maxLength={100_000}
-                placeholder="Ask a question grounded in your saved notes"
-                value={unsentMessage}
-                disabled={!enabled || sending || creating || deletingId !== null}
-                onChange={(event) => setUnsentMessage(event.target.value)}
-              />
-            </div>
+            <Label className="sr-only" htmlFor={composerId}>
+              Message
+            </Label>
+            <Textarea
+              ref={composerRef}
+              id={composerId}
+              className="chat-composer-input"
+              rows={1}
+              maxLength={100_000}
+              placeholder="Message Atlas"
+              value={unsentMessage}
+              disabled={!enabled || sending || creating || deletingId !== null}
+              onChange={(event) => setUnsentMessage(event.target.value)}
+            />
             <div className="chat-composer-actions">
-              <Button type="submit" disabled={controlsBusy || !hasUnsentInput}>
-                {activeRead?.activeTurn ? "Queue message" : "Send message"}
-              </Button>
               {activeRead?.activeTurn ? (
                 <Button
                   type="button"
-                  variant="outline"
+                  variant="ghost"
+                  className="chat-steer"
+                  aria-label="Steer answer"
+                  title="Steer answer"
                   disabled={controlsBusy || !hasUnsentInput}
                   onClick={() => void submitMessage("steer")}
                 >
-                  Steer answer
+                  Steer
                 </Button>
               ) : null}
+              <Button
+                type="submit"
+                className="chat-send"
+                aria-label={activeRead?.activeTurn ? "Queue message" : "Send message"}
+                title={activeRead?.activeTurn ? "Queue message" : "Send message"}
+                disabled={controlsBusy || !hasUnsentInput}
+              >
+                {activeRead?.activeTurn ? "Queue" : null}
+                <ArrowUpIcon weight="bold" aria-hidden="true" />
+              </Button>
             </div>
           </form>
         </div>
@@ -1425,7 +1516,7 @@ export function ChatWorkspace({
         }}
       >
         <AlertDialogContent
-          className="notes-dialog"
+          className="notes-dialog chat-dialog"
           initialFocus={discardCancelRef}
           finalFocus={composerRef}
         >
@@ -1457,7 +1548,7 @@ export function ChatWorkspace({
         }}
       >
         <AlertDialogContent
-          className="notes-dialog"
+          className="notes-dialog chat-dialog"
           initialFocus={deleteCancelRef}
           finalFocus={() => {
             const trigger = deleteTriggerRef.current;

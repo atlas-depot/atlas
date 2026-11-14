@@ -1,4 +1,13 @@
-import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  lazy,
+  Suspense,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -56,6 +65,18 @@ const BlockNoteEditor = lazy(() =>
   import("./BlockNoteEditor").then((module) => ({ default: module.BlockNoteEditor })),
 );
 
+const desktopQuery = "(min-width: 1024px)";
+
+function subscribeDesktop(onChange: () => void) {
+  const query = window.matchMedia(desktopQuery);
+  query.addEventListener("change", onChange);
+  return () => query.removeEventListener("change", onChange);
+}
+
+function isDesktop() {
+  return window.matchMedia(desktopQuery).matches;
+}
+
 export function NotesWorkspace({
   store,
   organizer,
@@ -97,7 +118,22 @@ export function NotesWorkspace({
   const [activeSourceTarget, setActiveSourceTarget] = useState<SourceTarget | null>(null);
   const [unavailableSourceTarget, setUnavailableSourceTarget] = useState<SourceTarget | null>(null);
   const [searchResetToken, setSearchResetToken] = useState(0);
+  const desktop = useSyncExternalStore(subscribeDesktop, isDesktop);
+  const [chatVisibility, setChatOpen] = useState<boolean | null>(null);
+  const chatOpen = chatVisibility ?? desktop;
+  const chatLauncherRef = useRef<HTMLButtonElement>(null);
   const [chatPresentation, setChatPresentation] = useState<"sidebar" | "fullscreen">("sidebar");
+  const canShowChat =
+    !example &&
+    conversations &&
+    (loadState === "ready" || loadState === "unauthenticated" || draft !== null);
+  const presentation = desktop ? chatPresentation : "fullscreen";
+
+  function closeChat() {
+    setChatOpen(false);
+    requestAnimationFrame(() => chatLauncherRef.current?.focus());
+  }
+
   const busyRef = useRef(false);
   const titleRef = useRef<HTMLInputElement>(null);
   const cancelRef = useRef<HTMLButtonElement>(null);
@@ -401,7 +437,12 @@ export function NotesWorkspace({
     const onKeyDown = (event: KeyboardEvent) => {
       if (!(event.ctrlKey || event.metaKey) || event.key.toLowerCase() !== "s") return;
       event.preventDefault();
-      if (!pending && !deleteOpen) void save();
+      if (
+        !pending &&
+        !deleteOpen &&
+        !(event.target instanceof Element && event.target.closest(".chat-workspace"))
+      )
+        void save();
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
@@ -576,7 +617,10 @@ export function NotesWorkspace({
   }
 
   return (
-    <main className="notes-workspace workspace-shell">
+    <main
+      className="notes-workspace workspace-shell"
+      data-chat-view={canShowChat && chatOpen ? presentation : undefined}
+    >
       <header className="workspace-header">
         <h1 className="workspace-brand" aria-label="Atlas notes">
           atlas
@@ -589,6 +633,11 @@ export function NotesWorkspace({
         >
           New note
         </Button>
+        {canShowChat && !chatOpen && (
+          <Button ref={chatLauncherRef} variant="ghost" onClick={() => setChatOpen(true)}>
+            Open chat
+          </Button>
+        )}
         <div className="workspace-save-controls">
           <div className="workspace-save-status">
             {/* Both live regions stay mounted so a status-to-failure switch is announced. */}
@@ -894,22 +943,30 @@ export function NotesWorkspace({
             />
           )}
         </div>
-        {!example &&
-          conversations &&
-          (loadState === "ready" || loadState === "unauthenticated" || draft !== null) && (
-            <ChatWorkspace
-              cacheResetToken={searchResetToken}
-              client={conversations}
-              notes={notes}
-              enabled={requestsEnabled && !writeBlocked}
-              canOpenSource={!busy}
-              activeSourceTarget={unavailableSourceTarget ?? activeSourceTarget}
-              presentation={chatPresentation}
-              onPresentationChange={setChatPresentation}
-              onOpenSource={requestOpenSource}
-              onUnauthenticated={handleSearchUnauthenticated}
-            />
-          )}
+        {canShowChat && (
+          <ChatWorkspace
+            cacheResetToken={searchResetToken}
+            client={conversations}
+            notes={notes}
+            enabled={requestsEnabled && !writeBlocked}
+            canOpenSource={!busy}
+            activeSourceTarget={unavailableSourceTarget ?? activeSourceTarget}
+            presentation={presentation}
+            compact={!desktop || presentation === "sidebar"}
+            hidden={!chatOpen}
+            onClose={closeChat}
+            onPresentationChange={(next) => {
+              setChatOpen(true);
+              setChatPresentation(next);
+            }}
+            onFocusChat={() => setChatOpen(true)}
+            onOpenSource={(target) => {
+              if (!desktop) setChatOpen(false);
+              requestOpenSource(target);
+            }}
+            onUnauthenticated={handleSearchUnauthenticated}
+          />
+        )}
       </div>
       <AlertDialog
         open={pending !== null}

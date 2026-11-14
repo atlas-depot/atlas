@@ -393,6 +393,7 @@ test.describe("saving and conflicts", () => {
     await expect(save).toBeDisabled();
     for (const width of [1440, 375, 320]) {
       await page.setViewportSize({ width, height: 900 });
+      await expect(editor).toBeVisible();
       expect(await page.evaluate("document.documentElement.scrollWidth <= window.innerWidth")).toBe(
         true,
       );
@@ -2021,6 +2022,7 @@ test.describe("saved conversations and chat history", () => {
 
     await page.goto("/");
     const chatRegion = page.getByRole("region", { name: "Chat workspace" });
+    await chatRegion.getByRole("button", { name: "Full screen chat", exact: true }).click();
     await expect(chatRegion.getByRole("alert")).toContainText(
       "Could not load saved conversations. Check your connection and try again.",
     );
@@ -2057,7 +2059,6 @@ test.describe("saved conversations and chat history", () => {
     // Toggle full-screen and sidebar chat without losing conversation state or unsent input.
     const messageInput = chatRegion.getByRole("textbox", { name: "Message", exact: true });
     await messageInput.fill("Draft question kept across layout toggle");
-    await chatRegion.getByRole("button", { name: "Full screen chat", exact: true }).click();
     await expect(chatRegion).toHaveAttribute("data-chat-presentation", "fullscreen");
     await expect(messageInput).toHaveValue("Draft question kept across layout toggle");
     await chatRegion.getByRole("button", { name: "Sidebar chat", exact: true }).click();
@@ -2174,6 +2175,7 @@ test.describe("saved conversations and chat history", () => {
 
     await page.goto("/");
     const chatRegion = page.getByRole("region", { name: "Chat workspace" });
+    await chatRegion.getByRole("button", { name: "Full screen chat", exact: true }).click();
     await chatRegion.getByRole("button", { name: conversationName(convOneLabel) }).click();
     await expect(chatRegion.getByText("Question 50")).toBeVisible();
     await expect(
@@ -2335,8 +2337,13 @@ test.describe("saved conversations and chat history", () => {
 
     await page.goto("/");
     const chatRegion = page.getByRole("region", { name: "Chat workspace" });
+    await chatRegion.getByRole("button", { name: "Full screen chat", exact: true }).click();
     await chatRegion.getByRole("button", { name: conversationName(convOneLabel) }).click();
-    await expect(chatRegion.getByText("Unique message from First thread")).toBeVisible();
+    await expect(
+      chatRegion
+        .getByRole("list", { name: "Conversation messages" })
+        .getByText("Unique message from First thread"),
+    ).toBeVisible();
 
     // Type an unsent message and attempt to switch to Second thread.
     const messageInput = chatRegion.getByRole("textbox", { name: "Message", exact: true });
@@ -2347,14 +2354,26 @@ test.describe("saved conversations and chat history", () => {
     await expect(discardDialog).toBeVisible();
     await discardDialog.getByRole("button", { name: "Keep message", exact: true }).click();
     await expect(messageInput).toHaveValue("Unsent draft for First thread");
-    await expect(chatRegion.getByText("Unique message from First thread")).toBeVisible();
+    await expect(
+      chatRegion
+        .getByRole("list", { name: "Conversation messages" })
+        .getByText("Unique message from First thread"),
+    ).toBeVisible();
 
     // Explicitly discard unsent message to switch to Second thread.
     await chatRegion.getByRole("button", { name: conversationName(convTwoLabel) }).click();
     await discardDialog.getByRole("button", { name: "Discard message", exact: true }).click();
     await expect(messageInput).toHaveValue("");
-    await expect(chatRegion.getByText("Unique message from Second thread")).toBeVisible();
-    await expect(chatRegion.getByText("Unique message from First thread")).toHaveCount(0);
+    await expect(
+      chatRegion
+        .getByRole("list", { name: "Conversation messages" })
+        .getByText("Unique message from Second thread"),
+    ).toBeVisible();
+    await expect(
+      chatRegion
+        .getByRole("list", { name: "Conversation messages" })
+        .getByText("Unique message from First thread"),
+    ).toHaveCount(0);
 
     // A slow read keeps the workspace busy: no other conversation can be selected
     // while it is pending, so its late response cannot replace a newer selection.
@@ -2368,7 +2387,11 @@ test.describe("saved conversations and chat history", () => {
       chatRegion.getByRole("button", { name: conversationName(convTwoLabel) }),
     ).toBeDisabled();
     resolveSlowFirstRead();
-    await expect(chatRegion.getByText("Unique message from First thread")).toBeVisible();
+    await expect(
+      chatRegion
+        .getByRole("list", { name: "Conversation messages" })
+        .getByText("Unique message from First thread"),
+    ).toBeVisible();
     slowFirstMode = false;
 
     // Now make Second thread missing (404) and click it: First thread's messages must clear immediately.
@@ -2377,7 +2400,11 @@ test.describe("saved conversations and chat history", () => {
     await expect(chatRegion.getByRole("alert")).toContainText(
       "This conversation is no longer available.",
     );
-    await expect(chatRegion.getByText("Unique message from First thread")).toHaveCount(0);
+    await expect(
+      chatRegion
+        .getByRole("list", { name: "Conversation messages" })
+        .getByText("Unique message from First thread"),
+    ).toHaveCount(0);
     await expect(
       chatRegion.getByRole("button", { name: conversationName(convTwoLabel) }),
     ).toHaveCount(0);
@@ -2531,8 +2558,13 @@ test.describe("saved conversations and chat history", () => {
 
     await page.goto("/");
     const chatRegion = page.getByRole("region", { name: "Chat workspace" });
+    await chatRegion.getByRole("button", { name: "Full screen chat", exact: true }).click();
     await chatRegion.getByRole("button", { name: conversationName(convTwoLabel) }).click();
-    await expect(chatRegion.getByText("Message inside Thread to delete")).toBeVisible();
+    await expect(
+      chatRegion
+        .getByRole("list", { name: "Conversation messages" })
+        .getByText("Message inside Thread to delete"),
+    ).toBeVisible();
 
     // Open delete confirmation and cancel first.
     await chatRegion.getByRole("button", { name: `Delete ${convTwoLabel}` }).click();
@@ -2552,7 +2584,11 @@ test.describe("saved conversations and chat history", () => {
     await expect(
       chatRegion.getByRole("button", { name: conversationName(convTwoLabel) }),
     ).toBeVisible();
-    await expect(chatRegion.getByText("Message inside Thread to delete")).toBeVisible();
+    await expect(
+      chatRegion
+        .getByRole("list", { name: "Conversation messages" })
+        .getByText("Message inside Thread to delete"),
+    ).toBeVisible();
 
     // Retry delete succeeds (204) and clears the active conversation view.
     await chatRegion.getByRole("button", { name: "Retry delete", exact: true }).click();
@@ -2560,7 +2596,11 @@ test.describe("saved conversations and chat history", () => {
     await expect(
       chatRegion.getByRole("button", { name: conversationName(convTwoLabel) }),
     ).toHaveCount(0);
-    await expect(chatRegion.getByText("Message inside Thread to delete")).toHaveCount(0);
+    await expect(
+      chatRegion
+        .getByRole("list", { name: "Conversation messages" })
+        .getByText("Message inside Thread to delete"),
+    ).toHaveCount(0);
 
     // Start a slow read of Alice's thread, then switch accounts while the read is held.
     // Wait for the intercepted request so the gate is armed before the account changes.
@@ -2582,6 +2622,7 @@ test.describe("saved conversations and chat history", () => {
     await page.evaluate(
       "new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))",
     );
+    await chatRegion.getByRole("button", { name: "Conversation history", exact: true }).click();
     await expect(
       chatRegion.getByText(
         "No saved conversations yet. Start a new conversation to ask about your notes.",

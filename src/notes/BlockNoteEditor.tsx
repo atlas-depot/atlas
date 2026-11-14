@@ -23,6 +23,9 @@ import {
 import "@blocknote/shadcn/style.css";
 import "./block-editor.css";
 
+const editorTheme =
+  import.meta.env.DEV || import.meta.env.VITE_NOTES_DEMO === "true" ? "light" : undefined;
+
 const links = {
   isValidLink(href: string) {
     return noteLinkSchema.safeParse(href).success;
@@ -301,7 +304,7 @@ function RichDocumentEditor({
         emojiPicker={false}
         tableHandles={false}
         filePanel={false}
-        theme="light"
+        theme={editorTheme}
         editable={!disabled}
         onChange={() => {
           const serialized = JSON.stringify(editor.document);
@@ -338,7 +341,7 @@ export function BlockNoteReader({ content }: { content: BlockNoteDocument }) {
   );
   return (
     <section className="rich-note-editor" aria-label="Saved note content">
-      <BlockNoteView editor={editor} theme="light" editable={false} />
+      <BlockNoteView editor={editor} theme={editorTheme} editable={false} />
     </section>
   );
 }

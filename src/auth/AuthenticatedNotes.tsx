@@ -22,6 +22,18 @@ type SessionState =
 
 /** Production shell. The demo editor stays independent of browser authentication. */
 export function AuthenticatedNotes({ store }: { store: NotesStore }) {
+  // Keep portaled menus and dialogs in the same theme as their workspace.
+  useEffect(() => {
+    const systemTheme = window.matchMedia("(prefers-color-scheme: dark)");
+    const updateTheme = () =>
+      document.documentElement.classList.toggle("dark", systemTheme.matches);
+    updateTheme();
+    systemTheme.addEventListener("change", updateTheme);
+    return () => {
+      systemTheme.removeEventListener("change", updateTheme);
+      document.documentElement.classList.remove("dark");
+    };
+  }, []);
   const [session, setSession] = useState<SessionState>({ kind: "loading" });
   const [attempt, setAttempt] = useState(0);
   const requestId = useRef(0);
