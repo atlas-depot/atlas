@@ -897,7 +897,7 @@
         },
         "conversation_citations_source_identity": {
           "name": "conversation_citations_source_identity",
-          "value": "(\"conversation_citations\".\"source\"->>'kind' IS NOT NULL) AND ((\"conversation_citations\".\"source\"->>'kind' = 'web' AND \"conversation_citations\".\"note_id\" IS NULL AND NOT jsonb_exists(\"conversation_citations\".\"source\", 'noteId')) OR (\"conversation_citations\".\"source\"->>'kind' IN ('block', 'markdown') AND \"conversation_citations\".\"note_id\" IS NOT NULL AND \"conversation_citations\".\"source\"->>'noteId' = \"conversation_citations\".\"note_id\"::text))"
+          "value": "(\"conversation_citations\".\"source\"->>'kind' IS NOT NULL) AND ((\"conversation_citations\".\"source\"->>'kind' = 'web' AND \"conversation_citations\".\"note_id\" IS NULL AND NOT jsonb_exists(\"conversation_citations\".\"source\", 'noteId')) OR (\"conversation_citations\".\"source\"->>'kind' IN ('block', 'markdown') AND \"conversation_citations\".\"note_id\" IS NOT NULL AND \"conversation_citations\".\"source\"->>'noteId' IS NOT NULL AND \"conversation_citations\".\"source\"->>'noteId' = \"conversation_citations\".\"note_id\"::text))"
         },
         "conversation_citations_redaction_valid": {
           "name": "conversation_citations_redaction_valid",

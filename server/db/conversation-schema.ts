@@ -291,7 +291,7 @@ export const conversationCitations = pgTable(
     check("conversation_citations_ordinal_nonnegative", sql`${table.ordinal} >= 0`),
     check(
       "conversation_citations_source_identity",
-      sql`(${table.source}->>'kind' IS NOT NULL) AND ((${table.source}->>'kind' = 'web' AND ${table.noteId} IS NULL AND NOT jsonb_exists(${table.source}, 'noteId')) OR (${table.source}->>'kind' IN ('block', 'markdown') AND ${table.noteId} IS NOT NULL AND ${table.source}->>'noteId' = ${table.noteId}::text))`,
+      sql`(${table.source}->>'kind' IS NOT NULL) AND ((${table.source}->>'kind' = 'web' AND ${table.noteId} IS NULL AND NOT jsonb_exists(${table.source}, 'noteId')) OR (${table.source}->>'kind' IN ('block', 'markdown') AND ${table.noteId} IS NOT NULL AND ${table.source}->>'noteId' IS NOT NULL AND ${table.source}->>'noteId' = ${table.noteId}::text))`,
     ),
     check(
       "conversation_citations_redaction_valid",

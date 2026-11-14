@@ -60,6 +60,7 @@ function normalizedUrls(value: string) {
   return [...value.normalize("NFKC").matchAll(urlPattern)].map((match) =>
     match[0]
       .toLowerCase()
+      .replace(/#.*$/u, "")
       .replace(/[.,;:!?)\]]+$/u, "")
       .replace(/\/+$/u, ""),
   );
