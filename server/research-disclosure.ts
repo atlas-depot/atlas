@@ -60,10 +60,7 @@ function fold(value: string) {
  * decimal fraction or a version string is not silently merged.
  */
 function joinGroupedDigits(value: string) {
-  return value.replace(
-    /(?<=\p{Nd})[.,'\u2019\u00A0\u202F\u066C ](?=\p{Nd}{3}(?!\p{Nd}))/gu,
-    "",
-  );
+  return value.replace(/(?<=\p{Nd})[.,'\u2019\u00A0\u202F\u066C ](?=\p{Nd}{3}(?!\p{Nd}))/gu, "");
 }
 
 /**
