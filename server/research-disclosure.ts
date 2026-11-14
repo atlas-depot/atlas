@@ -55,6 +55,18 @@ function fold(value: string) {
 }
 
 /**
+ * Join thousands separators so a formatted private figure (`148,000`, `148.000`, `148 000`)
+ * is screened as one number. Only separators followed by exactly three digits join, so a
+ * decimal fraction or a version string is not silently merged.
+ */
+function joinGroupedDigits(value: string) {
+  return value.replace(
+    /(?<=\p{Nd})[.,'\u2019\u00A0\u202F\u066C ](?=\p{Nd}{3}(?!\p{Nd}))/gu,
+    "",
+  );
+}
+
+/**
  * Pasted text can carry soft hyphens or zero-width characters inside a word or between two.
  * Screening both readings keeps `Ma\u00ADya` matching `Maya` without gluing separate words.
  */
@@ -154,8 +166,10 @@ function hasPrivateOverlap(question: string, privateTexts: readonly string[]) {
       for (const queryTerm of stemQueryTerms) {
         // Inflected forms: Yilmazlarin and Yilmaz, Hendersons and Henderson.
         if (sharesStem(term, queryTerm)) return true;
-        // Joined forms keep the private term inside one query token: #MayaChen, northstarlabs.
-        if (term.length >= 5 && queryTerm.includes(term)) return true;
+        // Joined forms keep the private term inside one query token: #WeLoveAcme, northstarlabs.
+        // Four letters is the same threshold as the stem relation, so a four-letter name cannot
+        // disappear inside a longer hashtag or joined label.
+        if (queryTerm.includes(term)) return true;
       }
     }
   }
@@ -165,7 +179,7 @@ function hasPrivateOverlap(question: string, privateTexts: readonly string[]) {
 function hasDirectIdentifier(question: string) {
   // Invisible format and tag characters can hide or alter a disclosed token.
   if (/[\p{Cf}\u{E0000}-\u{E007F}]/u.test(question)) return true;
-  const text = asciiDigits(question.normalize("NFKC"));
+  const text = asciiDigits(joinGroupedDigits(question.normalize("NFKC")));
   if (emailPattern.test(text) || uuidPattern.test(text) || ibanPattern.test(text)) return true;
   for (const match of text.matchAll(digitSequencePattern)) {
     if (match[0].replace(/\D/gu, "").length >= 7) return true;

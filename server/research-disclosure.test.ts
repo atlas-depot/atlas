@@ -184,6 +184,27 @@ describe("public research disclosure boundary", () => {
     ).toEqual({ status: "approval_required", reason: "direct_identifier" });
   });
 
+  it.each(["148,000", "148.000", "148 000", "148'000"])(
+    "screens a grouped private figure as one number: %s",
+    (amount) => {
+      expect(
+        inspectResearchQuestion({
+          question: `Is ${amount} enough for a senior engineer?`,
+          privateTexts: ["My salary is 148,000 and my start date is 2026."],
+        }),
+      ).toEqual({ status: "approval_required", reason: "direct_identifier" });
+    },
+  );
+
+  it("keeps an ordinary public year generalized after grouped-digit normalization", () => {
+    expect(
+      inspectResearchQuestion({
+        question: "What public exhibitions opened in 2026?",
+        privateTexts: ["My salary is 148,000 and my start date is 2026."],
+      }).status,
+    ).toBe("generalized");
+  });
+
   it.each([
     ["Yılmazların şirketinin iflası yakın, kimseye söyleme.", "Yılmaz şirket iflas"],
     ["Denizin boşanması için avukatla görüştük", "Deniz boşanma avukat"],
@@ -203,6 +224,15 @@ describe("public research disclosure boundary", () => {
     "Northstar2026 Maya1",
   ])("matches a private term joined into a longer query token: %s", (question) => {
     expect(inspectResearchQuestion({ question, privateTexts: privateContext }).status).toBe(
+      "approval_required",
+    );
+  });
+
+  it.each([
+    ["#WeLoveAcme funding news", "Acme is a private client."],
+    ["TeamAcme2026 funding", "Acme is a private client."],
+  ])("matches a four-letter private term joined without being a prefix: %s", (question, note) => {
+    expect(inspectResearchQuestion({ question, privateTexts: [note] }).status).toBe(
       "approval_required",
     );
   });
