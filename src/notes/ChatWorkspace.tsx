@@ -70,6 +70,7 @@ function mergeConversationMessages(
 
 export function ChatWorkspace({
   client,
+  cacheResetToken,
   notes,
   enabled,
   canOpenSource,
@@ -80,6 +81,7 @@ export function ChatWorkspace({
   onUnauthenticated,
 }: {
   client: ConversationClient;
+  cacheResetToken: number;
   notes: NoteSummary[];
   enabled: boolean;
   canOpenSource: boolean;
@@ -109,6 +111,8 @@ export function ChatWorkspace({
   const [sending, setSending] = useState(false);
   const [acting, setActing] = useState(false);
   const [actionFailure, setActionFailure] = useState<string | null>(null);
+  const [historyRefreshPending, setHistoryRefreshPending] = useState(false);
+  const [historyFailure, setHistoryFailure] = useState<string | null>(null);
 
   const [unsentMessage, setUnsentMessage] = useState("");
   const [pendingSwitch, setPendingSwitch] = useState<PendingSwitch | null>(null);
@@ -129,6 +133,31 @@ export function ChatWorkspace({
   const turnRefreshBusyRef = useRef(false);
   const actionGenerationRef = useRef(0);
   const messagesRef = useRef<ConversationMessage[]>([]);
+  const historyCursorRef = useRef<string | undefined>(undefined);
+  const activeReadRef = useRef<ConversationRead | null>(null);
+  const listInitializedRef = useRef(false);
+  const deleteRequestIdRef = useRef(0);
+
+  const invalidateActive = useCallback(() => {
+    openRequestIdRef.current += 1;
+    actionGenerationRef.current += 1;
+    setOpeningId(null);
+    setCreating(false);
+    setSending(false);
+    setActing(false);
+    setLoadingMoreMessages(false);
+  }, []);
+
+  function clearHistory() {
+    messagesRef.current = [];
+    historyCursorRef.current = undefined;
+    activeReadRef.current = null;
+    setActiveRead(null);
+    setMessages([]);
+    setMessagesNextCursor(null);
+    setHistoryRefreshPending(false);
+    setHistoryFailure(null);
+  }
 
   /** Keeps the selection ref in step with state so async completions can never act on a stale target. */
   function selectConversation(id: string | null) {
@@ -148,6 +177,8 @@ export function ChatWorkspace({
   const discardCancelRef = useRef<HTMLButtonElement>(null);
   const deleteCancelRef = useRef<HTMLButtonElement>(null);
   const newConversationRef = useRef<HTMLButtonElement>(null);
+  const chatHeadingRef = useRef<HTMLHeadingElement>(null);
+  const deleteTriggerRef = useRef<HTMLButtonElement | null>(null);
 
   const hasUnsentInput = unsentMessage.trim().length > 0;
 
@@ -155,18 +186,27 @@ export function ChatWorkspace({
     enabledRef.current = enabled;
     if (!enabled) {
       listRequestIdRef.current += 1;
-      openRequestIdRef.current += 1;
+      deleteRequestIdRef.current += 1;
       void Promise.resolve().then(() => {
-        setOpeningId(null);
-        setCreating(false);
-        setSending(false);
-        setActing(false);
+        invalidateActive();
         setDeletingId(null);
         setLoadingMoreConversations(false);
         setLoadingMoreMessages(false);
       });
     }
-  }, [enabled]);
+  }, [enabled, invalidateActive]);
+
+  useEffect(() => {
+    if (cacheResetToken === 0) return;
+    void Promise.resolve().then(() => {
+      invalidateActive();
+      clearHistory();
+      setConversations([]);
+      setCachedNoteTitles({});
+      setListNextCursor(null);
+      listInitializedRef.current = false;
+    });
+  }, [cacheResetToken, invalidateActive]);
 
   useEffect(() => {
     return () => {
@@ -174,10 +214,6 @@ export function ChatWorkspace({
       openRequestIdRef.current += 1;
     };
   }, []);
-
-  useEffect(() => {
-    messagesRef.current = messages;
-  }, [messages]);
 
   useEffect(() => {
     if (!hasUnsentInput && !sending && !creating) return;
@@ -206,13 +242,22 @@ export function ChatWorkspace({
         }
         // A conversation created while this request was pending is absent from the
         // response snapshot, so keep it until a later list confirms it exists.
+        const hadLoadedList = listInitializedRef.current;
         setConversations((current) => [
           ...current.filter(
             (item) => locallyCreatedIdsRef.current.has(item.id) && !returnedIds.has(item.id),
           ),
           ...filtered,
+          ...current.filter(
+            (item) =>
+              hadLoadedList &&
+              !returnedIds.has(item.id) &&
+              !locallyCreatedIdsRef.current.has(item.id) &&
+              !deletedIdsRef.current.has(item.id),
+          ),
         ]);
-        setListNextCursor(result.nextCursor);
+        if (!hadLoadedList) setListNextCursor(result.nextCursor);
+        listInitializedRef.current = true;
         setListState("ready");
         setListPageError(null);
       } catch (error) {
@@ -232,27 +277,43 @@ export function ChatWorkspace({
   }, [client, enabled, listAttempt, onUnauthenticated]);
 
   /**
-   * Pages forward from the newest loaded message until the store reports no further
-   * page, so an answer published after the first page is never missed. The endpoint
-   * continues from a sequence cursor, so the tail sequence anchors the next request.
+   * Continue from the contiguous history boundary, never an optimistically appended
+   * send. A bounded catch-up exposes any remaining pages through the manual control.
    */
   const fetchLatestHistory = useCallback(
-    async (id: string) => {
-      const current = messagesRef.current;
-      const tail = current.at(-1)?.sequence;
-      let cursor: string | undefined = tail === undefined ? undefined : String(tail);
+    async (id: string, fromStart = false) => {
+      const current = fromStart ? [] : messagesRef.current;
+      let cursor = fromStart ? undefined : historyCursorRef.current;
       let merged = current;
       for (let page = 0; page < MAX_HISTORY_CATCH_UP_PAGES; page += 1) {
         const result = await client.messages(id, { limit: 50, cursor });
         merged = mergeConversationMessages(merged, result.messages);
         if (result.nextCursor === null) {
-          return { messages: merged, nextCursor: null };
+          return {
+            messages: merged,
+            nextCursor: null,
+            cursor: result.messages.at(-1)?.sequence.toString() ?? cursor,
+          };
         }
         cursor = result.nextCursor;
       }
-      return { messages: merged, nextCursor: cursor ?? null };
+      return { messages: merged, nextCursor: cursor ?? null, cursor };
     },
     [client],
+  );
+
+  const commitHistory = useCallback(
+    (result: { messages: ConversationMessage[]; nextCursor: string | null; cursor?: string }) => {
+      messagesRef.current = mergeConversationMessages(messagesRef.current, result.messages);
+      setMessages(messagesRef.current);
+      // A late page cannot move the contiguous boundary behind a newer refresh.
+      if (Number(result.cursor ?? 0) >= Number(historyCursorRef.current ?? 0)) {
+        historyCursorRef.current = result.cursor;
+        setMessagesNextCursor(result.nextCursor);
+      }
+      setHistoryFailure(null);
+    },
+    [],
   );
 
   const refreshActiveConversation = useCallback(
@@ -267,19 +328,22 @@ export function ChatWorkspace({
       try {
         const readResult = await client.read(id);
         if (!stillCurrent()) return;
+        const previousTurnId = activeReadRef.current?.activeTurn?.id;
+        const turnChanged = previousTurnId !== readResult.activeTurn?.id;
+        const historyResult =
+          turnChanged || historyRefreshPending ? await fetchLatestHistory(id) : null;
+        if (!stillCurrent()) return;
+        // Publish the read and its history together. Failed history keeps the old
+        // running turn visible and polling alive, including between queued turns.
+        if (historyResult) commitHistory(historyResult);
+        activeReadRef.current = readResult;
         setActiveRead(readResult);
+        setHistoryRefreshPending(false);
         setConversations((current) =>
           current.map((item) => (item.id === id ? readResult.conversation : item)),
         );
-        if (readResult.activeTurn !== null) return;
-        // The turn is terminal, so the published answer is only in the newest page.
-        // Read first here so the history cannot observe an older state than the turn.
-        const historyResult = await fetchLatestHistory(id);
-        if (!stillCurrent()) return;
-        setMessages((current) => mergeConversationMessages(current, historyResult.messages));
-        setMessagesNextCursor(historyResult.nextCursor);
       } catch (error) {
-        if (requestId !== openRequestIdRef.current) return;
+        if (!stillCurrent()) return;
         const kind = classifyFailure(error);
         if (kind === "unauthenticated") {
           onUnauthenticated();
@@ -290,11 +354,9 @@ export function ChatWorkspace({
           deletedIdsRef.current.add(id);
           setConversations((current) => current.filter((item) => item.id !== id));
           if (activeConversationIdRef.current === id) {
-            openRequestIdRef.current += 1;
+            invalidateActive();
             selectConversation(null);
-            setActiveRead(null);
-            setMessages([]);
-            setMessagesNextCursor(null);
+            clearHistory();
             setOpenFailure({
               id,
               kind: "missing",
@@ -304,7 +366,14 @@ export function ChatWorkspace({
         }
       }
     },
-    [client, fetchLatestHistory, onUnauthenticated],
+    [
+      client,
+      fetchLatestHistory,
+      commitHistory,
+      historyRefreshPending,
+      invalidateActive,
+      onUnauthenticated,
+    ],
   );
 
   const activeTurnRunning = activeRead !== null && activeRead.activeTurn !== null;
@@ -312,7 +381,8 @@ export function ChatWorkspace({
   // A running answer only becomes visible through a new read, so keep the active
   // conversation in sync until the server reports a terminal turn.
   useEffect(() => {
-    if (!enabled || activeConversationId === null || !activeTurnRunning) return;
+    if (!enabled || activeConversationId === null || (!activeTurnRunning && !historyRefreshPending))
+      return;
     const id = activeConversationId;
     const timer = window.setInterval(() => {
       if (turnRefreshBusyRef.current) return;
@@ -322,7 +392,13 @@ export function ChatWorkspace({
       });
     }, 1_500);
     return () => window.clearInterval(timer);
-  }, [enabled, activeConversationId, activeTurnRunning, refreshActiveConversation]);
+  }, [
+    enabled,
+    activeConversationId,
+    activeTurnRunning,
+    historyRefreshPending,
+    refreshActiveConversation,
+  ]);
 
   function snapshotNoteTitles() {
     setCachedNoteTitles((current) => {
@@ -382,7 +458,8 @@ export function ChatWorkspace({
 
   async function openConversation(id: string) {
     if (!enabledRef.current || deletedIdsRef.current.has(id)) return;
-    const requestId = ++openRequestIdRef.current;
+    invalidateActive();
+    const requestId = openRequestIdRef.current;
     snapshotNoteTitles();
     setDeleteNotice(null);
     setOpenFailure(null);
@@ -391,16 +468,13 @@ export function ChatWorkspace({
     // messages are never displayed while loading or after a missing/failed read.
     selectConversation(id);
     setOpeningId(id);
-    setActiveRead(null);
-    setMessages([]);
-    setMessagesNextCursor(null);
-    setLoadingMoreMessages(false);
+    clearHistory();
 
     try {
-      const [readResult, historyResult] = await Promise.all([
-        client.read(id),
-        client.messages(id, { limit: 50 }),
-      ]);
+      // A read can publish a completed answer, so history must be requested after it.
+      const readResult = await client.read(id);
+      if (requestId !== openRequestIdRef.current || !enabledRef.current) return;
+      const historyResult = await fetchLatestHistory(id, true);
       if (
         requestId !== openRequestIdRef.current ||
         !enabledRef.current ||
@@ -415,9 +489,9 @@ export function ChatWorkspace({
         }
         return current.map((item) => (item.id === id ? readResult.conversation : item));
       });
+      activeReadRef.current = readResult;
       setActiveRead(readResult);
-      setMessages(historyResult.messages);
-      setMessagesNextCursor(historyResult.nextCursor);
+      commitHistory(historyResult);
       setOpenFailure(null);
     } catch (error) {
       if (
@@ -435,9 +509,7 @@ export function ChatWorkspace({
       if (kind === "missing") {
         setConversations((current) => current.filter((item) => item.id !== id));
         selectConversation(null);
-        setActiveRead(null);
-        setMessages([]);
-        setMessagesNextCursor(null);
+        clearHistory();
         setOpenFailure({
           id,
           kind: "missing",
@@ -445,9 +517,7 @@ export function ChatWorkspace({
         });
         return;
       }
-      setActiveRead(null);
-      setMessages([]);
-      setMessagesNextCursor(null);
+      clearHistory();
       setOpenFailure({
         id,
         kind: "failed",
@@ -483,8 +553,10 @@ export function ChatWorkspace({
       ) {
         return;
       }
-      setMessages((current) => mergeConversationMessages(current, result.messages));
-      setMessagesNextCursor(result.nextCursor);
+      commitHistory({
+        ...result,
+        cursor: result.nextCursor ?? result.messages.at(-1)?.sequence.toString() ?? cursor,
+      });
     } catch (error) {
       if (requestId !== openRequestIdRef.current) return;
       if (classifyFailure(error) === "unauthenticated") {
@@ -501,7 +573,8 @@ export function ChatWorkspace({
 
   async function createNewConversation() {
     if (!enabledRef.current || creating || deletingId !== null) return;
-    const requestId = ++openRequestIdRef.current;
+    invalidateActive();
+    const requestId = openRequestIdRef.current;
     setCreating(true);
     setDeleteNotice(null);
     setOpenFailure(null);
@@ -519,14 +592,14 @@ export function ChatWorkspace({
       setConversations((current) => [created, ...current.filter((item) => item.id !== created.id)]);
       setListState("ready");
       selectConversation(created.id);
-      setActiveRead({
+      clearHistory();
+      const read = {
         conversation: created,
         activeTurn: null,
         recovery: null,
-      });
-      setMessages([]);
-      setMessagesNextCursor(null);
-      setLoadingMoreMessages(false);
+      };
+      activeReadRef.current = read;
+      setActiveRead(read);
       requestAnimationFrame(() => composerRef.current?.focus());
     } catch (error) {
       if (requestId !== openRequestIdRef.current) return;
@@ -535,7 +608,7 @@ export function ChatWorkspace({
         onUnauthenticated();
         return;
       }
-      if (kind === "conflict") {
+      if (kind === "creation-conflict") {
         pendingCreateKeyRef.current = null;
       }
       setActionFailure("Could not start a new conversation. Try again.");
@@ -632,12 +705,6 @@ export function ChatWorkspace({
       };
 
       const sent = await client.send(targetId, { text: unsentMessage, policy }, sendKey);
-      // A newer retry can adopt the retained key while this request is in flight;
-      // only the operation that still owns it may clear it.
-      if (pendingSendKeyRef.current?.key === sendKey) {
-        pendingSendKeyRef.current = null;
-      }
-
       if (
         watchId !== openRequestIdRef.current ||
         !enabledRef.current ||
@@ -646,32 +713,25 @@ export function ChatWorkspace({
         return;
       }
 
+      // Session pauses retain this identity until a current retry confirms acceptance.
+      if (pendingSendKeyRef.current?.key === sendKey) pendingSendKeyRef.current = null;
+
       setUnsentMessage("");
-      setActiveRead({
+      const read = {
         conversation: sent.conversation,
         activeTurn: sent.activeTurn,
         recovery: sent.recovery,
-      });
+      };
+      activeReadRef.current = read;
+      setActiveRead(read);
       setConversations((current) =>
         current.map((item) => (item.id === sent.conversation.id ? sent.conversation : item)),
       );
-      setMessages((current) => {
-        const hasMessage = current.some((item) => item.id === sent.message.id);
-        return hasMessage ? current : [...current, sent.message];
-      });
+      messagesRef.current = mergeConversationMessages(messagesRef.current, [sent.message]);
+      setMessages(messagesRef.current);
 
-      const historyResult = await fetchLatestHistory(targetId);
-      if (
-        watchId !== openRequestIdRef.current ||
-        !enabledRef.current ||
-        deletedIdsRef.current.has(targetId)
-      ) {
-        return;
-      }
-      // The store pages forward from the oldest message, so catching up to the newest
-      // page keeps the accepted message and any later answer in view.
-      setMessages((current) => mergeConversationMessages(current, historyResult.messages));
-      setMessagesNextCursor(historyResult.nextCursor);
+      // Acceptance is final even when the follow-up history request fails.
+      await refreshHistoryAfterAction(targetId, watchId);
     } catch (error) {
       if (watchId !== openRequestIdRef.current) return;
       const kind = classifyFailure(error);
@@ -679,7 +739,8 @@ export function ChatWorkspace({
         onUnauthenticated();
         return;
       }
-      if (kind === "conflict") {
+      if (kind === "creation-conflict") {
+        pendingCreateKeyRef.current = null;
         pendingSendKeyRef.current = null;
       }
       setActionFailure(
@@ -689,6 +750,31 @@ export function ChatWorkspace({
       if (watchId === openRequestIdRef.current) {
         setSending(false);
       }
+    }
+  }
+
+  async function refreshHistoryAfterAction(id: string, requestId: number) {
+    const actionGeneration = actionGenerationRef.current;
+    const stillCurrent = () =>
+      requestId === openRequestIdRef.current &&
+      actionGeneration === actionGenerationRef.current &&
+      enabledRef.current &&
+      !deletedIdsRef.current.has(id);
+    try {
+      const result = await fetchLatestHistory(id);
+      if (!stillCurrent()) return;
+      commitHistory(result);
+      setHistoryRefreshPending(false);
+    } catch (error) {
+      if (!stillCurrent()) return;
+      if (classifyFailure(error) === "unauthenticated") {
+        onUnauthenticated();
+        return;
+      }
+      setHistoryFailure(
+        "Your action was accepted, but message history could not be refreshed. Retrying history does not send another message.",
+      );
+      setHistoryRefreshPending(true);
     }
   }
 
@@ -716,19 +802,11 @@ export function ChatWorkspace({
         return;
       }
       setActiveRead(updated);
+      activeReadRef.current = updated;
       setConversations((current) =>
         current.map((item) => (item.id === updated.conversation.id ? updated.conversation : item)),
       );
-      const historyResult = await fetchLatestHistory(targetId);
-      if (
-        watchId !== openRequestIdRef.current ||
-        !enabledRef.current ||
-        deletedIdsRef.current.has(targetId)
-      ) {
-        return;
-      }
-      setMessages((current) => mergeConversationMessages(current, historyResult.messages));
-      setMessagesNextCursor(historyResult.nextCursor);
+      await refreshHistoryAfterAction(targetId, watchId);
     } catch (error) {
       if (watchId !== openRequestIdRef.current) return;
       if (classifyFailure(error) === "unauthenticated") {
@@ -749,6 +827,7 @@ export function ChatWorkspace({
 
   async function performDelete(id: string) {
     if (!enabledRef.current || deletingId !== null) return;
+    const requestId = ++deleteRequestIdRef.current;
     setConfirmDeleteId(null);
     setDeletingId(id);
     setDeleteFailure(null);
@@ -757,7 +836,7 @@ export function ChatWorkspace({
     try {
       await client.delete(id);
     } catch (error) {
-      if (!enabledRef.current) return;
+      if (!enabledRef.current || requestId !== deleteRequestIdRef.current) return;
       const kind = classifyFailure(error);
       if (kind === "unauthenticated") {
         setDeletingId(null);
@@ -774,7 +853,7 @@ export function ChatWorkspace({
       }
     }
 
-    if (!enabledRef.current) return;
+    if (!enabledRef.current || requestId !== deleteRequestIdRef.current) return;
     deletedIdsRef.current.add(id);
     locallyCreatedIdsRef.current.delete(id);
     setDeletingId(null);
@@ -783,13 +862,9 @@ export function ChatWorkspace({
     setOpenFailure((current) => (current?.id === id ? null : current));
 
     if (activeConversationIdRef.current === id) {
-      openRequestIdRef.current += 1;
-      setOpeningId(null);
+      invalidateActive();
       selectConversation(null);
-      setActiveRead(null);
-      setMessages([]);
-      setMessagesNextCursor(null);
-      setLoadingMoreMessages(false);
+      clearHistory();
       setUnsentMessage("");
       pendingSendKeyRef.current = null;
       setActionFailure(null);
@@ -875,6 +950,7 @@ export function ChatWorkspace({
                     [source.noteId]: noteTitle,
                   }));
                 }
+                onPresentationChange("sidebar");
                 onOpenSource(createCitationSourceTarget(citation));
               }}
             >
@@ -900,7 +976,9 @@ export function ChatWorkspace({
       data-chat-presentation={presentation}
     >
       <div className="chat-workspace-header">
-        <h2>Saved conversations</h2>
+        <h2 ref={chatHeadingRef} tabIndex={-1}>
+          Saved conversations
+        </h2>
         <div className="chat-workspace-actions">
           <Button
             ref={newConversationRef}
@@ -947,7 +1025,14 @@ export function ChatWorkspace({
       </div>
 
       <div className="chat-workspace-body">
-        <div className="chat-history-column" aria-live="polite">
+        <div className="chat-history-column">
+          <p className="sr-only" aria-live="polite" aria-atomic="true">
+            {listState === "loading"
+              ? "Loading saved conversations."
+              : listState === "ready"
+                ? `${conversations.length} saved conversations loaded.`
+                : "Saved conversations could not be loaded."}
+          </p>
           {listState === "loading" ? (
             <p role="note" className="chat-list-status">
               Loading saved conversations...
@@ -997,7 +1082,10 @@ export function ChatWorkspace({
                         disabled={controlsBusy}
                         aria-label={`Delete ${label}`}
                         className="chat-conversation-delete text-destructive"
-                        onClick={() => setConfirmDeleteId(item.id)}
+                        onClick={(event) => {
+                          deleteTriggerRef.current = event.currentTarget;
+                          setConfirmDeleteId(item.id);
+                        }}
                       >
                         Delete
                       </Button>
@@ -1026,7 +1114,14 @@ export function ChatWorkspace({
           )}
         </div>
 
-        <div className="chat-thread-column" aria-live="polite">
+        <div className="chat-thread-column">
+          <p className="sr-only" aria-live="polite" aria-atomic="true">
+            {openingId
+              ? "Opening conversation."
+              : activeRead
+                ? `${messages.length} messages loaded. ${activeRead.activeTurn ? "Answer in progress." : "History updated."}`
+                : "No conversation selected."}
+          </p>
           {openingId ? (
             <p role="note" className="chat-thread-status">
               Opening conversation...
@@ -1068,7 +1163,10 @@ export function ChatWorkspace({
                     variant="ghost"
                     className="text-destructive"
                     disabled={controlsBusy}
-                    onClick={() => setConfirmDeleteId(activeRead.conversation.id)}
+                    onClick={(event) => {
+                      deleteTriggerRef.current = event.currentTarget;
+                      setConfirmDeleteId(activeRead.conversation.id);
+                    }}
                   >
                     Delete conversation
                   </Button>
@@ -1216,6 +1314,24 @@ export function ChatWorkspace({
             </p>
           ) : null}
 
+          {historyFailure ? (
+            <div className="note-search-feedback">
+              <p role="alert" className="note-search-error">
+                {historyFailure}
+              </p>
+              <Button
+                type="button"
+                variant="outline"
+                disabled={controlsBusy}
+                onClick={() => {
+                  if (activeConversationId) void refreshActiveConversation(activeConversationId);
+                }}
+              >
+                Retry loading messages
+              </Button>
+            </div>
+          ) : null}
+
           <form className="chat-composer-form" onSubmit={handleFormSubmit}>
             <div className="chat-composer-field">
               <Label htmlFor={composerId}>Message</Label>
@@ -1290,7 +1406,13 @@ export function ChatWorkspace({
         <AlertDialogContent
           className="notes-dialog"
           initialFocus={deleteCancelRef}
-          finalFocus={newConversationRef}
+          finalFocus={() => {
+            const trigger = deleteTriggerRef.current;
+            if (trigger?.isConnected && !trigger.disabled) return trigger;
+            return newConversationRef.current && !newConversationRef.current.disabled
+              ? newConversationRef.current
+              : chatHeadingRef.current;
+          }}
         >
           <AlertDialogHeader>
             <AlertDialogTitle>Delete conversation?</AlertDialogTitle>

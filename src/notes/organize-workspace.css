@@ -335,12 +335,31 @@
   }
   .chat-workspace[data-chat-presentation="fullscreen"] {
     grid-column: 1 / -1;
+    grid-row: 1;
     border-top: 1px solid var(--border);
   }
   .chat-workspace[data-chat-presentation="fullscreen"] .chat-workspace-body {
     grid-template-columns: minmax(14rem, 18rem) minmax(0, 1fr);
     column-gap: 1.5rem;
   }
+}
+.notes-body:has(> .chat-workspace[data-chat-presentation="fullscreen"]) > .workspace-sidebar,
+.notes-body:has(> .chat-workspace[data-chat-presentation="fullscreen"]) > .workspace-content {
+  display: none;
+}
+.chat-workspace[data-chat-presentation="fullscreen"] {
+  grid-column: 1 / -1;
+  grid-row: 1;
+  min-height: calc(100dvh - 8rem);
+  align-content: start;
+}
+.chat-active-card [data-slot="card-header"] {
+  grid-template-columns: minmax(0, 1fr);
+}
+.chat-active-card [data-slot="card-action"] {
+  grid-column: 1;
+  grid-row: auto;
+  justify-self: start;
 }
 @media (min-width: 1024px) {
   .workspace-content:has(.note-detail):has(.ai-draft-panel, .organize-progress) {

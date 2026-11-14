@@ -85,8 +85,9 @@ describe("conversation client and presentation helpers", () => {
         );
       }
       if (
-        url === `/api/conversations/${conversationId}/stop` ||
-        url === `/api/conversations/${conversationId}/resume`
+        (url === `/api/conversations/${conversationId}/stop` ||
+          url === `/api/conversations/${conversationId}/resume`) &&
+        init?.method === "POST"
       ) {
         return new Response(
           JSON.stringify({

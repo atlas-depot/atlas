@@ -894,20 +894,22 @@ export function NotesWorkspace({
             />
           )}
         </div>
-        {!example && conversations && (loadState === "ready" || draft !== null) && (
-          <ChatWorkspace
-            key={searchResetToken}
-            client={conversations}
-            notes={notes}
-            enabled={requestsEnabled && !blocked}
-            canOpenSource={!busy}
-            activeSourceTarget={unavailableSourceTarget ?? activeSourceTarget}
-            presentation={chatPresentation}
-            onPresentationChange={setChatPresentation}
-            onOpenSource={requestOpenSource}
-            onUnauthenticated={handleSearchUnauthenticated}
-          />
-        )}
+        {!example &&
+          conversations &&
+          (loadState === "ready" || loadState === "unauthenticated" || draft !== null) && (
+            <ChatWorkspace
+              cacheResetToken={searchResetToken}
+              client={conversations}
+              notes={notes}
+              enabled={requestsEnabled && !writeBlocked}
+              canOpenSource={!busy}
+              activeSourceTarget={unavailableSourceTarget ?? activeSourceTarget}
+              presentation={chatPresentation}
+              onPresentationChange={setChatPresentation}
+              onOpenSource={requestOpenSource}
+              onUnauthenticated={handleSearchUnauthenticated}
+            />
+          )}
       </div>
       <AlertDialog
         open={pending !== null}
