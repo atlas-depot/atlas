@@ -23,6 +23,7 @@ export default defineConfig({
       name: "chromium",
       testIgnore: [
         "**/notes-production.spec.ts",
+        "**/conversations.spec.ts",
         "**/notes-api.spec.ts",
         "**/editor-controls.spec.ts",
         "**/code-paste.spec.ts",
@@ -35,6 +36,7 @@ export default defineConfig({
       name: "production",
       testMatch: [
         "**/notes-production.spec.ts",
+        "**/conversations.spec.ts",
         "**/organize-workspace.spec.ts",
         "**/editor-controls.spec.ts",
         "**/code-paste.spec.ts",

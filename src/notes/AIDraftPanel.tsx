@@ -398,7 +398,7 @@ export function AIDraftPanel({
         value={content.title}
         maxLength={256}
         disabled={editingDisabled}
-        onChange={(event) => edit({ ...content, title: event.target.value })}
+        onChange={(event) => edit({ ...current.current, title: event.target.value })}
       />
       <Suspense fallback={<p>Opening draft editor...</p>}>
         <Editor
@@ -406,7 +406,7 @@ export function AIDraftPanel({
           key={editorKey}
           initialContent={content.content}
           disabled={editingDisabled}
-          onChange={(value) => edit({ ...content, content: value })}
+          onChange={(value) => edit({ ...current.current, content: value })}
           onModeChange={setMode}
           onValidityChange={reportEditorValidity}
         />

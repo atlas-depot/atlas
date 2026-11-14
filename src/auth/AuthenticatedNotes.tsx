@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { NotesWorkspace } from "@/notes/NotesWorkspace";
 import type { NotesStore } from "@/notes/notes-store";
 import { createNoteSearchClient, type NoteSearchClient } from "@/notes/note-search-store";
+import { createConversationClient, type ConversationClient } from "@/notes/conversation-store";
 import { createSessionClient } from "./session";
 import { SignInLink } from "./SignInLink";
 import { createOrganizeClient, type OrganizeClient } from "@/notes/organize-store";
@@ -11,6 +12,7 @@ import { createOrganizeClient, type OrganizeClient } from "@/notes/organize-stor
 const sessionClient = createSessionClient();
 const organizeClient = createOrganizeClient();
 const noteSearchClient = createNoteSearchClient();
+const conversationClient = createConversationClient();
 
 type SessionState =
   | { kind: "loading" }
@@ -110,6 +112,47 @@ export function AuthenticatedNotes({ store }: { store: NotesStore }) {
       search: async (query, limit) => {
         verified();
         return noteSearchClient.search(query, limit);
+      },
+    };
+  }, [accountId]);
+
+  const conversations = useMemo<ConversationClient>(() => {
+    const verified = () => {
+      if (accountId === null || verifiedUserId.current !== accountId)
+        throw new Error("Confirm your session before requesting conversations.");
+    };
+    return {
+      list: async (...args) => {
+        verified();
+        return conversationClient.list(...args);
+      },
+      create: async (...args) => {
+        verified();
+        return conversationClient.create(...args);
+      },
+      read: async (...args) => {
+        verified();
+        return conversationClient.read(...args);
+      },
+      messages: async (...args) => {
+        verified();
+        return conversationClient.messages(...args);
+      },
+      delete: async (...args) => {
+        verified();
+        return conversationClient.delete(...args);
+      },
+      send: async (...args) => {
+        verified();
+        return conversationClient.send(...args);
+      },
+      stop: async (...args) => {
+        verified();
+        return conversationClient.stop(...args);
+      },
+      resume: async (...args) => {
+        verified();
+        return conversationClient.resume(...args);
       },
     };
   }, [accountId]);
@@ -225,6 +268,7 @@ export function AuthenticatedNotes({ store }: { store: NotesStore }) {
         store={guardedStore}
         organizer={organizer}
         search={search}
+        conversations={conversations}
         requestsEnabled={sessionCheck === "verified"}
       />
     </div>

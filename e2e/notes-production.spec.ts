@@ -1,6 +1,7 @@
 import { expectEditorContent, paragraphDocument, serveNotes, toListRow } from "./notes-editor.ts";
 import { readFile, readdir } from "node:fs/promises";
 import { createNoteSchema, updateNoteSchema, type Note, type CreateNote } from "../shared/notes.ts";
+import { formatConversationLabel } from "../src/notes/conversation-store.ts";
 import { expect, test } from "@playwright/test";
 
 const browserUser = {
@@ -23,6 +24,9 @@ const serverNote = {
 test.beforeEach(async ({ page }) => {
   await page.route("**/api/organize-work", (route) =>
     route.fulfill({ json: { runs: [], drafts: [] } }),
+  );
+  await page.route("**/api/conversations*", (route) =>
+    route.fulfill({ json: { conversations: [], nextCursor: null } }),
   );
   await page.route("**/api/auth/session", (route) =>
     route.fulfill({ json: { user: browserUser } }),
@@ -948,13 +952,15 @@ test.describe("recovery and auth", () => {
       }
       await expect.poll(() => stalled).toBe(true);
       await page.clock.fastForward(30_001);
-      await expect(page.getByRole("alert")).toContainText(
+      const expectedAlert =
         operation === "list"
           ? "Could not load"
           : operation === "read"
             ? "Could not open"
-            : "Save failed",
-      );
+            : "Save failed";
+      // The chat workspace publishes its own alert, and the forwarded clock can time
+      // out its pending list request, so match the note alert by its message.
+      await expect(page.getByRole("alert").filter({ hasText: expectedAlert })).toBeVisible();
       if (operation === "list")
         await expect(page.getByRole("button", { name: "Retry loading" })).toBeEnabled();
       else await expect(page.getByRole("button", { name: "New note", exact: true })).toBeEnabled();
@@ -1758,6 +1764,832 @@ test.describe("search and source opening", () => {
     ).toBeVisible();
     await expect(
       searchRegion.getByText("Stale older query passage that must never replace newer results."),
+    ).toHaveCount(0);
+  });
+});
+
+test.describe("saved conversations and chat history", () => {
+  const convOneId = "ca100001-1234-4000-8000-000000000001";
+  const convTwoId = "ca100001-1234-4000-8000-000000000002";
+  const convOlderId = "ca100001-1234-4000-8000-000000000003";
+  const deletedNoteId = "fa100001-1234-4000-8000-000000000099";
+
+  /** Mirrors the label ChatWorkspace renders, so list controls are selected by role name. */
+  function conversationLabel(id: string, createdAt: string) {
+    return formatConversationLabel({ id, queuePaused: false, createdAt, updatedAt: createdAt });
+  }
+
+  const convOneLabel = conversationLabel(convOneId, "2026-10-28T10:00:00.000Z");
+  const convTwoLabel = conversationLabel(convTwoId, "2026-10-28T09:00:00.000Z");
+  const convOlderLabel = conversationLabel(convOlderId, "2026-10-27T08:00:00.000Z");
+
+  /** Anchors the label so the row's "Delete ..." control cannot also match. */
+  function conversationName(label: string) {
+    return new RegExp(`^${label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`);
+  }
+
+  test("loads bounded conversation list, reopens persisted history, cites sources, and preserves deleted-source, incomplete-answer, and paused-queue states", async ({
+    page,
+  }) => {
+    const richNote: Note = {
+      id: firstId,
+      title: "Architecture Runbook",
+      content: {
+        format: "blocknote",
+        schemaVersion: 1,
+        blocks: [
+          {
+            id: "heading-1",
+            type: "heading",
+            props: {
+              backgroundColor: "default",
+              textColor: "default",
+              textAlignment: "left",
+              level: 2,
+            },
+            content: [{ type: "text", text: "Storage Guarantees", styles: {} }],
+            children: [],
+          },
+          {
+            id: "cited-block",
+            type: "paragraph",
+            props: {
+              backgroundColor: "default",
+              textColor: "default",
+              textAlignment: "left",
+            },
+            content: [
+              {
+                type: "text",
+                text: "All conversation turns persist in PostgreSQL with revision-bound citations.",
+                styles: {},
+              },
+            ],
+            children: [],
+          },
+        ],
+      },
+      createdAt: "2026-10-28T09:00:00.000Z",
+      updatedAt: "2026-10-28T09:00:00.000Z",
+    };
+
+    await serveNotes(page, [[richNote, '"1"']]);
+
+    let listMode: "fail" | "ready" = "fail";
+    let resumeCalls = 0;
+    let queuePaused = true;
+
+    await page.route(
+      (url) => url.pathname.startsWith("/api/conversations"),
+      async (route) => {
+        const url = new URL(route.request().url());
+        if (url.pathname === "/api/conversations" && route.request().method() === "GET") {
+          expect(url.searchParams.get("limit")).toBe("50");
+          if (listMode === "fail") {
+            return route.fulfill({
+              status: 503,
+              json: { error: { code: "UNAVAILABLE", message: "Database unavailable" } },
+            });
+          }
+          if (url.searchParams.get("cursor") === "cursor_page_2") {
+            return route.fulfill({
+              json: {
+                conversations: [
+                  {
+                    id: convOlderId,
+                    queuePaused: false,
+                    createdAt: "2026-10-27T08:00:00.000Z",
+                    updatedAt: "2026-10-27T08:05:00.000Z",
+                  },
+                ],
+                nextCursor: null,
+              },
+            });
+          }
+          return route.fulfill({
+            json: {
+              conversations: [
+                {
+                  id: convOneId,
+                  queuePaused,
+                  createdAt: "2026-10-28T10:00:00.000Z",
+                  updatedAt: "2026-10-28T10:05:00.000Z",
+                },
+              ],
+              nextCursor: "cursor_page_2",
+            },
+          });
+        }
+
+        if (
+          url.pathname === `/api/conversations/${convOneId}` &&
+          route.request().method() === "GET"
+        ) {
+          return route.fulfill({
+            json: {
+              conversation: {
+                id: convOneId,
+                queuePaused,
+                createdAt: "2026-10-28T10:00:00.000Z",
+                updatedAt: "2026-10-28T10:05:00.000Z",
+              },
+              activeTurn: null,
+              recovery: queuePaused
+                ? {
+                    turnId: "ca200001-1234-4000-8000-000000000004",
+                    reason: "history_unavailable",
+                  }
+                : null,
+            },
+          });
+        }
+
+        if (
+          url.pathname === `/api/conversations/${convOneId}/messages` &&
+          route.request().method() === "GET"
+        ) {
+          return route.fulfill({
+            json: {
+              messages: [
+                {
+                  id: "ca200001-1234-4000-8000-000000000001",
+                  sequence: 1,
+                  role: "user",
+                  text: "How are conversation citations stored?",
+                  deliveryPolicy: "queue",
+                  createdAt: "2026-10-28T10:00:00.000Z",
+                },
+                {
+                  id: "ca200001-1234-4000-8000-000000000002",
+                  sequence: 2,
+                  role: "assistant",
+                  turnId: "ca300001-1234-4000-8000-000000000001",
+                  text: "Turns persist in PostgreSQL with revision-bound citations.",
+                  status: "completed",
+                  reason: null,
+                  inputIds: ["ca200001-1234-4000-8000-000000000001"],
+                  citations: [
+                    {
+                      source: {
+                        kind: "block",
+                        noteId: firstId,
+                        version: '"1"',
+                        blockId: "cited-block",
+                        headingPath: ["Storage Guarantees"],
+                      },
+                      excerpt:
+                        "All conversation turns persist in PostgreSQL with revision-bound citations.",
+                      stale: false,
+                      deleted: false,
+                    },
+                    {
+                      source: {
+                        kind: "block",
+                        noteId: deletedNoteId,
+                        version: '"1"',
+                        blockId: "deleted-block",
+                        headingPath: ["Legacy Appendix"],
+                      },
+                      excerpt: null,
+                      stale: false,
+                      deleted: true,
+                    },
+                  ],
+                  createdAt: "2026-10-28T10:01:00.000Z",
+                },
+                {
+                  id: "ca200001-1234-4000-8000-000000000003",
+                  sequence: 3,
+                  role: "assistant",
+                  turnId: "ca300001-1234-4000-8000-000000000002",
+                  text: "Partial cancelled draft that was stopped early.",
+                  status: "incomplete",
+                  reason: "cancelled",
+                  inputIds: ["ca200001-1234-4000-8000-000000000001"],
+                  citations: [],
+                  createdAt: "2026-10-28T10:02:00.000Z",
+                },
+                {
+                  id: "ca200001-1234-4000-8000-000000000004",
+                  sequence: 4,
+                  role: "assistant",
+                  turnId: "ca300001-1234-4000-8000-000000000003",
+                  text: "",
+                  status: "incomplete",
+                  reason: "failed",
+                  inputIds: ["ca200001-1234-4000-8000-000000000001"],
+                  citations: [],
+                  createdAt: "2026-10-28T10:03:00.000Z",
+                },
+                {
+                  id: "ca200001-1234-4000-8000-000000000005",
+                  sequence: 5,
+                  role: "user",
+                  text: "Pending follow-up question while queue is paused",
+                  deliveryPolicy: "queue",
+                  createdAt: "2026-10-28T10:04:00.000Z",
+                },
+              ],
+              nextCursor: null,
+            },
+          });
+        }
+
+        if (
+          url.pathname === `/api/conversations/${convOneId}/resume` &&
+          route.request().method() === "POST"
+        ) {
+          resumeCalls += 1;
+          queuePaused = false;
+          return route.fulfill({
+            json: {
+              conversation: {
+                id: convOneId,
+                queuePaused: false,
+                createdAt: "2026-10-28T10:00:00.000Z",
+                updatedAt: "2026-10-28T10:06:00.000Z",
+              },
+              activeTurn: null,
+              recovery: null,
+            },
+          });
+        }
+
+        return route.fallback();
+      },
+    );
+
+    await page.goto("/");
+    const chatRegion = page.getByRole("region", { name: "Chat workspace" });
+    await expect(chatRegion.getByRole("alert")).toContainText(
+      "Could not load saved conversations. Check your connection and try again.",
+    );
+
+    listMode = "ready";
+    await chatRegion
+      .getByRole("button", { name: "Retry loading conversations", exact: true })
+      .click();
+    await expect(
+      chatRegion.getByRole("button", { name: conversationName(convOneLabel) }),
+    ).toBeVisible();
+
+    await chatRegion.getByRole("button", { name: "Load older conversations", exact: true }).click();
+    await expect(
+      chatRegion.getByRole("button", { name: conversationName(convOlderLabel) }),
+    ).toBeVisible();
+
+    await chatRegion.getByRole("button", { name: conversationName(convOneLabel) }).click();
+    await expect(
+      chatRegion.getByText("Turns persist in PostgreSQL with revision-bound citations.", {
+        exact: true,
+      }),
+    ).toBeVisible();
+    expect(resumeCalls).toBe(0);
+
+    await expect(chatRegion.getByText("Supported answer")).toBeVisible();
+    await expect(chatRegion.getByText("Incomplete (cancelled)")).toBeVisible();
+    await expect(chatRegion.getByText("Incomplete (failed)")).toBeVisible();
+    await expect(chatRegion.getByText("Deleted source")).toBeVisible();
+    await expect(
+      chatRegion.getByText("Source note was deleted; stored excerpt was removed."),
+    ).toBeVisible();
+
+    // Toggle full-screen and sidebar chat without losing conversation state or unsent input.
+    const messageInput = chatRegion.getByRole("textbox", { name: "Message", exact: true });
+    await messageInput.fill("Draft question kept across layout toggle");
+    await chatRegion.getByRole("button", { name: "Full screen chat", exact: true }).click();
+    await expect(chatRegion).toHaveAttribute("data-chat-presentation", "fullscreen");
+    await expect(messageInput).toHaveValue("Draft question kept across layout toggle");
+    await chatRegion.getByRole("button", { name: "Sidebar chat", exact: true }).click();
+    await expect(chatRegion).toHaveAttribute("data-chat-presentation", "sidebar");
+    await expect(messageInput).toHaveValue("Draft question kept across layout toggle");
+    await messageInput.fill("");
+
+    // Open live citation source and verify cited block is highlighted and visible.
+    const openSourceButtons = chatRegion.getByRole("button", { name: "Open source", exact: true });
+    await openSourceButtons.first().click();
+    const citedBlock = page.locator('[data-node-type="blockContainer"][data-id="cited-block"]');
+    await expect(citedBlock).toHaveAttribute("data-cited-block", "true");
+    await expect(citedBlock).toBeInViewport();
+
+    // Open deleted citation source and verify deleted source panel is shown.
+    await openSourceButtons.nth(1).click();
+    const openedSource = page.getByRole("region", { name: "Opened source" });
+    await expect(openedSource.getByText("This cited note was deleted")).toBeVisible();
+
+    // Explicit Resume queue action resumes the paused queue.
+    await chatRegion.getByRole("button", { name: "Resume queue", exact: true }).click();
+    expect(resumeCalls).toBe(1);
+    await expect(chatRegion.getByRole("button", { name: "Resume queue", exact: true })).toHaveCount(
+      0,
+    );
+  });
+
+  test("loads the newest page when a running answer completes in a long conversation", async ({
+    page,
+  }) => {
+    await serveNotes(page, [[serverNote]]);
+
+    const history = Array.from({ length: 50 }, (_, index) => ({
+      id: `ca200001-1234-4000-8000-${String(index + 1).padStart(12, "0")}`,
+      sequence: index + 1,
+      role: "user" as const,
+      text: `Question ${index + 1}`,
+      deliveryPolicy: "queue" as const,
+      createdAt: "2026-10-28T10:00:00.000Z",
+    }));
+    const answer = {
+      id: "ca200001-1234-4000-8000-000000000051",
+      sequence: 51,
+      role: "assistant" as const,
+      turnId: "ca300001-1234-4000-8000-000000000051",
+      text: "Final grounded answer.",
+      status: "completed" as const,
+      reason: null,
+      inputIds: [history[0].id],
+      citations: [],
+      createdAt: "2026-10-28T10:06:00.000Z",
+    };
+    let turnRunning = true;
+
+    await page.route(
+      (url) => url.pathname.startsWith("/api/conversations"),
+      async (route) => {
+        const url = new URL(route.request().url());
+        if (url.pathname === "/api/conversations" && route.request().method() === "GET") {
+          return route.fulfill({
+            json: {
+              conversations: [
+                {
+                  id: convOneId,
+                  queuePaused: false,
+                  createdAt: "2026-10-28T10:00:00.000Z",
+                  updatedAt: "2026-10-28T10:05:00.000Z",
+                },
+              ],
+              nextCursor: null,
+            },
+          });
+        }
+        if (
+          url.pathname === `/api/conversations/${convOneId}` &&
+          route.request().method() === "GET"
+        ) {
+          return route.fulfill({
+            json: {
+              conversation: {
+                id: convOneId,
+                queuePaused: false,
+                createdAt: "2026-10-28T10:00:00.000Z",
+                updatedAt: "2026-10-28T10:05:00.000Z",
+              },
+              activeTurn: turnRunning
+                ? {
+                    id: "ca300001-1234-4000-8000-000000000051",
+                    status: "running",
+                    text: "Searching notes and preparing a grounded answer...",
+                    checkpointVersion: 1,
+                    inputIds: [history[0].id],
+                  }
+                : null,
+              recovery: null,
+            },
+          });
+        }
+        if (
+          url.pathname === `/api/conversations/${convOneId}/messages` &&
+          route.request().method() === "GET"
+        ) {
+          const cursor = url.searchParams.get("cursor");
+          if (cursor === "50") {
+            return route.fulfill({
+              json: { messages: turnRunning ? [] : [answer], nextCursor: null },
+            });
+          }
+          return route.fulfill({ json: { messages: history, nextCursor: "50" } });
+        }
+        return route.fallback();
+      },
+    );
+
+    await page.goto("/");
+    const chatRegion = page.getByRole("region", { name: "Chat workspace" });
+    await chatRegion.getByRole("button", { name: conversationName(convOneLabel) }).click();
+    await expect(chatRegion.getByText("Question 50")).toBeVisible();
+    await expect(
+      chatRegion.getByRole("button", { name: "Load more messages", exact: true }),
+    ).toHaveCount(0);
+    await expect(chatRegion.getByText("Final grounded answer.")).toHaveCount(0);
+    await expect(
+      chatRegion.getByRole("button", { name: "Stop answer", exact: true }),
+    ).toBeVisible();
+
+    // The answer is published after the first page, so the terminal refresh has to
+    // page forward past the loaded history before it can display it.
+    turnRunning = false;
+    await expect(chatRegion.getByText("Final grounded answer.")).toBeVisible({ timeout: 10_000 });
+    await expect(chatRegion.getByRole("button", { name: "Stop answer", exact: true })).toHaveCount(
+      0,
+    );
+    await expect(
+      chatRegion.getByRole("button", { name: "Load more messages", exact: true }),
+    ).toHaveCount(0);
+  });
+
+  test("protects unsent messages when switching conversations and prevents stale or missing reads from displaying cached messages", async ({
+    page,
+  }) => {
+    await serveNotes(page, [[serverNote]]);
+
+    let resolveSlowFirstRead: () => void = () => {};
+    let markSlowFirstStarted: () => void = () => {};
+    let slowFirstMode = false;
+    let missingSecondMode = false;
+
+    await page.route(
+      (url) => url.pathname.startsWith("/api/conversations"),
+      async (route) => {
+        const url = new URL(route.request().url());
+        if (url.pathname === "/api/conversations" && route.request().method() === "GET") {
+          return route.fulfill({
+            json: {
+              conversations: [
+                {
+                  id: convOneId,
+                  queuePaused: false,
+                  createdAt: "2026-10-28T10:00:00.000Z",
+                  updatedAt: "2026-10-28T10:05:00.000Z",
+                },
+                {
+                  id: convTwoId,
+                  queuePaused: false,
+                  createdAt: "2026-10-28T09:00:00.000Z",
+                  updatedAt: "2026-10-28T09:05:00.000Z",
+                },
+              ],
+              nextCursor: null,
+            },
+          });
+        }
+
+        if (
+          url.pathname === `/api/conversations/${convOneId}` &&
+          route.request().method() === "GET"
+        ) {
+          if (slowFirstMode) {
+            const gate = new Promise<void>((resolve) => {
+              resolveSlowFirstRead = resolve;
+            });
+            markSlowFirstStarted();
+            await gate;
+          }
+          return route.fulfill({
+            json: {
+              conversation: {
+                id: convOneId,
+                queuePaused: false,
+                createdAt: "2026-10-28T10:00:00.000Z",
+                updatedAt: "2026-10-28T10:05:00.000Z",
+              },
+              activeTurn: null,
+              recovery: null,
+            },
+          });
+        }
+
+        if (
+          url.pathname === `/api/conversations/${convOneId}/messages` &&
+          route.request().method() === "GET"
+        ) {
+          return route.fulfill({
+            json: {
+              messages: [
+                {
+                  id: "ca200001-1234-4000-8000-000000000011",
+                  sequence: 1,
+                  role: "user",
+                  text: "Unique message from First thread",
+                  deliveryPolicy: "queue",
+                  createdAt: "2026-10-28T10:00:00.000Z",
+                },
+              ],
+              nextCursor: null,
+            },
+          });
+        }
+
+        if (
+          url.pathname === `/api/conversations/${convTwoId}` &&
+          route.request().method() === "GET"
+        ) {
+          if (missingSecondMode) {
+            return route.fulfill({
+              status: 404,
+              json: { error: { code: "NOT_FOUND", message: "Conversation not found" } },
+            });
+          }
+          return route.fulfill({
+            json: {
+              conversation: {
+                id: convTwoId,
+                queuePaused: false,
+                createdAt: "2026-10-28T09:00:00.000Z",
+                updatedAt: "2026-10-28T09:05:00.000Z",
+              },
+              activeTurn: null,
+              recovery: null,
+            },
+          });
+        }
+
+        if (
+          url.pathname === `/api/conversations/${convTwoId}/messages` &&
+          route.request().method() === "GET"
+        ) {
+          if (missingSecondMode) {
+            return route.fulfill({
+              status: 404,
+              json: { error: { code: "NOT_FOUND", message: "Conversation not found" } },
+            });
+          }
+          return route.fulfill({
+            json: {
+              messages: [
+                {
+                  id: "ca200001-1234-4000-8000-000000000022",
+                  sequence: 1,
+                  role: "user",
+                  text: "Unique message from Second thread",
+                  deliveryPolicy: "queue",
+                  createdAt: "2026-10-28T09:00:00.000Z",
+                },
+              ],
+              nextCursor: null,
+            },
+          });
+        }
+
+        return route.fallback();
+      },
+    );
+
+    await page.goto("/");
+    const chatRegion = page.getByRole("region", { name: "Chat workspace" });
+    await chatRegion.getByRole("button", { name: conversationName(convOneLabel) }).click();
+    await expect(chatRegion.getByText("Unique message from First thread")).toBeVisible();
+
+    // Type an unsent message and attempt to switch to Second thread.
+    const messageInput = chatRegion.getByRole("textbox", { name: "Message", exact: true });
+    await messageInput.fill("Unsent draft for First thread");
+    await chatRegion.getByRole("button", { name: conversationName(convTwoLabel) }).click();
+
+    const discardDialog = page.getByRole("alertdialog", { name: "Discard unsent message?" });
+    await expect(discardDialog).toBeVisible();
+    await discardDialog.getByRole("button", { name: "Keep message", exact: true }).click();
+    await expect(messageInput).toHaveValue("Unsent draft for First thread");
+    await expect(chatRegion.getByText("Unique message from First thread")).toBeVisible();
+
+    // Explicitly discard unsent message to switch to Second thread.
+    await chatRegion.getByRole("button", { name: conversationName(convTwoLabel) }).click();
+    await discardDialog.getByRole("button", { name: "Discard message", exact: true }).click();
+    await expect(messageInput).toHaveValue("");
+    await expect(chatRegion.getByText("Unique message from Second thread")).toBeVisible();
+    await expect(chatRegion.getByText("Unique message from First thread")).toHaveCount(0);
+
+    // A slow read keeps the workspace busy: no other conversation can be selected
+    // while it is pending, so its late response cannot replace a newer selection.
+    slowFirstMode = true;
+    const slowFirstStarted = new Promise<void>((resolve) => {
+      markSlowFirstStarted = resolve;
+    });
+    await chatRegion.getByRole("button", { name: conversationName(convOneLabel) }).click();
+    await slowFirstStarted;
+    await expect(
+      chatRegion.getByRole("button", { name: conversationName(convTwoLabel) }),
+    ).toBeDisabled();
+    resolveSlowFirstRead();
+    await expect(chatRegion.getByText("Unique message from First thread")).toBeVisible();
+    slowFirstMode = false;
+
+    // Now make Second thread missing (404) and click it: First thread's messages must clear immediately.
+    missingSecondMode = true;
+    await chatRegion.getByRole("button", { name: conversationName(convTwoLabel) }).click();
+    await expect(chatRegion.getByRole("alert")).toContainText(
+      "This conversation is no longer available.",
+    );
+    await expect(chatRegion.getByText("Unique message from First thread")).toHaveCount(0);
+    await expect(
+      chatRegion.getByRole("button", { name: conversationName(convTwoLabel) }),
+    ).toHaveCount(0);
+  });
+
+  test("confirms conversation deletion, retains failed deletions for retry, fences active conversation deletion, and clears private history on account switch", async ({
+    page,
+  }) => {
+    await serveNotes(page, [[serverNote]]);
+
+    let currentSessionUser = browserUser;
+    let failDeleteOnce = true;
+    let deletedIds = new Set<string>();
+    let holdAliceDetail = false;
+    let releaseAliceDetail: () => void = () => {};
+    let markAliceDetailStarted: () => void = () => {};
+
+    await page.route("**/api/auth/session", (route) =>
+      route.fulfill({ json: { user: currentSessionUser } }),
+    );
+
+    await page.route(
+      (url) => url.pathname.startsWith("/api/conversations"),
+      async (route) => {
+        const url = new URL(route.request().url());
+        if (url.pathname === "/api/conversations" && route.request().method() === "GET") {
+          if (currentSessionUser.id !== "user_alice") {
+            return route.fulfill({ json: { conversations: [], nextCursor: null } });
+          }
+          const all = [
+            {
+              id: convOneId,
+              queuePaused: false,
+              createdAt: "2026-10-28T10:00:00.000Z",
+              updatedAt: "2026-10-28T10:05:00.000Z",
+            },
+            {
+              id: convTwoId,
+              queuePaused: false,
+              createdAt: "2026-10-28T09:00:00.000Z",
+              updatedAt: "2026-10-28T09:05:00.000Z",
+            },
+          ].filter((item) => !deletedIds.has(item.id));
+          return route.fulfill({ json: { conversations: all, nextCursor: null } });
+        }
+
+        if (
+          url.pathname === `/api/conversations/${convTwoId}` &&
+          route.request().method() === "GET"
+        ) {
+          return route.fulfill({
+            json: {
+              conversation: {
+                id: convTwoId,
+                queuePaused: false,
+                createdAt: "2026-10-28T09:00:00.000Z",
+                updatedAt: "2026-10-28T09:05:00.000Z",
+              },
+              activeTurn: null,
+              recovery: null,
+            },
+          });
+        }
+
+        if (
+          url.pathname === `/api/conversations/${convTwoId}/messages` &&
+          route.request().method() === "GET"
+        ) {
+          return route.fulfill({
+            json: {
+              messages: [
+                {
+                  id: "ca200001-1234-4000-8000-000000000099",
+                  sequence: 1,
+                  role: "user",
+                  text: "Message inside Thread to delete",
+                  deliveryPolicy: "queue",
+                  createdAt: "2026-10-28T09:00:00.000Z",
+                },
+              ],
+              nextCursor: null,
+            },
+          });
+        }
+
+        if (
+          url.pathname === `/api/conversations/${convTwoId}` &&
+          route.request().method() === "DELETE"
+        ) {
+          if (failDeleteOnce) {
+            failDeleteOnce = false;
+            return route.fulfill({
+              status: 503,
+              json: { error: { code: "UNAVAILABLE", message: "Delete failed" } },
+            });
+          }
+          deletedIds.add(convTwoId);
+          return route.fulfill({ status: 204 });
+        }
+
+        if (
+          url.pathname === `/api/conversations/${convOneId}` &&
+          route.request().method() === "GET"
+        ) {
+          if (holdAliceDetail) {
+            holdAliceDetail = false;
+            const gate = new Promise<void>((resolve) => {
+              releaseAliceDetail = resolve;
+            });
+            markAliceDetailStarted();
+            await gate;
+          }
+          return route.fulfill({
+            json: {
+              conversation: {
+                id: convOneId,
+                queuePaused: false,
+                createdAt: "2026-10-28T10:00:00.000Z",
+                updatedAt: "2026-10-28T10:05:00.000Z",
+              },
+              activeTurn: null,
+              recovery: null,
+            },
+          });
+        }
+
+        if (
+          url.pathname === `/api/conversations/${convOneId}/messages` &&
+          route.request().method() === "GET"
+        ) {
+          return route.fulfill({
+            json: {
+              messages: [
+                {
+                  id: "ca200001-1234-4000-8000-000000000088",
+                  sequence: 1,
+                  role: "user",
+                  text: "Secret Alice message",
+                  deliveryPolicy: "queue",
+                  createdAt: "2026-10-28T10:00:00.000Z",
+                },
+              ],
+              nextCursor: null,
+            },
+          });
+        }
+
+        return route.fallback();
+      },
+    );
+
+    await page.goto("/");
+    const chatRegion = page.getByRole("region", { name: "Chat workspace" });
+    await chatRegion.getByRole("button", { name: conversationName(convTwoLabel) }).click();
+    await expect(chatRegion.getByText("Message inside Thread to delete")).toBeVisible();
+
+    // Open delete confirmation and cancel first.
+    await chatRegion.getByRole("button", { name: `Delete ${convTwoLabel}` }).click();
+    const deleteDialog = page.getByRole("alertdialog", { name: "Delete conversation?" });
+    await expect(deleteDialog).toBeVisible();
+    await deleteDialog.getByRole("button", { name: "Keep conversation", exact: true }).click();
+    await expect(
+      chatRegion.getByRole("button", { name: conversationName(convTwoLabel) }),
+    ).toBeVisible();
+
+    // Confirm deletion; first attempt fails with 503, retaining the item and exposing Retry delete.
+    await chatRegion.getByRole("button", { name: `Delete ${convTwoLabel}` }).click();
+    await deleteDialog.getByRole("button", { name: "Delete permanently", exact: true }).click();
+    await expect(chatRegion.getByRole("alert")).toContainText(
+      "Could not delete conversation. The conversation was retained so you can retry.",
+    );
+    await expect(
+      chatRegion.getByRole("button", { name: conversationName(convTwoLabel) }),
+    ).toBeVisible();
+    await expect(chatRegion.getByText("Message inside Thread to delete")).toBeVisible();
+
+    // Retry delete succeeds (204) and clears the active conversation view.
+    await chatRegion.getByRole("button", { name: "Retry delete", exact: true }).click();
+    await expect(chatRegion.getByText("Conversation deleted.")).toBeVisible();
+    await expect(
+      chatRegion.getByRole("button", { name: conversationName(convTwoLabel) }),
+    ).toHaveCount(0);
+    await expect(chatRegion.getByText("Message inside Thread to delete")).toHaveCount(0);
+
+    // Start a slow read of Alice's thread, then switch accounts while the read is held.
+    // Wait for the intercepted request so the gate is armed before the account changes.
+    holdAliceDetail = true;
+    const aliceDetailStarted = new Promise<void>((resolve) => {
+      markAliceDetailStarted = resolve;
+    });
+    await chatRegion.getByRole("button", { name: conversationName(convOneLabel) }).click();
+    await aliceDetailStarted;
+    currentSessionUser = {
+      id: "user_bob",
+      email: "bob@example.test",
+      firstName: "Bob",
+      lastName: null,
+    };
+    await page.evaluate("window.dispatchEvent(new Event('focus'))");
+    await expect(page.getByText("Signed in as bob@example.test")).toBeVisible();
+    releaseAliceDetail();
+    await page.evaluate(
+      "new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))",
+    );
+    await expect(
+      chatRegion.getByText(
+        "No saved conversations yet. Start a new conversation to ask about your notes.",
+      ),
+    ).toBeVisible();
+    await expect(chatRegion.getByText("Secret Alice message")).toHaveCount(0);
+    await expect(
+      chatRegion.getByRole("button", { name: conversationName(convOneLabel) }),
     ).toHaveCount(0);
   });
 });
