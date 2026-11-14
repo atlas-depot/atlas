@@ -31,7 +31,9 @@ function copyNoteToComposer(input: HTMLTextAreaElement, event: DragEvent) {
   event.stopPropagation();
   event.preventDefault();
   if (input.disabled) return;
-  const text = event.dataTransfer.getData("text/plain");
+  // BlockNote serializes extra line breaks between selected blocks in text/plain.
+  const text =
+    input.ownerDocument.getSelection()?.toString() || event.dataTransfer.getData("text/plain");
   if (!text) return;
   const caret = input.ownerDocument.caretPositionFromPoint?.(event.clientX, event.clientY);
   input.focus();
