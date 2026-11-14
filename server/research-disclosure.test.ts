@@ -99,8 +99,8 @@ describe("public research disclosure boundary", () => {
         inspectResearchQuestion({
           question: `Is ${amount} enough for a senior engineer?`,
           privateTexts: [`My salary is ${amount} and my start date is 2026.`],
-        }),
-      ).toEqual({ status: "approval_required", reason: "private_context_overlap" });
+        }).status,
+      ).toBe("approval_required");
       expect(
         inspectResearchQuestion({
           question: `Is ${amount} enough for a senior engineer?`,

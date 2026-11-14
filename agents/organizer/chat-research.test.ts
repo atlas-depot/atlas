@@ -402,8 +402,7 @@ await test("truncates a provider snippet without splitting a surrogate pair", as
     new AbortController().signal,
   );
   assert.equal(output.status, "completed");
-  if (output.status === "completed")
-    assert.equal(output.sources[0]?.snippet, "a".repeat(7_999));
+  if (output.status === "completed") assert.equal(output.sources[0]?.snippet, "a".repeat(7_999));
 });
 
 await test("malicious page text remains evidence and is never interpreted as an action", async () => {
