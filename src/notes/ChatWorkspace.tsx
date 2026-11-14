@@ -26,6 +26,7 @@ import { NotebookIcon } from "@phosphor-icons/react/dist/csr/Notebook";
 import { SidebarSimpleIcon } from "@phosphor-icons/react/dist/csr/SidebarSimple";
 import { TrashSimpleIcon } from "@phosphor-icons/react/dist/csr/TrashSimple";
 import { XIcon } from "@phosphor-icons/react/dist/csr/X";
+import { allowNoteCopy, useNoteTextDrop } from "./note-text-drag";
 import "./chat-shell.css";
 import { ArrowUpIcon } from "@phosphor-icons/react/dist/csr/ArrowUp";
 import { FileTextIcon } from "@phosphor-icons/react/dist/csr/FileText";
@@ -95,6 +96,7 @@ export function ChatWorkspace({
   hidden,
   onClose,
   onFocusChat,
+  focusOnOpen,
   onOpenSource,
   onUnauthenticated,
 }: {
@@ -109,6 +111,7 @@ export function ChatWorkspace({
   hidden: boolean;
   onClose: () => void;
   onFocusChat: () => void;
+  focusOnOpen: boolean;
   onPresentationChange: (mode: "sidebar" | "fullscreen") => void;
   onOpenSource: (target: SourceTarget) => void;
   onUnauthenticated: () => void;
@@ -263,6 +266,7 @@ export function ChatWorkspace({
   const pendingCreateKeyRef = useRef<string | null>(null);
 
   const composerRef = useRef<HTMLTextAreaElement>(null);
+  useNoteTextDrop(composerRef);
   const discardCancelRef = useRef<HTMLButtonElement>(null);
   const deleteCancelRef = useRef<HTMLButtonElement>(null);
   const newConversationRef = useRef<HTMLButtonElement>(null);
@@ -271,9 +275,9 @@ export function ChatWorkspace({
   const deleteTriggerRef = useRef<HTMLButtonElement | null>(null);
   const previouslyHidden = useRef(hidden);
   useEffect(() => {
-    if (previouslyHidden.current && !hidden) chatHeadingRef.current?.focus();
+    if (previouslyHidden.current && !hidden && focusOnOpen) chatHeadingRef.current?.focus();
     previouslyHidden.current = hidden;
-  }, [hidden]);
+  }, [hidden, focusOnOpen]);
 
   useEffect(() => {
     // Focus the committed result, after React has mounted and enabled its control.
@@ -1525,6 +1529,7 @@ export function ChatWorkspace({
               ref={composerRef}
               id={composerId}
               className="chat-composer-input"
+              onDragOver={allowNoteCopy}
               rows={1}
               maxLength={100_000}
               placeholder="Message Atlas"

@@ -26,6 +26,7 @@ import { noteContentSchema, type CreateNote, type NoteSummary } from "../../shar
 import { SignInLink } from "@/auth/SignInLink";
 import { MarkdownPreview } from "./MarkdownPreview";
 import { NoteContentView } from "./NoteContentView";
+import { markNoteSelection } from "./note-text-drag";
 import { ChatWorkspace } from "./ChatWorkspace";
 import type { ConversationClient } from "./conversation-store";
 import { NoteSearchWorkspace } from "./NoteSearchWorkspace";
@@ -132,6 +133,17 @@ export function NotesWorkspace({
   function closeChat() {
     setChatOpen(false);
     requestAnimationFrame(() => chatLauncherRef.current?.focus());
+  }
+
+  function preferNotesOnNarrowScreen(event: { target: EventTarget | null }) {
+    if (
+      desktop &&
+      chatVisibility === true &&
+      event.target instanceof Element &&
+      event.target.closest(".workspace-content, .workspace-sidebar, .workspace-header")
+    ) {
+      setChatOpen(null);
+    }
   }
 
   const busyRef = useRef(false);
@@ -619,6 +631,9 @@ export function NotesWorkspace({
   return (
     <main
       className="notes-workspace workspace-shell"
+      onFocusCapture={preferNotesOnNarrowScreen}
+      onPointerDownCapture={preferNotesOnNarrowScreen}
+      onDragStart={markNoteSelection}
       data-chat-view={canShowChat && chatOpen ? presentation : undefined}
     >
       <header className="workspace-header">
@@ -960,6 +975,7 @@ export function NotesWorkspace({
               setChatPresentation(next);
             }}
             onFocusChat={() => setChatOpen(true)}
+            focusOnOpen={chatVisibility === true}
             onOpenSource={(target) => {
               if (!desktop) setChatOpen(false);
               requestOpenSource(target);
