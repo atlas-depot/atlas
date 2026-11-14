@@ -549,7 +549,7 @@ export function createConversationResearchStore(db: Database) {
       requestId: string,
       expectedHash: string,
       expectedContextHash: string,
-    ): Promise<"claimed" | "expired" | "cancelled" | "stale" | "budget"> {
+    ): Promise<{ question: string } | "expired" | "cancelled" | "stale" | "budget"> {
       const id = conversationIdSchema.parse(requestId);
       return db.transaction(async (tx) => {
         await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtextextended(${sessionId}, 72))`);
@@ -581,6 +581,8 @@ export function createConversationResearchStore(db: Database) {
         }
         if (row.status !== "approved") return row.status === "cancelled" ? "cancelled" : "stale";
         if (
+          !row.proposedQuery ||
+          queryHash(row.proposedQuery) !== expectedHash ||
           !context ||
           context.turnId !== row.turnId ||
           context.conversationId !== row.conversationId ||
@@ -603,7 +605,7 @@ export function createConversationResearchStore(db: Database) {
               eq(conversationResearchRequests.status, "approved"),
             ),
           );
-        return "claimed";
+        return { question: row.proposedQuery };
       });
     },
 

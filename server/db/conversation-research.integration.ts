@@ -14,6 +14,7 @@ import {
   conversations,
 } from "./conversation-schema.ts";
 import { createNoteStore, noteTag } from "./notes.ts";
+import { notes } from "./schema.ts";
 
 const database = setupIndexTestDatabase();
 
@@ -101,6 +102,7 @@ async function fixture(question: string, options: FixtureOptions = {}) {
     turnId,
     sessionId,
     inputId,
+    sources,
     turns: createConversationTurns(database.db),
   };
 }
@@ -426,6 +428,53 @@ it("presents and authorizes only an owner-bound, exact, current disclosure reque
   expect(stale).toMatchObject({ status: "stale", proposedQuery: null });
 });
 
+it.each([
+  ["edit", "claimed"],
+  ["delete", "stale"],
+  ["revoke access", "stale"],
+] as const)(
+  "rechecks source access before using an approval after %s",
+  async (change, expected) => {
+    const question = "Find Northstar announcements";
+    const f = await fixture(question, {
+      input: "Research the company in my note.",
+      note: {
+        title: "Northstar",
+        blocks: [{ id: "p", type: "paragraph", props: {}, content: [], children: [] }],
+      },
+    });
+    const { noteId } = f.sources[0]!;
+    const store = createNoteStore(database.other);
+    const prepared = await f.turns.research.prepare(f.sessionId, { question });
+    if (prepared.status !== "approval_required") throw new Error("Expected an approval request.");
+    const { id, queryHash } = prepared.request;
+    expect(
+      await f.turns.research.decide(f.owner, f.conversationId, id, queryHash, "approve"),
+    ).toEqual({
+      status: "approved",
+    });
+
+    if (change === "edit") {
+      const update = await store.update(f.owner, noteId, 1, {
+        title: "Northstar",
+        content: "Corrected typo",
+      });
+      expect(update).toMatchObject({ status: "saved", value: { revision: 2 } });
+    } else if (change === "delete") {
+      expect(await store.delete(f.owner, noteId, 1)).toEqual({ status: "deleted" });
+    } else {
+      await database.other
+        .update(notes)
+        .set({ ownerId: "another-owner" })
+        .where(eq(notes.id, noteId));
+    }
+
+    expect(
+      await f.turns.research.claimApproved(f.sessionId, id, queryHash, prepared.contextHash),
+    ).toEqual(expected === "claimed" ? { question } : expected);
+  },
+);
+
 it("claims a successful approval exactly once and clears its payload", async () => {
   const f = await fixture("What did Maya Chen earn?");
   const prepared = await f.turns.research.prepare(f.sessionId, {
@@ -452,7 +501,7 @@ it("claims a successful approval exactly once and clears its payload", async () 
       prepared.request.queryHash,
       prepared.contextHash,
     ),
-  ).toBe("claimed");
+  ).toEqual({ question: prepared.request.proposedQuery });
   const [claimed] = await database.db
     .select()
     .from(conversationResearchRequests)
@@ -467,6 +516,26 @@ it("claims a successful approval exactly once and clears its payload", async () 
       prepared.contextHash,
     ),
   ).toBe("stale");
+});
+
+it("withholds a stored query that changed after the owner approved its hash", async () => {
+  const question = "Find Northstar announcements";
+  const f = await fixture(question);
+  const prepared = await f.turns.research.prepare(f.sessionId, { question });
+  if (prepared.status !== "approval_required") throw new Error("Expected an approval request.");
+  const { id, queryHash } = prepared.request;
+  expect(
+    await f.turns.research.decide(f.owner, f.conversationId, id, queryHash, "approve"),
+  ).toEqual({ status: "approved" });
+
+  await database.other
+    .update(conversationResearchRequests)
+    .set({ proposedQuery: "Changed question" })
+    .where(eq(conversationResearchRequests.id, id));
+  expect(
+    await f.turns.research.claimApproved(f.sessionId, id, queryHash, prepared.contextHash),
+  ).toBe("stale");
+  expect(await f.turns.research.list(f.owner, f.conversationId)).toEqual({ requests: [] });
 });
 
 it("allows a later denial before execution and forbids re-approval", async () => {
@@ -792,7 +861,7 @@ it("replays an approve decision after execution starts and after a terminal fail
       prepared.request.queryHash,
       prepared.contextHash,
     ),
-  ).toBe("claimed");
+  ).toEqual({ question: prepared.request.proposedQuery });
   expect(
     await f.turns.research.decide(
       f.owner,

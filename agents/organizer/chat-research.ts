@@ -76,10 +76,10 @@ export function createChatResearch({
         prepared.contextHash,
       );
       if (claim === "budget") throw new Error("Research evidence budget is exhausted.");
-      if (claim !== "claimed") return notPerformed(claim);
+      if (typeof claim === "string") return notPerformed(claim);
       request = { id: prepared.request.id, queryHash: prepared.request.queryHash };
       // Approval is for the exact displayed question. No transcript or note text is appended.
-      question = input.question.trim();
+      question = claim.question;
     }
 
     if (signal.aborted) {

@@ -155,7 +155,7 @@ await test("a research-only answer cannot bypass the required note search", () =
   assert.deepEqual(observation, { status: "failed", text: "" });
 });
 
-await test("a failed research call does not discard a note-supported answer", () => {
+await test("a failed web search is disclosed alongside a note-supported answer", () => {
   const supported = {
     status: "completed",
     text: "The note has the time.",
@@ -185,7 +185,14 @@ await test("a failed research call does not discard a note-supported answer", ()
     ],
     deliveries,
   );
-  assert.deepEqual(observation, { status: "result", result: supported, evidence: [passage] });
+  assert.deepEqual(observation, {
+    status: "result",
+    result: {
+      ...supported,
+      text: "The note has the time.\n\nA web search returned no usable sources.",
+    },
+    evidence: [passage],
+  });
 });
 
 await test("research output with an invented source ID cannot become answer evidence", () => {
@@ -209,7 +216,31 @@ await test("research output with an invented source ID cannot become answer evid
     ],
     deliveries,
   );
-  assert.deepEqual(observation, { status: "result", result: answer, evidence: [passage] });
+  assert.deepEqual(observation, {
+    status: "result",
+    result: { ...answer, text: "At 14:00.\n\nA web search returned no usable sources." },
+    evidence: [passage],
+  });
+});
+
+await test("a later successful research attempt clears the failed search notice", () => {
+  const observation = observeAnswer(
+    [
+      consumed("delivery-1", "turn-1"),
+      ...search("turn-1", "notes-1", "search_notes", { passages: [passage] }),
+      ...search("turn-1", "missing", "research", { status: "completed", sources: [] }),
+      ...search("turn-1", "retry", "research", researchOutput),
+      reply("turn-1", answer),
+      turnSettled("turn-1"),
+      settled("delivery-1", "turn-1"),
+    ],
+    deliveries,
+  );
+  assert.deepEqual(observation, {
+    status: "result",
+    result: answer,
+    evidence: [passage, webEvidence],
+  });
 });
 
 await test("an answer is not read until every steering input has settled, then comes from the last turn", () => {

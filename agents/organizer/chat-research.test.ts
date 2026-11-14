@@ -3,6 +3,8 @@ import { test } from "node:test";
 import { evidenceId } from "../../server/conversation-answer.ts";
 import { answerInstructions } from "./agent/instructions/answer.ts";
 import type { ResearchResult } from "./research.ts";
+import { createOpenRouter } from "@openrouter/ai-sdk-provider";
+import { createResearch } from "./research.ts";
 import { createChatResearch } from "./chat-research.ts";
 
 const url = "https://example.test/release";
@@ -49,7 +51,7 @@ function setup(
       return "approved";
     },
     async claimApproved() {
-      return "claimed";
+      return { question: exactQuestion };
     },
     async finish(_sessionId: string, _requestId: string, _hash: string, status: string) {
       finishes.push(status);
@@ -70,7 +72,7 @@ function setup(
       }),
     now: () => new Date("2026-11-13T12:00:00.000Z"),
   });
-  return { calls, claims, finishes, run };
+  return { calls, claims, finishes, gate, run };
 }
 
 await test("sends only the generalized query to the existing research provider", async () => {
@@ -279,7 +281,7 @@ await test("approval claims only the same request, exact query and private-conte
           [requestId, queryHash, contextHash],
           [request.id, request.queryHash, "c".repeat(64)],
         );
-        return "claimed";
+        return { question: exactQuestion };
       },
     },
   );
@@ -294,6 +296,88 @@ await test("approval claims only the same request, exact query and private-conte
   );
   assert.equal(output.status, "completed");
   assert.deepEqual(finishes, ["completed"]);
+});
+
+await test("only the displayed query enters OpenRouter after approval, as one user message", async () => {
+  const displayed = "Acme  İmalat'ın 2025 faaliyet raporu?";
+  const waiting = Promise.withResolvers<void>();
+  const decision = Promise.withResolvers<"approved">();
+  const bodies: Record<string, unknown>[] = [];
+  const provider = createOpenRouter({
+    apiKey: "synthetic-key",
+    fetch: async (input, init) => {
+      assert.equal(
+        input instanceof Request ? input.url : input.toString(),
+        "https://openrouter.ai/api/v1/chat/completions",
+      );
+      assert.ok(typeof init?.body === "string");
+      bodies.push(JSON.parse(init.body));
+      return Response.json({
+        id: "synthetic-research",
+        model: "openai/gpt-6-luna",
+        choices: [
+          {
+            index: 0,
+            finish_reason: "stop",
+            message: {
+              role: "assistant",
+              content: "Public result.",
+              annotations: [
+                {
+                  type: "url_citation",
+                  url_citation: {
+                    url,
+                    title: "Annual report",
+                    content: "The report was published.",
+                    start_index: 0,
+                    end_index: 7,
+                  },
+                },
+              ],
+            },
+          },
+        ],
+        usage: { prompt_tokens: 20, completion_tokens: 10, total_tokens: 30 },
+      });
+    },
+  });
+  const { gate } = setup(
+    () => ({
+      status: "approval_required",
+      request: { ...request, proposedQuery: displayed },
+      contextHash: "c".repeat(64),
+    }),
+    {
+      waitForDecision: () => {
+        waiting.resolve();
+        return decision.promise;
+      },
+      claimApproved: async () => ({ question: displayed }),
+    },
+  );
+  const research = createResearch({
+    model: provider("openai/gpt-6-luna", { maxTokens: 8192 }),
+    webSearch: provider.tools.webSearch({}),
+  });
+  const run = createChatResearch({ gate, research });
+  const input = { question: displayed };
+  const evaluating = run("session-1", input, new AbortController().signal);
+  await waiting.promise;
+  input.question = "PRIVATE-NOTE-CANARY";
+  assert.equal(bodies.length, 0);
+  decision.resolve("approved");
+  assert.equal((await evaluating).status, "completed");
+  assert.equal(bodies.length, 1);
+  const [body] = bodies;
+  assert.ok(body);
+  assert.deepEqual(body.tools, [{ type: "openrouter:web_search" }]);
+  assert.ok(Array.isArray(body.messages));
+  assert.deepEqual(
+    body.messages.map(({ role }) => role),
+    ["system", "user"],
+  );
+  assert.deepEqual(body.messages[1], { role: "user", content: displayed });
+  assert.doesNotMatch(JSON.stringify(body), /PRIVATE-NOTE-CANARY|session-1|6f1c2a8e/);
 });
 
 await test("a budget loss after approval still prevents the provider call", async () => {
