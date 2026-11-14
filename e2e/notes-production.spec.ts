@@ -2083,6 +2083,114 @@ test.describe("saved conversations and chat history", () => {
     );
   });
 
+  test("loads the newest page when a running answer completes in a long conversation", async ({
+    page,
+  }) => {
+    await serveNotes(page, [[serverNote]]);
+
+    const history = Array.from({ length: 50 }, (_, index) => ({
+      id: `ca200001-1234-4000-8000-${String(index + 1).padStart(12, "0")}`,
+      sequence: index + 1,
+      role: "user" as const,
+      text: `Question ${index + 1}`,
+      deliveryPolicy: "queue" as const,
+      createdAt: "2026-10-28T10:00:00.000Z",
+    }));
+    const answer = {
+      id: "ca200001-1234-4000-8000-000000000051",
+      sequence: 51,
+      role: "assistant" as const,
+      turnId: "ca300001-1234-4000-8000-000000000051",
+      text: "Final grounded answer.",
+      status: "completed" as const,
+      reason: null,
+      inputIds: [history[0].id],
+      citations: [],
+      createdAt: "2026-10-28T10:06:00.000Z",
+    };
+    let turnRunning = true;
+
+    await page.route(
+      (url) => url.pathname.startsWith("/api/conversations"),
+      async (route) => {
+        const url = new URL(route.request().url());
+        if (url.pathname === "/api/conversations" && route.request().method() === "GET") {
+          return route.fulfill({
+            json: {
+              conversations: [
+                {
+                  id: convOneId,
+                  queuePaused: false,
+                  createdAt: "2026-10-28T10:00:00.000Z",
+                  updatedAt: "2026-10-28T10:05:00.000Z",
+                },
+              ],
+              nextCursor: null,
+            },
+          });
+        }
+        if (
+          url.pathname === `/api/conversations/${convOneId}` &&
+          route.request().method() === "GET"
+        ) {
+          return route.fulfill({
+            json: {
+              conversation: {
+                id: convOneId,
+                queuePaused: false,
+                createdAt: "2026-10-28T10:00:00.000Z",
+                updatedAt: "2026-10-28T10:05:00.000Z",
+              },
+              activeTurn: turnRunning
+                ? {
+                    id: "ca300001-1234-4000-8000-000000000051",
+                    status: "running",
+                    text: "Searching notes and preparing a grounded answer...",
+                    checkpointVersion: 1,
+                    inputIds: [history[0].id],
+                  }
+                : null,
+              recovery: null,
+            },
+          });
+        }
+        if (
+          url.pathname === `/api/conversations/${convOneId}/messages` &&
+          route.request().method() === "GET"
+        ) {
+          const cursor = url.searchParams.get("cursor");
+          if (cursor === "50") {
+            return route.fulfill({ json: { messages: [answer], nextCursor: null } });
+          }
+          return route.fulfill({ json: { messages: history, nextCursor: "50" } });
+        }
+        return route.fallback();
+      },
+    );
+
+    await page.goto("/");
+    const chatRegion = page.getByRole("region", { name: "Chat workspace" });
+    await chatRegion.getByRole("button", { name: conversationName(convOneLabel) }).click();
+    await expect(chatRegion.getByText("Question 50")).toBeVisible();
+    await expect(
+      chatRegion.getByRole("button", { name: "Load more messages", exact: true }),
+    ).toBeVisible();
+    await expect(
+      chatRegion.getByRole("button", { name: "Stop answer", exact: true }),
+    ).toBeVisible();
+
+    // The answer is published after the first page, so the terminal refresh has to
+    // page forward past the loaded history before it can display it.
+    turnRunning = false;
+    await expect(chatRegion.getByText("Final grounded answer.")).toBeVisible({ timeout: 10_000 });
+    await expect(chatRegion.getByRole("button", { name: "Stop answer", exact: true })).toHaveCount(
+      0,
+    );
+    await expect(
+      chatRegion.getByRole("button", { name: "Load more messages", exact: true }),
+    ).toHaveCount(0);
+  });
+
   test("protects unsent messages when switching conversations and prevents stale or missing reads from displaying cached messages", async ({
     page,
   }) => {
@@ -2243,14 +2351,17 @@ test.describe("saved conversations and chat history", () => {
     await expect(chatRegion.getByText("Unique message from Second thread")).toBeVisible();
     await expect(chatRegion.getByText("Unique message from First thread")).toHaveCount(0);
 
-    // Rapid navigation: click First thread (slow) and wait until its read is intercepted
-    // before releasing it, so the delayed response cannot race the request setup.
+    // A slow read keeps the workspace busy: no other conversation can be selected
+    // while it is pending, so its late response cannot replace a newer selection.
     slowFirstMode = true;
     const slowFirstStarted = new Promise<void>((resolve) => {
       markSlowFirstStarted = resolve;
     });
     await chatRegion.getByRole("button", { name: conversationName(convOneLabel) }).click();
     await slowFirstStarted;
+    await expect(
+      chatRegion.getByRole("button", { name: conversationName(convTwoLabel) }),
+    ).toBeDisabled();
     resolveSlowFirstRead();
     await expect(chatRegion.getByText("Unique message from First thread")).toBeVisible();
     slowFirstMode = false;

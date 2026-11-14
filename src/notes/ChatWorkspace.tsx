@@ -55,6 +55,9 @@ type DeleteFailure = {
   message: string;
 };
 
+/** Bounds a single catch-up refresh; further pages stay behind the manual control. */
+const MAX_HISTORY_CATCH_UP_PAGES = 20;
+
 /** Refresh by id so a newer answer state can never drop messages from loaded pages. */
 function mergeConversationMessages(
   current: ConversationMessage[],
@@ -124,6 +127,8 @@ export function ChatWorkspace({
   const deletedIdsRef = useRef<Set<string>>(new Set());
   const locallyCreatedIdsRef = useRef<Set<string>>(new Set());
   const turnRefreshBusyRef = useRef(false);
+  const actionGenerationRef = useRef(0);
+  const messagesRef = useRef<ConversationMessage[]>([]);
 
   /** Keeps the selection ref in step with state so async completions can never act on a stale target. */
   function selectConversation(id: string | null) {
@@ -169,6 +174,10 @@ export function ChatWorkspace({
       openRequestIdRef.current += 1;
     };
   }, []);
+
+  useEffect(() => {
+    messagesRef.current = messages;
+  }, [messages]);
 
   useEffect(() => {
     if (!hasUnsentInput && !sending && !creating) return;
@@ -222,26 +231,53 @@ export function ChatWorkspace({
     };
   }, [client, enabled, listAttempt, onUnauthenticated]);
 
+  /**
+   * Pages forward from the newest loaded message until the store reports no further
+   * page, so an answer published after the first page is never missed. The endpoint
+   * continues from a sequence cursor, so the tail sequence anchors the next request.
+   */
+  const fetchLatestHistory = useCallback(
+    async (id: string) => {
+      const current = messagesRef.current;
+      const tail = current.at(-1)?.sequence;
+      let cursor: string | undefined = tail === undefined ? undefined : String(tail);
+      let merged = current;
+      for (let page = 0; page < MAX_HISTORY_CATCH_UP_PAGES; page += 1) {
+        const result = await client.messages(id, { limit: 50, cursor });
+        merged = mergeConversationMessages(merged, result.messages);
+        if (result.nextCursor === null) {
+          return { messages: merged, nextCursor: null };
+        }
+        cursor = result.nextCursor;
+      }
+      return { messages: merged, nextCursor: cursor ?? null };
+    },
+    [client],
+  );
+
   const refreshActiveConversation = useCallback(
     async (id: string) => {
       const requestId = openRequestIdRef.current;
+      const actionGeneration = actionGenerationRef.current;
+      const stillCurrent = () =>
+        requestId === openRequestIdRef.current &&
+        actionGeneration === actionGenerationRef.current &&
+        enabledRef.current &&
+        !deletedIdsRef.current.has(id);
       try {
-        const [readResult, historyResult] = await Promise.all([
-          client.read(id),
-          client.messages(id, { limit: 50 }),
-        ]);
-        if (
-          requestId !== openRequestIdRef.current ||
-          !enabledRef.current ||
-          deletedIdsRef.current.has(id)
-        ) {
-          return;
-        }
+        const readResult = await client.read(id);
+        if (!stillCurrent()) return;
         setActiveRead(readResult);
-        setMessages((current) => mergeConversationMessages(current, historyResult.messages));
         setConversations((current) =>
           current.map((item) => (item.id === id ? readResult.conversation : item)),
         );
+        if (readResult.activeTurn !== null) return;
+        // The turn is terminal, so the published answer is only in the newest page.
+        // Read first here so the history cannot observe an older state than the turn.
+        const historyResult = await fetchLatestHistory(id);
+        if (!stillCurrent()) return;
+        setMessages((current) => mergeConversationMessages(current, historyResult.messages));
+        setMessagesNextCursor(historyResult.nextCursor);
       } catch (error) {
         if (requestId !== openRequestIdRef.current) return;
         const kind = classifyFailure(error);
@@ -268,7 +304,7 @@ export function ChatWorkspace({
         }
       }
     },
-    [client, onUnauthenticated],
+    [client, fetchLatestHistory, onUnauthenticated],
   );
 
   const activeTurnRunning = activeRead !== null && activeRead.activeTurn !== null;
@@ -548,6 +584,7 @@ export function ChatWorkspace({
       return;
     }
     snapshotNoteTitles();
+    actionGenerationRef.current += 1;
     setSending(true);
     setActionFailure(null);
     setDeleteNotice(null);
@@ -627,7 +664,7 @@ export function ChatWorkspace({
         return hasMessage ? current : [...current, sent.message];
       });
 
-      const historyResult = await client.messages(targetId, { limit: 50 });
+      const historyResult = await fetchLatestHistory(targetId);
       if (
         watchId !== openRequestIdRef.current ||
         !enabledRef.current ||
@@ -635,9 +672,10 @@ export function ChatWorkspace({
       ) {
         return;
       }
-      // The store returns the oldest page first, so replacing the thread would drop
-      // the message just accepted and any later pages already loaded.
+      // The store pages forward from the oldest message, so catching up to the newest
+      // page keeps the accepted message and any later answer in view.
       setMessages((current) => mergeConversationMessages(current, historyResult.messages));
+      setMessagesNextCursor(historyResult.nextCursor);
     } catch (error) {
       if (watchId !== openRequestIdRef.current) return;
       const kind = classifyFailure(error);
@@ -667,6 +705,7 @@ export function ChatWorkspace({
     if (!enabledRef.current || !activeConversationId || acting || deletingId !== null) return;
     const targetId = activeConversationId;
     const watchId = openRequestIdRef.current;
+    actionGenerationRef.current += 1;
     setActing(true);
     setActionFailure(null);
 
@@ -684,7 +723,7 @@ export function ChatWorkspace({
       setConversations((current) =>
         current.map((item) => (item.id === updated.conversation.id ? updated.conversation : item)),
       );
-      const historyResult = await client.messages(targetId, { limit: 50 });
+      const historyResult = await fetchLatestHistory(targetId);
       if (
         watchId !== openRequestIdRef.current ||
         !enabledRef.current ||
@@ -693,6 +732,7 @@ export function ChatWorkspace({
         return;
       }
       setMessages((current) => mergeConversationMessages(current, historyResult.messages));
+      setMessagesNextCursor(historyResult.nextCursor);
     } catch (error) {
       if (watchId !== openRequestIdRef.current) return;
       if (classifyFailure(error) === "unauthenticated") {
