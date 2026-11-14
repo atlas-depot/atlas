@@ -483,11 +483,7 @@ export function ChatWorkspace({
       ) {
         return;
       }
-      setMessages((current) => {
-        const seen = new Set(current.map((item) => item.id));
-        const next = result.messages.filter((item) => !seen.has(item.id));
-        return [...current, ...next];
-      });
+      setMessages((current) => mergeConversationMessages(current, result.messages));
       setMessagesNextCursor(result.nextCursor);
     } catch (error) {
       if (requestId !== openRequestIdRef.current) return;
