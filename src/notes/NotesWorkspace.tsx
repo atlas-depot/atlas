@@ -17,6 +17,8 @@ import { noteContentSchema, type CreateNote, type NoteSummary } from "../../shar
 import { SignInLink } from "@/auth/SignInLink";
 import { MarkdownPreview } from "./MarkdownPreview";
 import { NoteContentView } from "./NoteContentView";
+import { ChatWorkspace } from "./ChatWorkspace";
+import type { ConversationClient } from "./conversation-store";
 import { NoteSearchWorkspace } from "./NoteSearchWorkspace";
 import type { NoteSearchClient } from "./note-search-store";
 import { OpenedSourcePanel } from "./OpenedSourcePanel";
@@ -58,12 +60,14 @@ export function NotesWorkspace({
   store,
   organizer,
   search,
+  conversations,
   example = false,
   requestsEnabled = true,
 }: {
   store: NotesStore;
   organizer?: OrganizeClient;
   search?: NoteSearchClient;
+  conversations?: ConversationClient;
   example?: boolean;
   requestsEnabled?: boolean;
 }) {
@@ -93,6 +97,7 @@ export function NotesWorkspace({
   const [activeSourceTarget, setActiveSourceTarget] = useState<SourceTarget | null>(null);
   const [unavailableSourceTarget, setUnavailableSourceTarget] = useState<SourceTarget | null>(null);
   const [searchResetToken, setSearchResetToken] = useState(0);
+  const [chatPresentation, setChatPresentation] = useState<"sidebar" | "fullscreen">("sidebar");
   const busyRef = useRef(false);
   const titleRef = useRef<HTMLInputElement>(null);
   const cancelRef = useRef<HTMLButtonElement>(null);
@@ -889,6 +894,20 @@ export function NotesWorkspace({
             />
           )}
         </div>
+        {!example && conversations && (loadState === "ready" || draft !== null) && (
+          <ChatWorkspace
+            key={searchResetToken}
+            client={conversations}
+            notes={notes}
+            enabled={requestsEnabled && !blocked}
+            canOpenSource={!busy}
+            activeSourceTarget={unavailableSourceTarget ?? activeSourceTarget}
+            presentation={chatPresentation}
+            onPresentationChange={setChatPresentation}
+            onOpenSource={requestOpenSource}
+            onUnauthenticated={handleSearchUnauthenticated}
+          />
+        )}
       </div>
       <AlertDialog
         open={pending !== null}

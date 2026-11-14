@@ -39,6 +39,9 @@ async function openDocument(page: Page, blocks: unknown[]) {
   await page.route("**/api/organize-work", (route) =>
     route.fulfill({ json: { runs: [], drafts: [] } }),
   );
+  await page.route("**/api/conversations*", (route) =>
+    route.fulfill({ json: { conversations: [], nextCursor: null } }),
+  );
   await page.route("**/api/notes", (route) =>
     route.fulfill({ json: { notes: [toListRow(note)] } }),
   );

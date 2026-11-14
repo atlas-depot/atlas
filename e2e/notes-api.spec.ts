@@ -407,3 +407,154 @@ test("keyboard search and source opening work on narrow mobile through the real 
     fullPage: true,
   });
 });
+
+test("saved conversations reopen across reload, redact deleted note excerpts, enforce ownership and deletion fences, and work on narrow mobile", async ({
+  page,
+  context,
+}, testInfo) => {
+  const noteResponse = await page.request.post("/api/notes", {
+    headers: { Origin: origin, "Idempotency-Key": randomUUID() },
+    data: {
+      title: "Postgres Durability Guide",
+      content: {
+        format: "blocknote",
+        schemaVersion: 1,
+        blocks: [
+          {
+            id: "durability-heading",
+            type: "heading",
+            props: { level: 2 },
+            content: [{ type: "text", text: "Write-Ahead Logging", styles: {} }],
+            children: [],
+          },
+          {
+            id: "durability-block",
+            type: "paragraph",
+            props: {},
+            content: [
+              {
+                type: "text",
+                text: "PostgreSQL pgvector durability relies on synchronous WAL flushing.",
+                styles: {},
+              },
+            ],
+            children: [],
+          },
+        ],
+      },
+      createdAt: "2026-11-08T11:00:00.000Z",
+    },
+  });
+  expect(noteResponse.status()).toBe(201);
+  const createdNote = noteSchema.parse(await noteResponse.json());
+  const noteRead = await page.request.get(`/api/notes/${createdNote.id}`);
+  const noteEtag = noteRead.headers().etag;
+  expect(noteEtag).toBeTruthy();
+
+  await expect
+    .poll(async () => {
+      const statusResponse = await page.request.get(`/api/notes/${createdNote.id}/index`);
+      if (statusResponse.status() !== 200) return "pending";
+      const body = (await statusResponse.json()) as { status: string };
+      return body.status;
+    })
+    .toBe("ready");
+
+  await page.setViewportSize({ width: 375, height: 812 });
+  await page.goto("/");
+
+  const chatRegion = page.getByRole("region", { name: "Chat workspace" });
+  const messageInput = chatRegion.getByLabel("Message");
+  await messageInput.focus();
+  await page.keyboard.type("How does pgvector durability work?");
+  await chatRegion.getByRole("button", { name: "Send message", exact: true }).click();
+
+  await expect(chatRegion.getByText("How does pgvector durability work?")).toBeVisible();
+  await expect(
+    chatRegion.getByText(
+      "Grounded answer from your notes: PostgreSQL pgvector durability relies on synchronous WAL flushing.",
+    ),
+  ).toBeVisible();
+  await expect(
+    chatRegion.getByText("PostgreSQL pgvector durability relies on synchronous WAL flushing."),
+  ).toBeVisible();
+
+  const listResponse = await page.request.get("/api/conversations?limit=50");
+  expect(listResponse.status()).toBe(200);
+  const listBody = (await listResponse.json()) as {
+    conversations: Array<{ id: string; title: string }>;
+  };
+  expect(listBody.conversations).toHaveLength(1);
+  const conversationId = listBody.conversations[0].id;
+
+  // Reload and reopen the persisted conversation on narrow mobile using keyboard.
+  await page.reload();
+  const reopenedChat = page.getByRole("region", { name: "Chat workspace" });
+  const convButton = reopenedChat
+    .getByRole("navigation", { name: "Saved conversations" })
+    .getByRole("button")
+    .first();
+  await convButton.focus();
+  await page.keyboard.press("Enter");
+
+  await expect(reopenedChat.getByText("How does pgvector durability work?")).toBeVisible();
+  await expect(
+    reopenedChat.getByText("PostgreSQL pgvector durability relies on synchronous WAL flushing."),
+  ).toBeVisible();
+
+  // Delete the cited source note and verify reopening preserves the answer but removes the stored excerpt.
+  const deleteNoteResponse = await page.request.delete(`/api/notes/${createdNote.id}`, {
+    headers: { Origin: origin, "If-Match": noteEtag },
+  });
+  expect(deleteNoteResponse.status()).toBe(204);
+
+  await page.reload();
+  const afterNoteDeleteChat = page.getByRole("region", { name: "Chat workspace" });
+  await afterNoteDeleteChat
+    .getByRole("navigation", { name: "Saved conversations" })
+    .getByRole("button")
+    .first()
+    .click();
+  await expect(
+    afterNoteDeleteChat.getByText(
+      "Grounded answer from your notes: PostgreSQL pgvector durability relies on synchronous WAL flushing.",
+    ),
+  ).toBeVisible();
+  await expect(afterNoteDeleteChat.getByText("Deleted source")).toBeVisible();
+  await expect(
+    afterNoteDeleteChat.getByText("Source note was deleted; stored excerpt was removed."),
+  ).toBeVisible();
+  await expect(afterNoteDeleteChat.locator(".note-search-excerpt")).toHaveCount(0);
+
+  // Verify ownership isolation across synthetic accounts before deleting the conversation.
+  const bob = newAccount();
+  await signIn(context, bob);
+  for (const path of [
+    `/api/conversations/${conversationId}`,
+    `/api/conversations/${conversationId}/messages?limit=50`,
+  ]) {
+    const res = await page.request.get(path);
+    expect(res.status()).toBe(404);
+  }
+  const bobDelete = await page.request.delete(`/api/conversations/${conversationId}`, {
+    headers: { Origin: origin },
+  });
+  expect(bobDelete.status()).toBe(404);
+
+  // Switch browser focus to Bob and confirm Alice's conversation history is cleared.
+  await page.evaluate("window.dispatchEvent(new Event('focus'))");
+  await expect(page.getByText(`Signed in as ${bob}@example.test`)).toBeVisible();
+  await expect(
+    afterNoteDeleteChat.getByText(
+      "No saved conversations yet. Start a new conversation to ask about your notes.",
+    ),
+  ).toBeVisible();
+
+  expect(await page.evaluate("document.documentElement.scrollWidth <= window.innerWidth")).toBe(
+    true,
+  );
+  await page.screenshot({
+    path: testInfo.outputPath("conversations-mobile-api.png"),
+    fullPage: true,
+  });
+});

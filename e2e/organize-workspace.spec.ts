@@ -81,6 +81,9 @@ async function fixture(page: Page) {
       },
     }),
   );
+  await page.route("**/api/conversations*", (route) =>
+    route.fulfill({ json: { conversations: [], nextCursor: null } }),
+  );
   await page.route(`**/api/notes/${sourceId}/organize`, (route) => {
     starts.push(route.request().headers()["if-match"]);
     run = true;
