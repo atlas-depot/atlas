@@ -208,6 +208,8 @@ for (const scenario of [
   });
 
 test("block color checkmarks update immediately and persist", async ({ page }) => {
+  // Keep both color sections in view so a pointer action does not scroll the menu's anchor.
+  await page.setViewportSize({ width: 1280, height: 900 });
   const state = await openDocument(page, [paragraph("Keep this thought")]);
   await page.locator('[data-id="paragraph"]').last().hover();
   await page.getByRole("button", { name: "Open block menu" }).click();
