@@ -952,13 +952,15 @@ test.describe("recovery and auth", () => {
       }
       await expect.poll(() => stalled).toBe(true);
       await page.clock.fastForward(30_001);
-      await expect(page.getByRole("alert")).toContainText(
+      const expectedAlert =
         operation === "list"
           ? "Could not load"
           : operation === "read"
             ? "Could not open"
-            : "Save failed",
-      );
+            : "Save failed";
+      // The chat workspace publishes its own alert, and the forwarded clock can time
+      // out its pending list request, so match the note alert by its message.
+      await expect(page.getByRole("alert").filter({ hasText: expectedAlert })).toBeVisible();
       if (operation === "list")
         await expect(page.getByRole("button", { name: "Retry loading" })).toBeEnabled();
       else await expect(page.getByRole("button", { name: "New note", exact: true })).toBeEnabled();
