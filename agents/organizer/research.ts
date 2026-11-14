@@ -13,7 +13,7 @@ export const researchResultSchema = z.strictObject({
   sources: z
     .array(
       sourceSchema
-        .extend({ id: publicSourceUrlSchema })
+        .extend({ id: publicSourceUrlSchema, snippet: z.string().min(1).max(8_000) })
         .refine((source) => source.id === source.url),
     )
     .min(1)
@@ -67,18 +67,37 @@ export function createResearch({
       throw new Error("Research did not return a complete answer.");
     }
 
-    const sources: ResearchResult["sources"] = [];
-    const seen = new Set<string>();
+    const snippets = new Map<string, { title: string; values: Set<string> }>();
     for (const source of result.sources) {
       if (source.sourceType !== "url") continue;
       const parsed = sourceSchema.safeParse(source);
       if (!parsed.success) throw new Error("Research returned an invalid source.");
-      if (!seen.has(parsed.data.url)) {
-        // Identity comes from provider evidence, never a model-written citation label.
-        sources.push({ id: parsed.data.url, ...parsed.data });
-        seen.add(parsed.data.url);
-      }
+      const metadata = source.providerMetadata?.openrouter;
+      const content = metadata?.content;
+      const start = metadata?.startIndex;
+      const end = metadata?.endIndex;
+      const span =
+        typeof start === "number" && typeof end === "number" && end > start
+          ? result.text.slice(start, end).trim()
+          : "";
+      // Provider attribution, not an arbitrary sentence from the model's prose.
+      const snippet = (
+        (typeof content === "string" && content.trim()) ||
+        span ||
+        parsed.data.title.trim() ||
+        parsed.data.url
+      ).slice(0, 8_000);
+      const existing = snippets.get(parsed.data.url);
+      if (existing) existing.values.add(snippet);
+      // Identity comes from provider evidence, never a model-written citation label.
+      else snippets.set(parsed.data.url, { title: parsed.data.title, values: new Set([snippet]) });
     }
+    const sources: ResearchResult["sources"] = [...snippets].map(([url, value]) => ({
+      id: url,
+      url,
+      title: value.title,
+      snippet: [...value.values].slice(0, 20).join("\n").slice(0, 8_000),
+    }));
     if (sources.length === 0) throw new Error("Research returned no verified sources.");
 
     const cost = result.usage.raw?.cost;

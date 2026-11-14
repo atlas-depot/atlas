@@ -48,7 +48,9 @@ const source = {
   id: "https://example.com/doc",
   url: "https://example.com/doc",
   title: "Primary document",
+  snippet: "Sourced fact",
 };
+const draftSource = { id: source.id, url: source.url, title: source.title };
 const research = [
   event({
     type: "call.requested",
@@ -250,7 +252,7 @@ await test("sources come only from completed research for the accepted turn", as
   const { adapter } = fixture({ events });
   assert.deepEqual(await adapter.inspect(reference), {
     status: "draft",
-    draft: { markdown: "# Kept source facts", sources: [source] },
+    draft: { markdown: "# Kept source facts", sources: [draftSource] },
     completedAt,
     usage: { complete: false },
   });
@@ -483,7 +485,7 @@ await test("usage aggregates distinct outer models and research without counting
   assert.deepEqual(result.usage, expected);
   assert.deepEqual((await fixture({ events }).adapter.inspect(reference)).usage, expected);
   assert.equal(result.status, "draft");
-  if (result.status === "draft") assert.deepEqual(result.draft.sources, [source]);
+  if (result.status === "draft") assert.deepEqual(result.draft.sources, [draftSource]);
 });
 
 await test("unknown cost is absent, partial cost is explicit, and failed or cancelled work preserves reported usage", async () => {

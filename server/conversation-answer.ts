@@ -143,7 +143,8 @@ export function readResearchEvidence(
   for (const source of parsed.data.sources) {
     const id = evidenceId(source.source);
     if (source.id !== id) return undefined;
-    evidence.push({ id, text: parsed.data.text, source: source.source });
+    // Each excerpt must come from this URL's provider-attributed snippet, not the summary.
+    evidence.push({ id, text: source.snippet, source: source.source });
   }
   return { status: "completed", evidence };
 }

@@ -33,6 +33,7 @@ export function createChatResearch({
     signal: AbortSignal,
   ): Promise<ResearchToolResult> {
     const prepared = await gate.prepare(sessionId, input);
+    if (prepared.status === "budget") throw new Error("Research evidence budget is exhausted.");
     if (prepared.status === "unavailable" || prepared.status === "limit")
       throw new Error("Research permission could not be verified.");
 
@@ -45,7 +46,8 @@ export function createChatResearch({
         queryHash: prepared.queryHash,
         contextHash: prepared.contextHash,
       });
-      if (!claimed) return notPerformed("stale");
+      if (claimed === "budget") throw new Error("Research evidence budget is exhausted.");
+      if (claimed !== "claimed") return notPerformed("stale");
       question = prepared.outboundQuestion;
     } else {
       const decision = await gate.waitForDecision(
@@ -61,6 +63,7 @@ export function createChatResearch({
         prepared.request.queryHash,
         prepared.contextHash,
       );
+      if (claim === "budget") throw new Error("Research evidence budget is exhausted.");
       if (claim !== "claimed") return notPerformed(claim);
       request = { id: prepared.request.id, queryHash: prepared.request.queryHash };
       // Approval is for the exact displayed question. No transcript or note text is appended.
@@ -80,7 +83,7 @@ export function createChatResearch({
         status: "completed",
         question,
         text: result.text,
-        sources: result.sources.map(({ url, title }) => {
+        sources: result.sources.map(({ url, title, snippet }) => {
           const source = webEvidenceSourceSchema.parse({
             kind: "web",
             url,
@@ -88,7 +91,7 @@ export function createChatResearch({
             title: title.trim() || url,
             retrievedAt,
           });
-          return { id: evidenceId(source), source };
+          return { id: evidenceId(source), source, snippet: snippet.slice(0, 8_000) };
         }),
       });
       const recorded = await gate.recordResult(sessionId, output);

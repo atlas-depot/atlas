@@ -2,11 +2,23 @@ import { z } from "zod";
 import { noteTextSchema } from "./document.ts";
 import { notePassageSourceSchema } from "./passages.ts";
 
-export const publicSourceUrlSchema = z.url({ protocol: /^https?$/ }).refine((value) => {
-  if (!URL.canParse(value)) return false;
-  const url = new URL(value);
-  return url.username === "" && url.password === "";
-});
+function hasControlCharacter(value: string) {
+  for (const character of value) {
+    const code = character.codePointAt(0);
+    if (code !== undefined && (code <= 0x1f || code === 0x7f)) return true;
+  }
+  return false;
+}
+
+export const publicSourceUrlSchema = z
+  .url({ protocol: /^https?$/ })
+  .max(2_048)
+  .refine((value) => !hasControlCharacter(value))
+  .refine((value) => {
+    if (!URL.canParse(value)) return false;
+    const url = new URL(value);
+    return url.username === "" && url.password === "";
+  });
 
 /** A provider-verified public page record; unlike note evidence, it has no private note identity. */
 export const webEvidenceSourceSchema = z.strictObject({
@@ -33,6 +45,7 @@ export const researchToolResultSchema = z.discriminatedUnion("status", [
         z.strictObject({
           id: evidenceIdSchema,
           source: webEvidenceSourceSchema,
+          snippet: noteTextSchema.min(1).max(8_000),
         }),
       )
       .min(1)

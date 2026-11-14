@@ -15,7 +15,7 @@ const request = {
 };
 const result: ResearchResult = {
   text: "The release is on 14 October. [Official release](https://example.test/release)",
-  sources: [{ id: url, url, title: "Official release" }],
+  sources: [{ id: url, url, title: "Official release", snippet: "The release is on 14 October." }],
   usage: {},
 };
 
@@ -32,7 +32,7 @@ function setup(
       return prepare();
     },
     async claimGeneralized() {
-      return true;
+      return "claimed";
     },
     async waitForDecision() {
       return "approved";
@@ -79,6 +79,19 @@ await test("sends only the generalized query to the existing research provider",
     assert.equal(output.question, outboundQuestion);
     assert.equal(output.sources[0]?.id, evidenceId(output.sources[0]!.source));
   }
+});
+
+await test("refuses to spend a provider call when the evidence budget is already exhausted", async () => {
+  const { calls, run } = setup(() => ({ status: "budget" }));
+  await assert.rejects(
+    run(
+      "session-1",
+      { question: "What are public web-safety principles?" },
+      new AbortController().signal,
+    ),
+    { message: "Research evidence budget is exhausted." },
+  );
+  assert.deepEqual(calls, []);
 });
 
 await test("does not call either research provider until the exact proposed query is approved", async () => {
@@ -145,6 +158,26 @@ await test("approval claims only the same request, exact query and private-conte
   assert.deepEqual(finishes, ["completed"]);
 });
 
+await test("a budget loss after approval still prevents the provider call", async () => {
+  const { calls, run } = setup(
+    () => ({ status: "approval_required", request, contextHash: "c".repeat(64) }),
+    {
+      async claimApproved() {
+        return "budget";
+      },
+    },
+  );
+  await assert.rejects(
+    run(
+      "session-1",
+      { question: exactQuestion, requiresPrivateDisclosure: true },
+      new AbortController().signal,
+    ),
+    { message: "Research evidence budget is exhausted." },
+  );
+  assert.deepEqual(calls, []);
+});
+
 await test("expired, cancelled, stale and changed approvals never call research", async () => {
   for (const decision of ["expired", "cancelled", "stale"] as const) {
     const { calls, run } = setup(
@@ -195,7 +228,7 @@ await test("a provider source without a title keeps the verified URL as its reco
     }),
     {},
     () => {},
-    { ...result, sources: [{ id: url, url, title: "" }] },
+    { ...result, sources: [{ id: url, url, title: "", snippet: "The release is on 14 October." }] },
   );
   const output = await run(
     "session-1",

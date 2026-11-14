@@ -280,6 +280,36 @@ export function canonicalNoteContent(content: NoteContent): string {
   return canonicalJson(content);
 }
 
+function collectDocumentText(value: unknown, parts: string[]) {
+  if (Array.isArray(value)) {
+    for (const item of value) collectDocumentText(item, parts);
+    return;
+  }
+  if (value === null || typeof value !== "object") return;
+  const record = value as Record<string, unknown>;
+  if (record.type === "text" && typeof record.text === "string") {
+    parts.push(record.text);
+    return;
+  }
+  // Link destinations are private source text too, even when the visible label differs.
+  if (typeof record.href === "string") parts.push(record.href);
+  for (const [key, child] of Object.entries(record)) {
+    if (key === "text" || key === "href") continue;
+    collectDocumentText(child, parts);
+  }
+}
+
+/** Plain text of every inline and table cell, without JSON keys or block serialization. */
+export function noteContentPlainText(content: NoteContent): string {
+  if (typeof content === "string") return content;
+  const parts: string[] = [];
+  for (const block of content.blocks) {
+    collectDocumentText(block, parts);
+    parts.push("\n");
+  }
+  return parts.join("");
+}
+
 /** A derived model input, never a second authoritative note representation. */
 export function organizerContent(content: NoteContent): string {
   return typeof content === "string"

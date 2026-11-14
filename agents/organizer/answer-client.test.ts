@@ -31,7 +31,7 @@ const researchOutput = {
   status: "completed",
   question: "When is the public meeting?",
   text: webEvidence.text,
-  sources: [{ id: webEvidence.id, source: webSource }],
+  sources: [{ id: webEvidence.id, source: webSource, snippet: webEvidence.text }],
 };
 const answer = {
   status: "completed",
@@ -123,6 +123,7 @@ await test("a declined research request permits a no-support reply but adds no w
   const observation = observeAnswer(
     [
       consumed("delivery-1", "turn-1"),
+      ...search("turn-1", "notes-1", "search_notes", { passages: [] }),
       ...search("turn-1", "research-1", "research", {
         status: "not_performed",
         reason: "denied",
@@ -136,13 +137,71 @@ await test("a declined research request permits a no-support reply but adds no w
   assert.deepEqual(observation, { status: "result", result: noSupport, evidence: [] });
 });
 
+await test("a research-only answer cannot bypass the required note search", () => {
+  const observation = observeAnswer(
+    [
+      consumed("delivery-1", "turn-1"),
+      ...search("turn-1", "research-1", "research", researchOutput),
+      reply("turn-1", {
+        status: "completed",
+        text: "The public meeting is on Friday.",
+        citations: [{ passageId: webEvidence.id, excerpt: "public meeting is on Friday" }],
+      }),
+      turnSettled("turn-1"),
+      settled("delivery-1", "turn-1"),
+    ],
+    deliveries,
+  );
+  assert.deepEqual(observation, { status: "failed", text: "" });
+});
+
+await test("a failed research call does not discard a note-supported answer", () => {
+  const supported = {
+    status: "completed",
+    text: "The note has the time.",
+    citations: [{ passageId: passage.id, excerpt: "library at 14:00" }],
+  };
+  const observation = observeAnswer(
+    [
+      consumed("delivery-1", "turn-1"),
+      ...search("turn-1", "notes-1", "search_notes", { passages: [passage] }),
+      event({
+        type: "call.requested",
+        scope: { turnId: "turn-1" },
+        data: {
+          callId: "research-1",
+          owner: { runId: "model-1" },
+          capability: { kind: "tool", name: "research" },
+        },
+      }),
+      event({
+        type: "call.settled",
+        scope: { turnId: "turn-1" },
+        data: { callId: "research-1", outcome: "failed", output: undefined },
+      }),
+      reply("turn-1", supported),
+      turnSettled("turn-1"),
+      settled("delivery-1", "turn-1"),
+    ],
+    deliveries,
+  );
+  assert.deepEqual(observation, { status: "result", result: supported, evidence: [passage] });
+});
+
 await test("research output with an invented source ID cannot become answer evidence", () => {
   const observation = observeAnswer(
     [
       consumed("delivery-1", "turn-1"),
+      ...search("turn-1", "notes-1", "search_notes", { passages: [passage] }),
       ...search("turn-1", "research-1", "research", {
         ...researchOutput,
-        sources: [{ id: "p_0000000000000000", source: webSource }],
+        sources: [
+          {
+            id: "p_0000000000000000",
+            source: webSource,
+            snippet: webEvidence.text,
+          },
+        ],
       }),
       reply("turn-1", answer),
       turnSettled("turn-1"),
@@ -150,7 +209,7 @@ await test("research output with an invented source ID cannot become answer evid
     ],
     deliveries,
   );
-  assert.deepEqual(observation, { status: "failed", text: "" });
+  assert.deepEqual(observation, { status: "result", result: answer, evidence: [passage] });
 });
 
 await test("an answer is not read until every steering input has settled, then comes from the last turn", () => {

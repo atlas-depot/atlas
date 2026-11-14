@@ -69,13 +69,43 @@ it("validates public citations separately and persists only the provider's web s
       status: "completed",
       question: "What is the release date?",
       text: webPassage.text,
-      sources: [{ id: "p_0000000000000000", source: webSource }],
+      sources: [{ id: "p_0000000000000000", source: webSource, snippet: webPassage.text }],
     }),
   ).toBeUndefined();
   expect(readResearchEvidence({ status: "not_performed", reason: "denied" })).toEqual({
     status: "not_performed",
     reason: "denied",
   });
+});
+
+it("binds a web excerpt to its own provider-attributed snippet, not the research summary", () => {
+  const webSource = {
+    kind: "web" as const,
+    url: "https://example.test/release",
+    title: "Official release",
+    retrievedAt: "2026-11-13T12:00:00.000Z",
+  };
+  const id = evidenceId(webSource);
+  const research = readResearchEvidence({
+    status: "completed",
+    question: "What is the release date?",
+    text: "The summary says the release is on 14 October.",
+    sources: [{ id, source: webSource, snippet: "Official notice: 14 October release." }],
+  });
+  expect(research).toEqual({
+    status: "completed",
+    evidence: [{ id, text: "Official notice: 14 October release.", source: webSource }],
+  });
+  if (research?.status !== "completed") throw new Error("Expected recorded research evidence.");
+  expect(
+    resolveAnswer(
+      answer([{ passageId: id, excerpt: "summary says the release" }]),
+      research.evidence,
+    ),
+  ).toEqual({ ok: false, reason: "excerpt_mismatch" });
+  expect(
+    resolveAnswer(answer([{ passageId: id, excerpt: "14 October release" }]), research.evidence),
+  ).toMatchObject({ ok: true, answer: { status: "completed" } });
 });
 
 it("rejects a well-formed citation of a passage this attempt never retrieved", () => {

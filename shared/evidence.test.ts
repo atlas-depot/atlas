@@ -32,6 +32,9 @@ describe("distinct public evidence records", () => {
       "javascript:alert(1)",
       "https://user:password@example.test/page",
       "not a URL",
+      `https://example.test/${"a".repeat(2_048)}`,
+      "https://example.test/\u0000",
+      "https://example.test/\u0007",
     ])
       expect(webEvidenceSourceSchema.safeParse({ ...source, url }).success).toBe(false);
 

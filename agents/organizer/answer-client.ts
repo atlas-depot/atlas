@@ -156,12 +156,13 @@ export function observeAnswer(
       searched = true;
       for (const passage of passages) evidence.set(passage.id, passage);
     } else if (event.type === "call.settled" && researches.has(event.data.callId)) {
-      if (event.data.outcome !== "completed") return { status: "failed", text };
-      const research = readResearchEvidence(event.data.output);
-      if (!research) return { status: "failed", text };
-      searched = true;
-      if (research.status === "completed")
-        for (const source of research.evidence) evidence.set(source.id, source);
+      // Research is optional evidence. A failed or denied call never invalidates note evidence;
+      // an answer that cites it will still fail because no web source was recorded.
+      if (event.data.outcome === "completed") {
+        const research = readResearchEvidence(event.data.output);
+        if (research?.status === "completed")
+          for (const source of research.evidence) evidence.set(source.id, source);
+      }
     } else if (event.type === "content.completed" && event.scope?.turnId === turnId) {
       const part = resultPartSchema.safeParse(event.data);
       if (part.success) result = { value: part.data.value };

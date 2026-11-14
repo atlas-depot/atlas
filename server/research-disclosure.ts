@@ -1,149 +1,115 @@
 /**
- * Conservative local query generalization. This is a backend disclosure guard, not an entity
- * recognizer: uncertain or over-broad context is sent to approval rather than to a provider.
+ * Conservative fail-closed disclosure screen. This is not an entity recognizer: any distinctive
+ * token shared with private context, or any direct identifier in the query, requires approval.
+ * An autonomous query therefore contains no screened term from notes, history or this turn's input.
  */
-const genericCapitalizedWords = new Set(
-  `A An And As At About After All Also Are Be Because Before But By Can Could Do Does For From Had Has Have He Her Here Hers Him His How I In Into Is It Its May Me More Most My No Not Of On Or Our She So Some Such Than That The Their Them There These They This Those To Was We Were What When Where Which Who Why Will With Would You Your`
-    .toLowerCase()
-    .split(" "),
-);
 
-const commonTerms = new Set(
-  `a about after again all also an and any are as at be because been before being between both but by can could did do does doing down during each few find for from further had has have having he her here hers him his how i if in information into is it its just more most my no not of off on once only or other our out over own public research same search she should so some such than that the their them then there these they this those through to too under until up very was we web were what when where which while who why will with would you your subject private`.split(
+const genericTerms = new Set(
+  `a about after again all also an and any are as at be because been before being between both but by can could did do does doing down during each few find for from further had has have having he her here hers him his how i if in information into is it its just latest more most my news no not of off on once only or other our out over own plan planning public research same search she should so some such than that the their them then there these they this those through to too under until up update updates very was we web were what when where which while who why will with would you your subject private company companies employee employees work works https http www com org net io`.split(
     " ",
   ),
 );
+for (const acronym of ["AI", "API", "CEO", "EU", "GDP", "HR", "IT", "PDF", "US", "USA"])
+  genericTerms.add(acronym.toLowerCase());
 
-const commonAcronyms = new Set(["AI", "API", "CEO", "EU", "GDP", "HR", "IT", "PDF", "US", "USA"]);
-const emailPattern = /[\p{L}\p{N}._%+-]+@[\p{L}\p{N}.-]+\.[A-Za-z]{2,}/gu;
-const uuidPattern =
-  /\b[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\b/giu;
-const longNumberPattern = /\b\d[\d,./-]{3,}\d\b/gu;
-const phonePattern = /(?:\+\d[\d ().-]{6,}\d|\(?\d{3}\)?[ .-]\d{3}[ .-]\d{4})/gu;
-const yearPattern = /^(?:19|20|21)\d{2}$/u;
-const datePattern = /^\d{4}[-/.]\d{1,2}[-/.]\d{1,2}$/u;
-const quotedPhrasePattern = /[“"]([^“”"\n]{8,160})[”"]/gu;
-const capitalizedWordPattern = /\p{Lu}[\p{L}\p{M}\p{N}'’.-]{2,}/gu;
-const privateWordPattern = /[\p{L}\p{N}]+/gu;
-const MAX_PRIVATE_MARKERS = 512;
+const emailPattern =
+  /(?:^|[^\p{L}\p{N}._%+-])[\p{L}\p{N}._%+-]{1,64}@[\p{L}\p{N}-]{1,63}(?:\.[\p{L}\p{N}-]{1,63}){0,4}\.[A-Za-z]{2,24}(?=$|[^\p{L}\p{N}])/u;
+const uuidPattern = /\b[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\b/iu;
+const ibanPattern =
+  /(?:^|[^\p{L}\p{N}])[A-Z]{2}\d{2}(?: ?[A-Z0-9]{2,4}){2,12}(?=$|[^\p{L}\p{N}])/iu;
+const digitSequencePattern = /\+?\d[\d ()./:-]{2,}\d/gu;
+const longNumberPattern = /\b\d{4,}\b/gu;
+const yearPattern = /^(?:18|19|20|21)\d{2}$/u;
+const termPattern = /[\p{L}\p{N}]+/gu;
+const nonLatinPattern = /[^\p{Script=Latin}\p{N}\p{M}]/u;
 
-function normalize(value: string) {
-  return value.normalize("NFKC").toLocaleLowerCase("en-US");
+/** NFKC plus Turkish-safe folding, so NFD text and I/ı/İ/i compare as one form. */
+function fold(value: string) {
+  return value
+    .normalize("NFKC")
+    .replace(/[\u0130\u0131]/gu, "i")
+    .replace(/I/gu, "i")
+    .replace(/\p{M}+/gu, "")
+    .toLowerCase();
 }
 
-function escapeRegExp(value: string) {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+function terms(value: string) {
+  return [...value.matchAll(termPattern)].map((match) => match[0]);
 }
 
-function privateMarkers(privateTexts: readonly string[], privatePhraseTexts: readonly string[]) {
-  const markers = new Set<string>();
-  let truncated = false;
-  const add = (value: string) => {
-    if (markers.has(value)) return;
-    if (markers.size >= MAX_PRIVATE_MARKERS) {
-      truncated = true;
-      return;
-    }
-    markers.add(value);
-  };
+function isSpecificTerm(term: string) {
+  if (genericTerms.has(term) || /^\p{N}+$/u.test(term)) return false;
+  // A single Latin character is usually noise; even one uncased-script character can identify.
+  return term.length >= 2 || nonLatinPattern.test(term);
+}
+
+/** Two-character windows catch names in scripts that do not separate words with spaces. */
+function sharesNonLatinFragment(term: string, query: string) {
+  if (!nonLatinPattern.test(term)) return false;
+  const characters = Array.from(term);
+  for (let index = 0; index + 1 < characters.length; index++)
+    if (query.includes(characters[index]! + characters[index + 1]!)) return true;
+  return false;
+}
+
+function hasPrivateOverlap(question: string, privateTexts: readonly string[]) {
+  const query = fold(question);
+  const queryTerms = new Set(terms(query));
   for (const text of privateTexts) {
-    for (const pattern of [emailPattern, uuidPattern, phonePattern, quotedPhrasePattern]) {
-      pattern.lastIndex = 0;
-      for (const match of text.matchAll(pattern)) if (match[0]) add(match[0].trim());
-    }
-    for (const match of text.matchAll(longNumberPattern)) {
-      const value = match[0]!.trim();
-      if (!yearPattern.test(value) && !datePattern.test(value)) add(value);
-    }
-    for (const match of text.matchAll(capitalizedWordPattern)) {
-      const word = match[0]!.replace(/^[.'’_-]+|[.'’_-]+$/gu, "");
-      if (word.length < 3) continue;
-      const normalized = normalize(word);
-      if (!genericCapitalizedWords.has(normalized) && !commonAcronyms.has(word)) add(word);
+    const folded = fold(text);
+    for (const term of terms(folded)) {
+      if (!isSpecificTerm(term)) continue;
+      if (queryTerms.has(term) || sharesNonLatinFragment(term, query)) return true;
     }
   }
-  for (const text of privatePhraseTexts) {
-    const words = [...text.matchAll(privateWordPattern)];
-    for (let start = 0; start + 2 < words.length; start++) {
-      const first = words[start]!;
-      const last = words[start + 2]!;
-      const phrase = text.slice(first.index, last.index + last[0].length);
-      const specificWords = words
-        .slice(start, start + 3)
-        .filter(([word]) => word.length > 2 && !commonTerms.has(normalize(word))).length;
-      if (phrase.length >= 18 && specificWords >= 2) add(phrase);
-      if (truncated) break;
-    }
-    if (truncated) break;
+  return false;
+}
+
+function hasDirectIdentifier(question: string) {
+  if (emailPattern.test(question) || uuidPattern.test(question) || ibanPattern.test(question))
+    return true;
+  for (const match of question.matchAll(digitSequencePattern)) {
+    if (match[0].replace(/\D/gu, "").length >= 7) return true;
   }
-  return { values: [...markers].sort((left, right) => right.length - left.length), truncated };
-}
-
-function replacePrivateMarker(query: string, marker: string) {
-  const escaped = escapeRegExp(marker).replace(/\s+/gu, "\\s+");
-  const pattern = new RegExp(`(^|[^\\p{L}\\p{N}])${escaped}(?=$|[^\\p{L}\\p{N}])`, "giu");
-  return query.replace(pattern, (_match, prefix: string) => `${prefix}the subject`);
-}
-
-function replaceDirectIdentifiers(query: string) {
-  return query
-    .replace(emailPattern, "the subject")
-    .replace(uuidPattern, "the subject")
-    .replace(phonePattern, "the subject")
-    .replace(longNumberPattern, (value) =>
-      yearPattern.test(value) || datePattern.test(value) ? value : "the subject",
-    );
-}
-
-function meaningfulTermCount(query: string) {
-  return (
-    normalize(query)
-      .match(/[\p{L}\p{N}]+/gu)
-      ?.filter((term) => term.length > 2 && !commonTerms.has(term)).length ?? 0
-  );
+  for (const match of question.matchAll(longNumberPattern)) {
+    if (!yearPattern.test(match[0])) return true;
+  }
+  return false;
 }
 
 export type ResearchQuestionInspection =
-  | { status: "generalized"; outboundQuestion: string; redacted: boolean }
+  | { status: "generalized"; outboundQuestion: string }
   | {
       status: "approval_required";
-      reason: "explicit_private_details" | "not_usefully_generalized";
+      reason:
+        | "explicit_private_details"
+        | "private_context_overlap"
+        | "direct_identifier"
+        | "context_unavailable";
     };
 
 /**
- * Private specifics found in the current turn's notes/history are removed before autonomous
- * research. If the remaining query would be too vague, the exact proposed query needs approval.
+ * Only a query with no distinctive term shared with private context and no direct identifier may
+ * leave Atlas autonomously. Everything else shows its exact outbound text for explicit approval.
  * The model flag can only escalate to approval; it never grants permission.
  */
 export function inspectResearchQuestion({
   question,
   privateTexts,
-  privatePhraseTexts = [],
   requiresPrivateDisclosure = false,
   contextUncertain = false,
 }: {
   question: string;
   privateTexts: readonly string[];
-  privatePhraseTexts?: readonly string[];
   requiresPrivateDisclosure?: boolean;
   contextUncertain?: boolean;
 }): ResearchQuestionInspection {
   if (requiresPrivateDisclosure)
     return { status: "approval_required", reason: "explicit_private_details" };
-  if (contextUncertain) return { status: "approval_required", reason: "not_usefully_generalized" };
-
-  let outboundQuestion = replaceDirectIdentifiers(question);
-  const markers = privateMarkers(privateTexts, privatePhraseTexts);
-  if (markers.truncated) return { status: "approval_required", reason: "not_usefully_generalized" };
-  for (const marker of markers.values)
-    outboundQuestion = replacePrivateMarker(outboundQuestion, marker);
-  outboundQuestion = outboundQuestion
-    .replace(/\bthe subject(?:\s+the subject)+\b/giu, "the subject")
-    .replace(/\s+/gu, " ")
-    .trim();
-
-  const redacted = outboundQuestion !== question;
-  if (redacted && meaningfulTermCount(outboundQuestion) < 2)
-    return { status: "approval_required", reason: "not_usefully_generalized" };
-  return { status: "generalized", outboundQuestion, redacted };
+  if (contextUncertain) return { status: "approval_required", reason: "context_unavailable" };
+  if (hasPrivateOverlap(question, privateTexts))
+    return { status: "approval_required", reason: "private_context_overlap" };
+  if (hasDirectIdentifier(question))
+    return { status: "approval_required", reason: "direct_identifier" };
+  return { status: "generalized", outboundQuestion: question };
 }

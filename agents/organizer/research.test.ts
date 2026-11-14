@@ -65,7 +65,14 @@ await test("one real provider request uses server search and preserves cited evi
   });
   assert.deepEqual(await research("When is the public release?", new AbortController().signal), {
     text,
-    sources: [{ id: url, url, title: "Official release" }],
+    sources: [
+      {
+        id: url,
+        url,
+        title: "Official release",
+        snippet: "[Source](https://example.com/release)",
+      },
+    ],
     usage: { inputTokens: 20, outputTokens: 10, costUsd: 0.012 },
   });
   assert.equal(calls, 1);

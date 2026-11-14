@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { and, asc, eq, inArray, lt, sql } from "drizzle-orm";
 import { z } from "zod";
 import {
+  CONTEXT_LIMITS,
   contextMessagesSchema,
   sourceDependenciesSchema,
   byteSize,
@@ -9,6 +10,7 @@ import {
 } from "../conversation-context.ts";
 import { inspectResearchQuestion } from "../research-disclosure.ts";
 import { conversationIdSchema } from "../../shared/conversations.ts";
+import { noteContentPlainText } from "../../shared/document.ts";
 import {
   researchDisclosureRequestsSchema,
   type ResearchDisclosureRequest,
@@ -22,6 +24,7 @@ import {
   conversations,
   conversationTurnInputs,
   conversationTurns,
+  type ConversationResearchRequestStatus,
 } from "./conversation-schema.ts";
 import { lockOwnedConversation, type ConversationTransaction } from "./conversation-publication.ts";
 import { noteTag } from "./notes.ts";
@@ -35,6 +38,8 @@ const RESEARCH_REQUEST_POLL_MS = 500;
 const MAX_RESEARCH_REQUESTS_PER_TURN = 3;
 const MAX_PRIVATE_NOTE_COUNT = 100;
 const MAX_PRIVATE_NOTE_BYTES = 250_000;
+/** Do not spend a paid provider call when the answer has no room for useful evidence. */
+const MIN_RESEARCH_BUDGET_BYTES = 4_000;
 
 type ContextSnapshot = {
   ownerId: string;
@@ -42,8 +47,8 @@ type ContextSnapshot = {
   turnId: string;
   sourceDependencies: SourceDependency[];
   contextHash: string;
+  retrievalBytes: number;
   privateTexts: string[];
-  privatePhraseTexts: string[];
   contextUncertain: boolean;
 };
 
@@ -54,6 +59,36 @@ type ContextLookup = {
 };
 
 type ResearchDecision = "pending" | "approved" | "denied" | "cancelled" | "expired" | "stale";
+
+const openStatuses = ["pending", "approved"] as const;
+const terminalStatuses = [
+  "denied",
+  "expired",
+  "cancelled",
+  "stale",
+  "completed",
+  "failed",
+] as const;
+
+type RequestWriter = Pick<Database, "update">;
+
+/** One guarded terminal write. A stale status never overwrites a claimed or decided row. */
+async function settleRequest(
+  tx: RequestWriter,
+  id: string,
+  status: ConversationResearchRequestStatus,
+  allowedFrom: readonly ConversationResearchRequestStatus[],
+) {
+  await tx
+    .update(conversationResearchRequests)
+    .set({ status, proposedQuery: null, decidedAt: sql`clock_timestamp()` })
+    .where(
+      and(
+        eq(conversationResearchRequests.id, id),
+        inArray(conversationResearchRequests.status, allowedFrom),
+      ),
+    );
+}
 
 function compareDependencies(left: SourceDependency[], right: SourceDependency[]) {
   const sorted = (sources: SourceDependency[]) =>
@@ -85,6 +120,7 @@ async function readResearchContext(
       ownerId: conversations.ownerId,
       sourceDependencies: conversationTurns.sourceDependencies,
       provenanceComplete: conversationTurns.provenanceComplete,
+      retrievalBytes: conversationTurns.retrievalBytes,
       summary: conversationContexts.summary,
       recent: conversationContexts.recent,
     })
@@ -200,20 +236,24 @@ async function readResearchContext(
     )
     .digest("hex");
 
-  const noteTexts = noteContent.flatMap(({ title, content }) => [title, JSON.stringify(content)]);
+  const noteTexts = noteContent.flatMap(({ title, content }) => [
+    title,
+    noteContentPlainText(content),
+  ]);
   return {
     ownerId: row.ownerId,
     conversationId: row.conversationId,
     turnId: row.turnId,
     sourceDependencies: dependencies.data,
     contextHash,
+    retrievalBytes: row.retrievalBytes,
+    // Notes, summary, recent history and this turn's inputs are all transcript evidence.
     privateTexts: [
       ...(context.summary ? [context.summary] : []),
       ...contextRecent.data.map(({ text }) => text),
       ...inputs.map(({ text }) => text),
       ...noteTexts,
     ],
-    privatePhraseTexts: noteTexts,
     contextUncertain: !sourcesCurrent || privateContextTooLarge,
   };
 }
@@ -279,23 +319,18 @@ export function createConversationResearchStore(db: Database) {
             eq(conversationResearchRequests.queryHash, expectedHash),
             eq(conversationTurns.sessionId, sessionId),
           ),
-        );
+        )
+        .for("update");
       if (!row) return "stale";
       if (
         (row.request.status === "pending" || row.request.status === "approved") &&
         new Date(row.request.expiresAt).getTime() <= Date.now()
       ) {
-        await tx
-          .update(conversationResearchRequests)
-          .set({ status: "expired", proposedQuery: null, decidedAt: sql`clock_timestamp()` })
-          .where(eq(conversationResearchRequests.id, id));
+        await settleRequest(tx, id, "expired", openStatuses);
         return "expired";
       }
       if (row.turnStatus !== "running" && ["pending", "approved"].includes(row.request.status)) {
-        await tx
-          .update(conversationResearchRequests)
-          .set({ status: "cancelled", proposedQuery: null, decidedAt: sql`clock_timestamp()` })
-          .where(eq(conversationResearchRequests.id, id));
+        await settleRequest(tx, id, "cancelled", openStatuses);
         return "cancelled";
       }
       switch (row.request.status) {
@@ -327,14 +362,28 @@ export function createConversationResearchStore(db: Database) {
         await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtextextended(${sessionId}, 72))`);
         const context = await readResearchContext(tx, { sessionId });
         if (!context) return { status: "unavailable" as const };
+        if (CONTEXT_LIMITS.retrievalBytes - context.retrievalBytes < MIN_RESEARCH_BUDGET_BYTES)
+          return { status: "budget" as const };
+
+        await expireRequestRows(tx, context.turnId);
+        // Once this turn has a terminal decision, every later query needs a new approval.
+        const [terminal] = await tx
+          .select({ id: conversationResearchRequests.id })
+          .from(conversationResearchRequests)
+          .where(
+            and(
+              eq(conversationResearchRequests.turnId, context.turnId),
+              inArray(conversationResearchRequests.status, terminalStatuses),
+            ),
+          )
+          .limit(1);
         const inspection = inspectResearchQuestion({
           question,
           privateTexts: context.privateTexts,
-          privatePhraseTexts: context.privatePhraseTexts,
           requiresPrivateDisclosure: input.requiresPrivateDisclosure,
           contextUncertain: context.contextUncertain,
         });
-        if (inspection.status === "generalized")
+        if (inspection.status === "generalized" && !terminal)
           return {
             status: "generalized" as const,
             outboundQuestion: inspection.outboundQuestion,
@@ -342,7 +391,6 @@ export function createConversationResearchStore(db: Database) {
             contextHash: context.contextHash,
           };
 
-        await expireRequestRows(tx, context.turnId);
         const [existing] = await tx
           .select()
           .from(conversationResearchRequests)
@@ -361,22 +409,14 @@ export function createConversationResearchStore(db: Database) {
             contextHash: existing.contextHash,
           };
         }
-        if (existing)
-          await tx
-            .update(conversationResearchRequests)
-            .set({ status: "stale", proposedQuery: null, decidedAt: sql`clock_timestamp()` })
-            .where(eq(conversationResearchRequests.id, existing.id));
+        if (existing) await settleRequest(tx, existing.id, "stale", openStatuses);
 
-        const active = await tx
+        // Count every attempt, including denied and expired ones, so a re-ask cannot loop.
+        const used = await tx
           .select({ id: conversationResearchRequests.id })
           .from(conversationResearchRequests)
-          .where(
-            and(
-              eq(conversationResearchRequests.turnId, context.turnId),
-              inArray(conversationResearchRequests.status, ["pending", "approved"]),
-            ),
-          );
-        if (active.length >= MAX_RESEARCH_REQUESTS_PER_TURN) return { status: "limit" as const };
+          .where(eq(conversationResearchRequests.turnId, context.turnId));
+        if (used.length >= MAX_RESEARCH_REQUESTS_PER_TURN) return { status: "limit" as const };
 
         const [request] = await tx
           .insert(conversationResearchRequests)
@@ -414,18 +454,31 @@ export function createConversationResearchStore(db: Database) {
       return db.transaction(async (tx) => {
         await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtextextended(${sessionId}, 72))`);
         const context = await readResearchContext(tx, { sessionId });
-        if (!context || context.contextHash !== input.contextHash) return false;
+        if (!context || context.contextHash !== input.contextHash) return "stale" as const;
+        if (CONTEXT_LIMITS.retrievalBytes - context.retrievalBytes < MIN_RESEARCH_BUDGET_BYTES)
+          return "budget" as const;
+        await expireRequestRows(tx, context.turnId);
+        const [terminal] = await tx
+          .select({ id: conversationResearchRequests.id })
+          .from(conversationResearchRequests)
+          .where(
+            and(
+              eq(conversationResearchRequests.turnId, context.turnId),
+              inArray(conversationResearchRequests.status, terminalStatuses),
+            ),
+          )
+          .limit(1);
+        if (terminal) return "stale" as const;
         const inspection = inspectResearchQuestion({
           question,
           privateTexts: context.privateTexts,
-          privatePhraseTexts: context.privatePhraseTexts,
           contextUncertain: context.contextUncertain,
         });
-        return (
-          inspection.status === "generalized" &&
+        return inspection.status === "generalized" &&
           inspection.outboundQuestion === input.outboundQuestion &&
           queryHash(inspection.outboundQuestion) === input.queryHash
-        );
+          ? ("claimed" as const)
+          : ("stale" as const);
       });
     },
 
@@ -459,7 +512,7 @@ export function createConversationResearchStore(db: Database) {
       requestId: string,
       expectedHash: string,
       expectedContextHash: string,
-    ): Promise<"claimed" | "expired" | "cancelled" | "stale"> {
+    ): Promise<"claimed" | "expired" | "cancelled" | "stale" | "budget"> {
       const id = conversationIdSchema.parse(requestId);
       return db.transaction(async (tx) => {
         await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtextextended(${sessionId}, 72))`);
@@ -481,11 +534,12 @@ export function createConversationResearchStore(db: Database) {
           .for("update");
         if (!request) return "stale";
         const row = request.request;
-        if (row.status === "expired" || new Date(row.expiresAt).getTime() <= Date.now()) {
-          await tx
-            .update(conversationResearchRequests)
-            .set({ status: "expired", proposedQuery: null, decidedAt: sql`clock_timestamp()` })
-            .where(eq(conversationResearchRequests.id, id));
+        if (row.status === "expired") return "expired";
+        if (
+          (row.status === "pending" || row.status === "approved") &&
+          new Date(row.expiresAt).getTime() <= Date.now()
+        ) {
+          await settleRequest(tx, id, "expired", openStatuses);
           return "expired";
         }
         if (row.status !== "approved") return row.status === "cancelled" ? "cancelled" : "stale";
@@ -496,16 +550,22 @@ export function createConversationResearchStore(db: Database) {
           context.contextHash !== expectedContextHash ||
           row.contextHash !== expectedContextHash
         ) {
-          await tx
-            .update(conversationResearchRequests)
-            .set({ status: "stale", proposedQuery: null, decidedAt: sql`clock_timestamp()` })
-            .where(eq(conversationResearchRequests.id, id));
+          await settleRequest(tx, id, "stale", openStatuses);
           return "stale";
+        }
+        if (CONTEXT_LIMITS.retrievalBytes - context.retrievalBytes < MIN_RESEARCH_BUDGET_BYTES) {
+          await settleRequest(tx, id, "failed", openStatuses);
+          return "budget";
         }
         await tx
           .update(conversationResearchRequests)
           .set({ status: "started", proposedQuery: null })
-          .where(eq(conversationResearchRequests.id, id));
+          .where(
+            and(
+              eq(conversationResearchRequests.id, id),
+              eq(conversationResearchRequests.status, "approved"),
+            ),
+          );
         return "claimed";
       });
     },
@@ -598,7 +658,7 @@ export function createConversationResearchStore(db: Database) {
           .where(eq(conversationContexts.turnId, snapshot.turn.id));
         if (!turn || context?.state !== "ready") return { status: "unavailable" as const };
         const bytes = turn.retrievalBytes + byteSize(output);
-        if (bytes > 48_000) return { status: "budget" as const };
+        if (bytes > CONTEXT_LIMITS.retrievalBytes) return { status: "budget" as const };
         await tx
           .update(conversationTurns)
           .set({ retrievalBytes: bytes })
@@ -623,10 +683,7 @@ export function createConversationResearchStore(db: Database) {
           );
         for (const row of rows) {
           if (new Date(row.expiresAt).getTime() <= Date.now())
-            await tx
-              .update(conversationResearchRequests)
-              .set({ status: "expired", proposedQuery: null, decidedAt: sql`clock_timestamp()` })
-              .where(eq(conversationResearchRequests.id, row.id));
+            await settleRequest(tx, row.id, "expired", openStatuses);
         }
         const pending = rows
           .filter(
@@ -655,16 +712,20 @@ export function createConversationResearchStore(db: Database) {
         .orderBy(asc(conversationResearchRequests.expiresAt))
         .limit(size);
       if (rows.length === 0) return 0;
-      await db
+      const expired = await db
         .update(conversationResearchRequests)
         .set({ status: "expired", proposedQuery: null, decidedAt: sql`clock_timestamp()` })
         .where(
-          inArray(
-            conversationResearchRequests.id,
-            rows.map(({ id }) => id),
+          and(
+            inArray(
+              conversationResearchRequests.id,
+              rows.map(({ id }) => id),
+            ),
+            inArray(conversationResearchRequests.status, openStatuses),
           ),
-        );
-      return rows.length;
+        )
+        .returning({ id: conversationResearchRequests.id });
+      return expired.length;
     },
 
     async decide(
@@ -721,51 +782,59 @@ export function createConversationResearchStore(db: Database) {
           .for("update");
         if (!request) return { status: "not_found" as const };
         if (request.queryHash !== expectedHash) return { status: "mismatch" as const };
-        if (request.status === "expired" || new Date(request.expiresAt).getTime() <= Date.now()) {
-          if (request.status === "pending" || request.status === "approved")
-            await tx
-              .update(conversationResearchRequests)
-              .set({ status: "expired", proposedQuery: null, decidedAt: sql`clock_timestamp()` })
-              .where(eq(conversationResearchRequests.id, id));
+        if (request.status === "expired") return { status: "expired" as const };
+        if (
+          (request.status === "pending" || request.status === "approved") &&
+          new Date(request.expiresAt).getTime() <= Date.now()
+        ) {
+          await settleRequest(tx, id, "expired", openStatuses);
           return { status: "expired" as const };
         }
-        if (decision === "deny" && request.status === "denied") return { status: "denied" };
-        const alreadyApproved = decision === "approve" && request.status === "approved";
-        if (request.status !== "pending" && !alreadyApproved)
+        if (request.status === "denied" && decision === "deny") return { status: "denied" };
+        if (request.status !== "pending" && request.status !== "approved")
           return { status: "conflict" as const };
 
-        if (decision === "approve") {
-          const context =
-            sourcesAvailable && dependencies.success
-              ? await readResearchContext(tx, {
-                  turnId: request.turnId,
-                  conversationId: parentId,
-                })
-              : undefined;
-          if (
-            !context ||
-            context.ownerId !== owner ||
-            context.contextHash !== request.contextHash
-          ) {
-            await tx
-              .update(conversationResearchRequests)
-              .set({ status: "stale", proposedQuery: null, decidedAt: sql`clock_timestamp()` })
-              .where(eq(conversationResearchRequests.id, id));
-            return { status: "stale" as const };
-          }
-          if (alreadyApproved) return { status: "approved" };
+        // Denial remains available until a provider call starts, including after approval.
+        if (decision === "deny") {
+          await tx
+            .update(conversationResearchRequests)
+            .set({ status: "denied", proposedQuery: null, decidedAt: sql`clock_timestamp()` })
+            .where(
+              and(
+                eq(conversationResearchRequests.id, id),
+                inArray(conversationResearchRequests.status, openStatuses),
+              ),
+            );
+          return { status: "denied" as const };
         }
 
-        const status = decision === "approve" ? "approved" : "denied";
+        const context =
+          sourcesAvailable && dependencies.success
+            ? await readResearchContext(tx, {
+                turnId: request.turnId,
+                conversationId: parentId,
+              })
+            : undefined;
+        if (!context || context.ownerId !== owner || context.contextHash !== request.contextHash) {
+          await settleRequest(tx, id, "stale", openStatuses);
+          return { status: "stale" as const };
+        }
+        if (request.status === "approved") return { status: "approved" as const };
+
         await tx
           .update(conversationResearchRequests)
           .set({
-            status,
-            proposedQuery: decision === "approve" ? request.proposedQuery : null,
+            status: "approved",
+            proposedQuery: request.proposedQuery,
             decidedAt: sql`clock_timestamp()`,
           })
-          .where(eq(conversationResearchRequests.id, id));
-        return { status };
+          .where(
+            and(
+              eq(conversationResearchRequests.id, id),
+              eq(conversationResearchRequests.status, "pending"),
+            ),
+          );
+        return { status: "approved" as const };
       });
     },
   };
