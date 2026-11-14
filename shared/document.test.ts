@@ -126,6 +126,31 @@ describe("stored note documents", () => {
     expect(text).not.toContain("columnWidths");
   });
 
+  it("keeps text immediately before a link from merging into the destination", () => {
+    const value = blockNoteDocumentSchema.parse(
+      document([
+        {
+          id: "para",
+          type: "paragraph",
+          props: {},
+          content: [
+            { type: "text", text: "bluebird", styles: {} },
+            {
+              type: "link",
+              href: "https://example.com",
+              content: [{ type: "text", text: "Read", styles: {} }],
+            },
+          ],
+          children: [],
+        },
+      ]),
+    );
+    const text = noteContentPlainText(value);
+    expect(text).toContain("bluebird");
+    expect(text).toContain("https://example.com");
+    expect(text).not.toContain("bluebirdhttps");
+  });
+
   it("distinguishes a structured document from a literal string containing the same JSON", () => {
     const value = blockNoteDocumentSchema.parse(document());
     expect(canonicalNoteContent(value)).not.toBe(canonicalNoteContent(canonicalNoteContent(value)));

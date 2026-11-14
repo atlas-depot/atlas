@@ -63,6 +63,21 @@ describe("public research disclosure boundary", () => {
     ).toEqual({ status: "approval_required", reason: "private_context_overlap" });
   });
 
+  it("compares private URLs after dropping fragments", () => {
+    expect(
+      inspectResearchQuestion({
+        question: "Summarize https://a.io/b#section",
+        privateTexts: ["Private link: https://a.io/b"],
+      }),
+    ).toEqual({ status: "approval_required", reason: "private_context_overlap" });
+    expect(
+      inspectResearchQuestion({
+        question: "Summarize https://a.io/b",
+        privateTexts: ["Private link: https://a.io/b#section"],
+      }),
+    ).toEqual({ status: "approval_required", reason: "private_context_overlap" });
+  });
+
   it("preserves URL identity when every label is a single character", () => {
     expect(
       inspectResearchQuestion({
