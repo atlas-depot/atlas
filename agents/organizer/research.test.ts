@@ -70,7 +70,6 @@ await test("one real provider request uses server search and preserves cited evi
         id: url,
         url,
         title: "Official release",
-        snippet: "[Source](https://example.com/release)",
       },
     ],
     usage: { inputTokens: 20, outputTokens: 10, costUsd: 0.012 },
@@ -123,7 +122,7 @@ await test("links written in prose do not substitute for provider citation evide
   });
 });
 
-await test("a source without attributed content is not recorded as evidence", async () => {
+await test("a source without provider content keeps its record but no snippet", async () => {
   const research = setup(async () =>
     response({
       annotations: [
@@ -134,9 +133,9 @@ await test("a source without attributed content is not recorded as evidence", as
       ],
     }),
   );
-  await assert.rejects(research("Public question", new AbortController().signal), {
-    message: "Research returned no verified sources.",
-  });
+  const result = await research("Public question", new AbortController().signal);
+  assert.equal(result.sources.length, 1);
+  assert.equal(result.sources[0]?.snippet, undefined);
 });
 
 for (const sourceUrl of ["javascript:alert(1)", "https://user:password@example.com", "not a URL"]) {

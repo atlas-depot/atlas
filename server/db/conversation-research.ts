@@ -216,10 +216,6 @@ async function readResearchContext(
           .orderBy(asc(notes.id));
   if (!privateContextTooLarge && noteContent.length !== sourceIds.length) return undefined;
 
-  const stableDependencies = [...dependencies.data].sort(
-    (left, right) =>
-      left.noteId.localeCompare(right.noteId) || left.version.localeCompare(right.version),
-  );
   const contextHash = createHash("sha256")
     .update(
       JSON.stringify({
@@ -230,8 +226,6 @@ async function readResearchContext(
         summary: context.summary,
         recent: contextRecent.data,
         inputs,
-        dependencies: stableDependencies,
-        currentVersions: [...currentVersions].sort(([left], [right]) => left.localeCompare(right)),
       }),
     )
     .digest("hex");
@@ -405,7 +399,18 @@ export function createConversationResearchStore(db: Database) {
           requiresPrivateDisclosure: input.requiresPrivateDisclosure,
           contextUncertain: context.contextUncertain,
         });
-        if (inspection.status === "generalized" && !terminal)
+        const [openRequest] = await tx
+          .select({ id: conversationResearchRequests.id })
+          .from(conversationResearchRequests)
+          .where(
+            and(
+              eq(conversationResearchRequests.turnId, context.turnId),
+              eq(conversationResearchRequests.queryHash, expectedHash),
+              inArray(conversationResearchRequests.status, ["pending", "approved"]),
+            ),
+          )
+          .limit(1);
+        if (inspection.status === "generalized" && !terminal && !openRequest)
           return {
             status: "generalized" as const,
             outboundQuestion: inspection.outboundQuestion,
@@ -488,6 +493,18 @@ export function createConversationResearchStore(db: Database) {
           )
           .limit(1);
         if (terminal) return "stale" as const;
+        const [openRequest] = await tx
+          .select({ id: conversationResearchRequests.id })
+          .from(conversationResearchRequests)
+          .where(
+            and(
+              eq(conversationResearchRequests.turnId, context.turnId),
+              eq(conversationResearchRequests.queryHash, input.queryHash),
+              inArray(conversationResearchRequests.status, ["pending", "approved"]),
+            ),
+          )
+          .limit(1);
+        if (openRequest) return "stale" as const;
         const inspection = inspectResearchQuestion({
           question,
           privateTexts: context.privateTexts,
@@ -814,6 +831,12 @@ export function createConversationResearchStore(db: Database) {
           return { status: "expired" as const };
         }
         if (request.status === "denied" && decision === "deny") return { status: "denied" };
+        // Idempotent replay after a lost approve response, including once execution started.
+        if (
+          decision === "approve" &&
+          (request.status === "started" || request.status === "completed")
+        )
+          return { status: "approved" as const };
         if (request.status !== "pending" && request.status !== "approved")
           return { status: "conflict" as const };
 

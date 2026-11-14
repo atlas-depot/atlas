@@ -13,7 +13,7 @@ export const researchResultSchema = z.strictObject({
   sources: z
     .array(
       sourceSchema
-        .extend({ id: publicSourceUrlSchema, snippet: z.string().min(1).max(8_000) })
+        .extend({ id: publicSourceUrlSchema, snippet: z.string().min(1).max(8_000).optional() })
         .refine((source) => source.id === source.url),
     )
     .min(1)
@@ -74,34 +74,34 @@ export function createResearch({
       if (!parsed.success) throw new Error("Research returned an invalid source.");
       const metadata = source.providerMetadata?.openrouter;
       const content = metadata?.content;
-      const start = metadata?.startIndex;
-      const end = metadata?.endIndex;
-      const span =
-        typeof start === "number" && typeof end === "number" && end > start
-          ? result.text.slice(start, end).trim()
-          : "";
-      // Provider attribution, not an arbitrary sentence from the model's prose. A title or URL
-      // alone is an identifier, not evidence, so reject a source without attributed content.
-      const snippet = ((typeof content === "string" && content.trim()) || span)
-        .trim()
-        .slice(0, 8_000);
-      if (!snippet) continue;
+      // Provider attribution only. The helper model's own prose is never evidence.
+      const snippet =
+        typeof content === "string" && content.trim().length > 0
+          ? content.trim().slice(0, 8_000)
+          : undefined;
       const existing = snippets.get(parsed.data.url);
       if (existing) {
-        existing.values.add(snippet);
+        if (snippet) existing.values.add(snippet);
         // A later annotation may carry the title the first one omitted.
         if (!existing.title && parsed.data.title) existing.title = parsed.data.title;
       }
       // Identity comes from provider evidence, never a model-written citation label.
-      else snippets.set(parsed.data.url, { title: parsed.data.title, values: new Set([snippet]) });
+      else
+        snippets.set(parsed.data.url, {
+          title: parsed.data.title,
+          values: new Set(snippet ? [snippet] : []),
+        });
     }
     // The chat evidence contract accepts at most 50 sources.
-    const sources: ResearchResult["sources"] = [...snippets].slice(0, 50).map(([url, value]) => ({
-      id: url,
-      url,
-      title: value.title,
-      snippet: [...value.values].slice(0, 20).join("\n").slice(0, 8_000),
-    }));
+    const sources: ResearchResult["sources"] = [...snippets].slice(0, 50).map(([url, value]) => {
+      const joined = [...value.values].filter(Boolean).slice(0, 20).join("\n").slice(0, 8_000);
+      return {
+        id: url,
+        url,
+        title: value.title,
+        ...(joined ? { snippet: joined } : {}),
+      };
+    });
     if (sources.length === 0) throw new Error("Research returned no verified sources.");
 
     const cost = result.usage.raw?.cost;

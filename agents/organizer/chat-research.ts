@@ -80,11 +80,9 @@ export function createChatResearch({
       const result = await research(question, signal);
       if (signal.aborted) throw new DOMException("Research cancelled.", "AbortError");
       const retrievedAt = now().toISOString();
-      const output = researchToolResultSchema.parse({
-        status: "completed",
-        question,
-        text: result.text,
-        sources: result.sources.map(({ url, title, snippet }) => {
+      const mappedSources = result.sources
+        .filter((source) => typeof source.snippet === "string" && source.snippet.trim().length > 0)
+        .map(({ url, title, snippet }) => {
           const source = webEvidenceSourceSchema.parse({
             kind: "web",
             url,
@@ -92,8 +90,18 @@ export function createChatResearch({
             title: title.trim() || url,
             retrievedAt,
           });
-          return { id: evidenceId(source), source, snippet: snippet.slice(0, 8_000) };
-        }),
+          return {
+            id: evidenceId(source),
+            source,
+            snippet: (snippet as string).trim().slice(0, 8_000),
+          };
+        });
+      if (mappedSources.length === 0) throw new Error("Research returned no verified sources.");
+      const output = researchToolResultSchema.parse({
+        status: "completed",
+        question,
+        text: result.text,
+        sources: mappedSources,
       });
       const recorded = await gate.recordResult(sessionId, output);
       if (signal.aborted) throw new DOMException("Research cancelled.", "AbortError");

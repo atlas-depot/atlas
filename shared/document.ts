@@ -294,7 +294,7 @@ function collectInlineText(value: unknown, parts: string[]) {
   }
   if (record.type === "link") {
     // The destination is private source text too and must not merge with its visible label.
-    if (typeof record.href === "string") parts.push(record.href, "\n");
+    if (typeof record.href === "string") parts.push("\n", record.href, "\n");
     collectInlineText(record.content, parts);
     return;
   }

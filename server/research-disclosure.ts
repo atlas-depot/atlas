@@ -26,13 +26,16 @@ const termPattern = /[\p{L}\p{N}]+/gu;
 const nonLatinPattern = /[^\p{Script=Latin}\p{N}\p{M}]/u;
 const urlPattern = /https?:\/\/[^\s"'<>]+/giu;
 
-/** NFKC plus Turkish-safe folding, so NFD text and I/ı/İ/i compare as one form. */
+/** NFKD, then strip combining marks, then Turkish-safe and special-letter folding. */
 function fold(value: string) {
   return value
-    .normalize("NFKC")
+    .normalize("NFKD")
+    .replace(/\p{M}+/gu, "")
     .replace(/[\u0130\u0131]/gu, "i")
     .replace(/I/gu, "i")
-    .replace(/\p{M}+/gu, "")
+    .replace(/ß/gu, "ss")
+    .replace(/[øØ]/gu, "o")
+    .replace(/[łŁ]/gu, "l")
     .toLowerCase();
 }
 
@@ -89,7 +92,9 @@ function sharesNonLatinFragment(term: string, query: string) {
 
 function hasPrivateOverlap(question: string, privateTexts: readonly string[]) {
   const query = fold(question);
-  const queryTerms = new Set(terms(query));
+  const queryTerms = [...terms(query)];
+  const queryTermSet = new Set(queryTerms);
+  const querySkeleton = query.replace(/[^\\p{L}\\p{N}]/gu, "");
   // URL identity survives even when every path label is a single character.
   const queryUrls = new Set(normalizedUrls(query));
   for (const text of privateTexts) {
@@ -97,18 +102,29 @@ function hasPrivateOverlap(question: string, privateTexts: readonly string[]) {
     if (queryUrls.size > 0 && normalizedUrls(folded).some((url) => queryUrls.has(url))) return true;
     for (const term of terms(folded)) {
       if (!isSpecificTerm(term)) continue;
-      if (
-        queryTerms.has(term) ||
-        (nonLatinPattern.test(term) && query.includes(term)) ||
-        sharesNonLatinFragment(term, query)
-      )
-        return true;
+      if (nonLatinPattern.test(term)) {
+        if (query.includes(term) || sharesNonLatinFragment(term, query)) return true;
+        continue;
+      }
+      // Exact token match.
+      if (queryTermSet.has(term)) return true;
+      // Inflected Latin forms: a 3+ letter prefix relation catches suffixes.
+      if (term.length >= 3) {
+        for (const queryTerm of queryTerms) {
+          if (!/^[\\p{Script=Latin}]+$/u.test(queryTerm) || queryTerm.length < 3) continue;
+          if (term.startsWith(queryTerm) || queryTerm.startsWith(term)) return true;
+        }
+      }
+      // Joined forms (e.g. #MayaChen, mayachen): check the query skeleton.
+      if (term.length >= 4 && querySkeleton.includes(term)) return true;
     }
   }
   return false;
 }
 
 function hasDirectIdentifier(question: string) {
+  // Invisible format and tag characters can hide or alter a disclosed token.
+  if (/[\p{Cf}\u{E0000}-\u{E007F}]/u.test(question)) return true;
   const text = asciiDigits(question.normalize("NFKC"));
   if (emailPattern.test(text) || uuidPattern.test(text) || ibanPattern.test(text)) return true;
   for (const match of text.matchAll(digitSequencePattern)) {
