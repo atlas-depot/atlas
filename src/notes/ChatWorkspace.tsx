@@ -148,6 +148,14 @@ export function ChatWorkspace({
     setLoadingMoreMessages(false);
   }, []);
 
+  const isCurrentOpenRequest = useCallback(
+    (requestId: number, conversationId?: string) =>
+      requestId === openRequestIdRef.current &&
+      enabledRef.current &&
+      (conversationId === undefined || !deletedIdsRef.current.has(conversationId)),
+    [],
+  );
+
   function clearHistory() {
     messagesRef.current = [];
     historyCursorRef.current = undefined;
@@ -177,6 +185,7 @@ export function ChatWorkspace({
   const discardCancelRef = useRef<HTMLButtonElement>(null);
   const deleteCancelRef = useRef<HTMLButtonElement>(null);
   const newConversationRef = useRef<HTMLButtonElement>(null);
+  const retryDeleteRef = useRef<HTMLButtonElement>(null);
   const chatHeadingRef = useRef<HTMLHeadingElement>(null);
   const deleteTriggerRef = useRef<HTMLButtonElement | null>(null);
 
@@ -321,10 +330,7 @@ export function ChatWorkspace({
       const requestId = openRequestIdRef.current;
       const actionGeneration = actionGenerationRef.current;
       const stillCurrent = () =>
-        requestId === openRequestIdRef.current &&
-        actionGeneration === actionGenerationRef.current &&
-        enabledRef.current &&
-        !deletedIdsRef.current.has(id);
+        actionGeneration === actionGenerationRef.current && isCurrentOpenRequest(requestId, id);
       try {
         const readResult = await client.read(id);
         if (!stillCurrent()) return;
@@ -372,6 +378,7 @@ export function ChatWorkspace({
       commitHistory,
       historyRefreshPending,
       invalidateActive,
+      isCurrentOpenRequest,
       onUnauthenticated,
     ],
   );
@@ -473,13 +480,9 @@ export function ChatWorkspace({
     try {
       // A read can publish a completed answer, so history must be requested after it.
       const readResult = await client.read(id);
-      if (requestId !== openRequestIdRef.current || !enabledRef.current) return;
+      if (!isCurrentOpenRequest(requestId, id)) return;
       const historyResult = await fetchLatestHistory(id, true);
-      if (
-        requestId !== openRequestIdRef.current ||
-        !enabledRef.current ||
-        deletedIdsRef.current.has(id)
-      ) {
+      if (!isCurrentOpenRequest(requestId, id)) {
         return;
       }
       setConversations((current) => {
@@ -494,11 +497,7 @@ export function ChatWorkspace({
       commitHistory(historyResult);
       setOpenFailure(null);
     } catch (error) {
-      if (
-        requestId !== openRequestIdRef.current ||
-        !enabledRef.current ||
-        deletedIdsRef.current.has(id)
-      ) {
+      if (!isCurrentOpenRequest(requestId, id)) {
         return;
       }
       const kind = classifyFailure(error);
@@ -546,11 +545,7 @@ export function ChatWorkspace({
     setActionFailure(null);
     try {
       const result = await client.messages(targetId, { limit: 50, cursor });
-      if (
-        requestId !== openRequestIdRef.current ||
-        !enabledRef.current ||
-        deletedIdsRef.current.has(targetId)
-      ) {
+      if (!isCurrentOpenRequest(requestId, targetId)) {
         return;
       }
       commitHistory({
@@ -584,7 +579,7 @@ export function ChatWorkspace({
 
     try {
       const created = await client.create(key);
-      if (requestId !== openRequestIdRef.current || !enabledRef.current) {
+      if (!isCurrentOpenRequest(requestId)) {
         return;
       }
       pendingCreateKeyRef.current = null;
@@ -666,7 +661,7 @@ export function ChatWorkspace({
         const createKey = pendingCreateKeyRef.current ?? crypto.randomUUID();
         pendingCreateKeyRef.current = createKey;
         const created = await client.create(createKey);
-        if (watchId !== openRequestIdRef.current || !enabledRef.current) {
+        if (!isCurrentOpenRequest(watchId)) {
           return;
         }
         pendingCreateKeyRef.current = null;
@@ -678,11 +673,14 @@ export function ChatWorkspace({
         ]);
         setListState("ready");
         selectConversation(created.id);
-        setActiveRead({
+        clearHistory();
+        const createdRead = {
           conversation: created,
           activeTurn: null,
           recovery: null,
-        });
+        };
+        activeReadRef.current = createdRead;
+        setActiveRead(createdRead);
       }
 
       if (deletedIdsRef.current.has(targetId)) {
@@ -705,11 +703,7 @@ export function ChatWorkspace({
       };
 
       const sent = await client.send(targetId, { text: unsentMessage, policy }, sendKey);
-      if (
-        watchId !== openRequestIdRef.current ||
-        !enabledRef.current ||
-        deletedIdsRef.current.has(targetId)
-      ) {
+      if (!isCurrentOpenRequest(watchId, targetId)) {
         return;
       }
 
@@ -756,10 +750,7 @@ export function ChatWorkspace({
   async function refreshHistoryAfterAction(id: string, requestId: number) {
     const actionGeneration = actionGenerationRef.current;
     const stillCurrent = () =>
-      requestId === openRequestIdRef.current &&
-      actionGeneration === actionGenerationRef.current &&
-      enabledRef.current &&
-      !deletedIdsRef.current.has(id);
+      actionGeneration === actionGenerationRef.current && isCurrentOpenRequest(requestId, id);
     try {
       const result = await fetchLatestHistory(id);
       if (!stillCurrent()) return;
@@ -794,11 +785,7 @@ export function ChatWorkspace({
     try {
       const updated =
         action === "stop" ? await client.stop(targetId) : await client.resume(targetId);
-      if (
-        watchId !== openRequestIdRef.current ||
-        !enabledRef.current ||
-        deletedIdsRef.current.has(targetId)
-      ) {
+      if (!isCurrentOpenRequest(watchId, targetId)) {
         return;
       }
       setActiveRead(updated);
@@ -849,6 +836,7 @@ export function ChatWorkspace({
           id,
           message: "Could not delete conversation. The conversation was retained so you can retry.",
         });
+        requestAnimationFrame(() => retryDeleteRef.current?.focus());
         return;
       }
     }
@@ -1013,6 +1001,7 @@ export function ChatWorkspace({
               {deleteFailure.message}
             </p>
             <Button
+              ref={retryDeleteRef}
               type="button"
               variant="outline"
               disabled={controlsBusy}
