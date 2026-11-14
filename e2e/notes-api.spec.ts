@@ -476,7 +476,9 @@ test("saved conversations reopen across reload, redact deleted note excerpts, en
     ),
   ).toBeVisible();
   await expect(
-    chatRegion.getByText("PostgreSQL pgvector durability relies on synchronous WAL flushing."),
+    chatRegion.getByText("PostgreSQL pgvector durability relies on synchronous WAL flushing.", {
+      exact: true,
+    }),
   ).toBeVisible();
 
   const listResponse = await page.request.get("/api/conversations?limit=50");
@@ -499,7 +501,9 @@ test("saved conversations reopen across reload, redact deleted note excerpts, en
 
   await expect(reopenedChat.getByText("How does pgvector durability work?")).toBeVisible();
   await expect(
-    reopenedChat.getByText("PostgreSQL pgvector durability relies on synchronous WAL flushing."),
+    reopenedChat.getByText("PostgreSQL pgvector durability relies on synchronous WAL flushing.", {
+      exact: true,
+    }),
   ).toBeVisible();
 
   // Delete the cited source note and verify reopening preserves the answer but removes the stored excerpt.

@@ -1,4 +1,4 @@
-import { useEffect, useId, useMemo, useRef, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState, type FormEvent } from "react";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -55,6 +55,16 @@ type DeleteFailure = {
   message: string;
 };
 
+/** Refresh by id so a newer answer state can never drop messages from loaded pages. */
+function mergeConversationMessages(
+  current: ConversationMessage[],
+  incoming: ConversationMessage[],
+): ConversationMessage[] {
+  const byId = new Map(current.map((message) => [message.id, message]));
+  for (const message of incoming) byId.set(message.id, message);
+  return [...byId.values()].sort((left, right) => left.sequence - right.sequence);
+}
+
 export function ChatWorkspace({
   client,
   notes,
@@ -110,7 +120,10 @@ export function ChatWorkspace({
   const enabledRef = useRef(enabled);
   const listRequestIdRef = useRef(0);
   const openRequestIdRef = useRef(0);
+  const activeConversationIdRef = useRef<string | null>(null);
   const deletedIdsRef = useRef<Set<string>>(new Set());
+  const locallyCreatedIdsRef = useRef<Set<string>>(new Set());
+  const turnRefreshBusyRef = useRef(false);
   const pendingSendKeyRef = useRef<{
     conversationId: string | null;
     text: string;
@@ -151,6 +164,10 @@ export function ChatWorkspace({
   }, []);
 
   useEffect(() => {
+    activeConversationIdRef.current = activeConversationId;
+  }, [activeConversationId]);
+
+  useEffect(() => {
     if (!hasUnsentInput && !sending && !creating) return;
     const warn = (event: BeforeUnloadEvent) => {
       event.preventDefault();
@@ -171,7 +188,18 @@ export function ChatWorkspace({
           return;
         }
         const filtered = result.conversations.filter((item) => !deletedIdsRef.current.has(item.id));
-        setConversations(filtered);
+        const returnedIds = new Set(filtered.map((item) => item.id));
+        for (const createdId of [...locallyCreatedIdsRef.current]) {
+          if (returnedIds.has(createdId)) locallyCreatedIdsRef.current.delete(createdId);
+        }
+        // A conversation created while this request was pending is absent from the
+        // response snapshot, so keep it until a later list confirms it exists.
+        setConversations((current) => [
+          ...current.filter(
+            (item) => locallyCreatedIdsRef.current.has(item.id) && !returnedIds.has(item.id),
+          ),
+          ...filtered,
+        ]);
         setListNextCursor(result.nextCursor);
         setListState("ready");
         setListPageError(null);
@@ -190,6 +218,72 @@ export function ChatWorkspace({
       active = false;
     };
   }, [client, enabled, listAttempt, onUnauthenticated]);
+
+  const refreshActiveConversation = useCallback(
+    async (id: string) => {
+      const requestId = openRequestIdRef.current;
+      try {
+        const [readResult, historyResult] = await Promise.all([
+          client.read(id),
+          client.messages(id, { limit: 50 }),
+        ]);
+        if (
+          requestId !== openRequestIdRef.current ||
+          !enabledRef.current ||
+          deletedIdsRef.current.has(id)
+        ) {
+          return;
+        }
+        setActiveRead(readResult);
+        setMessages((current) => mergeConversationMessages(current, historyResult.messages));
+        setConversations((current) =>
+          current.map((item) => (item.id === id ? readResult.conversation : item)),
+        );
+      } catch (error) {
+        if (requestId !== openRequestIdRef.current) return;
+        const kind = classifyFailure(error);
+        if (kind === "unauthenticated") {
+          onUnauthenticated();
+          return;
+        }
+        if (kind === "missing") {
+          // Stop refreshing a conversation that no longer exists.
+          deletedIdsRef.current.add(id);
+          setConversations((current) => current.filter((item) => item.id !== id));
+          if (activeConversationIdRef.current === id) {
+            openRequestIdRef.current += 1;
+            setActiveConversationId(null);
+            setActiveRead(null);
+            setMessages([]);
+            setMessagesNextCursor(null);
+            setOpenFailure({
+              id,
+              kind: "missing",
+              message: "This conversation is no longer available.",
+            });
+          }
+        }
+      }
+    },
+    [client, onUnauthenticated],
+  );
+
+  const activeTurnRunning = activeRead !== null && activeRead.activeTurn !== null;
+
+  // A running answer only becomes visible through a new read, so keep the active
+  // conversation in sync until the server reports a terminal turn.
+  useEffect(() => {
+    if (!enabled || activeConversationId === null || !activeTurnRunning) return;
+    const id = activeConversationId;
+    const timer = window.setInterval(() => {
+      if (turnRefreshBusyRef.current) return;
+      turnRefreshBusyRef.current = true;
+      void refreshActiveConversation(id).finally(() => {
+        turnRefreshBusyRef.current = false;
+      });
+    }, 1_500);
+    return () => window.clearInterval(timer);
+  }, [enabled, activeConversationId, activeTurnRunning, refreshActiveConversation]);
 
   function snapshotNoteTitles() {
     setCachedNoteTitles((current) => {
@@ -261,6 +355,7 @@ export function ChatWorkspace({
     setActiveRead(null);
     setMessages([]);
     setMessagesNextCursor(null);
+    setLoadingMoreMessages(false);
 
     try {
       const [readResult, historyResult] = await Promise.all([
@@ -381,10 +476,11 @@ export function ChatWorkspace({
 
     try {
       const created = await client.create(key);
-      pendingCreateKeyRef.current = null;
       if (requestId !== openRequestIdRef.current || !enabledRef.current) {
         return;
       }
+      pendingCreateKeyRef.current = null;
+      locallyCreatedIdsRef.current.add(created.id);
       setConversations((current) => [created, ...current.filter((item) => item.id !== created.id)]);
       setListState("ready");
       setActiveConversationId(created.id);
@@ -395,6 +491,7 @@ export function ChatWorkspace({
       });
       setMessages([]);
       setMessagesNextCursor(null);
+      setLoadingMoreMessages(false);
       requestAnimationFrame(() => composerRef.current?.focus());
     } catch (error) {
       if (requestId !== openRequestIdRef.current) return;
@@ -460,10 +557,11 @@ export function ChatWorkspace({
         const createKey = pendingCreateKeyRef.current ?? crypto.randomUUID();
         pendingCreateKeyRef.current = createKey;
         const created = await client.create(createKey);
-        pendingCreateKeyRef.current = null;
         if (watchId !== openRequestIdRef.current || !enabledRef.current) {
           return;
         }
+        pendingCreateKeyRef.current = null;
+        locallyCreatedIdsRef.current.add(created.id);
         targetId = created.id;
         setConversations((current) => [
           created,
@@ -498,7 +596,11 @@ export function ChatWorkspace({
       };
 
       const sent = await client.send(targetId, { text: unsentMessage, policy }, sendKey);
-      pendingSendKeyRef.current = null;
+      // A newer retry can adopt the retained key while this request is in flight;
+      // only the operation that still owns it may clear it.
+      if (pendingSendKeyRef.current?.key === sendKey) {
+        pendingSendKeyRef.current = null;
+      }
 
       if (
         watchId !== openRequestIdRef.current ||
@@ -530,8 +632,9 @@ export function ChatWorkspace({
       ) {
         return;
       }
-      setMessages(historyResult.messages);
-      setMessagesNextCursor(historyResult.nextCursor);
+      // The store returns the oldest page first, so replacing the thread would drop
+      // the message just accepted and any later pages already loaded.
+      setMessages((current) => mergeConversationMessages(current, historyResult.messages));
     } catch (error) {
       if (watchId !== openRequestIdRef.current) return;
       const kind = classifyFailure(error);
@@ -586,8 +689,7 @@ export function ChatWorkspace({
       ) {
         return;
       }
-      setMessages(historyResult.messages);
-      setMessagesNextCursor(historyResult.nextCursor);
+      setMessages((current) => mergeConversationMessages(current, historyResult.messages));
     } catch (error) {
       if (watchId !== openRequestIdRef.current) return;
       if (classifyFailure(error) === "unauthenticated") {
@@ -635,20 +737,22 @@ export function ChatWorkspace({
 
     if (!enabledRef.current) return;
     deletedIdsRef.current.add(id);
+    locallyCreatedIdsRef.current.delete(id);
     setDeletingId(null);
     setDeleteFailure(null);
     setConversations((current) => current.filter((item) => item.id !== id));
+    setOpenFailure((current) => (current?.id === id ? null : current));
 
-    if (activeConversationId === id || openingId === id || openFailure?.id === id) {
+    if (activeConversationIdRef.current === id) {
       openRequestIdRef.current += 1;
       setOpeningId(null);
       setActiveConversationId(null);
       setActiveRead(null);
       setMessages([]);
       setMessagesNextCursor(null);
+      setLoadingMoreMessages(false);
       setUnsentMessage("");
       pendingSendKeyRef.current = null;
-      setOpenFailure(null);
       setActionFailure(null);
     }
     setDeleteNotice("Conversation deleted.");
