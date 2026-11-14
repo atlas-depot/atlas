@@ -830,10 +830,13 @@ export function createConversationResearchStore(db: Database) {
           return { status: "expired" as const };
         }
         if (request.status === "denied" && decision === "deny") return { status: "denied" };
-        // Idempotent replay after a lost approve response, including once execution started.
+        // Idempotent replay after a lost approve response, including once execution started
+        // and after the provider or persistence path failed.
         if (
           decision === "approve" &&
-          (request.status === "started" || request.status === "completed")
+          (request.status === "started" ||
+            request.status === "completed" ||
+            request.status === "failed")
         )
           return { status: "approved" as const };
         if (request.status !== "pending" && request.status !== "approved")

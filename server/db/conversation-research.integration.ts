@@ -768,3 +768,101 @@ it("denial, expiry and Stop clear the outbound payload and block later approval"
     ),
   ).toEqual({ status: "conflict" });
 });
+
+it("replays an approve decision after execution starts and after a terminal failure", async () => {
+  const f = await fixture("What did Maya Chen earn?");
+  const prepared = await f.turns.research.prepare(f.sessionId, {
+    question: "What did Maya Chen earn?",
+    requiresPrivateDisclosure: true,
+  });
+  if (prepared.status !== "approval_required") throw new Error("Expected an approval request.");
+  expect(
+    await f.turns.research.decide(
+      f.owner,
+      f.conversationId,
+      prepared.request.id,
+      prepared.request.queryHash,
+      "approve",
+    ),
+  ).toEqual({ status: "approved" });
+  expect(
+    await f.turns.research.claimApproved(
+      f.sessionId,
+      prepared.request.id,
+      prepared.request.queryHash,
+      prepared.contextHash,
+    ),
+  ).toBe("claimed");
+  expect(
+    await f.turns.research.decide(
+      f.owner,
+      f.conversationId,
+      prepared.request.id,
+      prepared.request.queryHash,
+      "approve",
+    ),
+  ).toEqual({ status: "approved" });
+  await f.turns.research.finish(
+    f.sessionId,
+    prepared.request.id,
+    prepared.request.queryHash,
+    "failed",
+  );
+  expect(
+    await f.turns.research.decide(
+      f.owner,
+      f.conversationId,
+      prepared.request.id,
+      prepared.request.queryHash,
+      "approve",
+    ),
+  ).toEqual({ status: "approved" });
+  const [failed] = await database.db
+    .select()
+    .from(conversationResearchRequests)
+    .where(eq(conversationResearchRequests.id, prepared.request.id));
+  expect(failed).toMatchObject({ status: "failed", proposedQuery: null });
+});
+
+it("cancels a pending request, clears its payload and blocks approval", async () => {
+  const f = await fixture("What did Maya Chen earn?");
+  const prepared = await f.turns.research.prepare(f.sessionId, {
+    question: "What did Maya Chen earn?",
+    requiresPrivateDisclosure: true,
+  });
+  if (prepared.status !== "approval_required") throw new Error("Expected an approval request.");
+  await f.turns.research.cancel(f.sessionId, prepared.request.id, prepared.request.queryHash);
+  const [cancelled] = await database.db
+    .select()
+    .from(conversationResearchRequests)
+    .where(eq(conversationResearchRequests.id, prepared.request.id));
+  expect(cancelled).toMatchObject({ status: "cancelled", proposedQuery: null });
+  expect(
+    await f.turns.research.decide(
+      f.owner,
+      f.conversationId,
+      prepared.request.id,
+      prepared.request.queryHash,
+      "approve",
+    ),
+  ).toEqual({ status: "conflict" });
+});
+
+it("expires open requests through maintenance and clears their payloads", async () => {
+  const f = await fixture("What did Maya Chen earn?");
+  const prepared = await f.turns.research.prepare(f.sessionId, {
+    question: "What did Maya Chen earn?",
+    requiresPrivateDisclosure: true,
+  });
+  if (prepared.status !== "approval_required") throw new Error("Expected an approval request.");
+  await database.db
+    .update(conversationResearchRequests)
+    .set({ expiresAt: new Date(Date.now() - 1_000).toISOString() })
+    .where(eq(conversationResearchRequests.id, prepared.request.id));
+  expect(await f.turns.research.expire()).toBeGreaterThanOrEqual(1);
+  const [expired] = await database.db
+    .select()
+    .from(conversationResearchRequests)
+    .where(eq(conversationResearchRequests.id, prepared.request.id));
+  expect(expired).toMatchObject({ status: "expired", proposedQuery: null });
+});
