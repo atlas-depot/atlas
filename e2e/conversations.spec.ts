@@ -672,6 +672,28 @@ test("focus verification preserves older list pages and their next cursor", asyn
   ).toBeVisible();
 });
 
+test("keeping a draft from compact history returns focus to the selected conversation row", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 375, height: 812 });
+  await setupChat(page);
+  await page.goto("/");
+  await page.getByRole("button", { name: "Open chat", exact: true }).click();
+  const input = chat(page).getByRole("textbox", { name: "Message", exact: true });
+  await input.fill("Keep this unsent draft");
+  await showHistory(page);
+  const row = chat(page).getByRole("button", { name: label, exact: true });
+  const keep = page.getByRole("alertdialog").getByRole("button", { name: "Keep message" });
+  for (const key of ["Escape", "Enter"]) {
+    await row.press("Enter");
+    await expect(keep).toBeFocused();
+    await page.keyboard.press(key);
+    await expect(row).toBeFocused();
+  }
+  await chat(page).getByRole("button", { name: "Conversation history", exact: true }).click();
+  await expect(input).toHaveValue("Keep this unsent draft");
+});
+
 for (const width of [1280, 375]) {
   test(`chat layout and dialog keyboard focus work at ${width}px with an open conversation`, async ({
     page,
@@ -790,7 +812,7 @@ async function setupResearchConsent(page: Page, stale = false) {
     }
     return true;
   };
-  return { request, decisions, decisionPath: `${path}/${request.id}` };
+  return { api, request, decisions, decisionPath: `${path}/${request.id}` };
 }
 
 for (const [width, decision] of [
@@ -906,4 +928,60 @@ test("a research consent query with a mismatched hash cannot be approved", async
   await expect(chat(page).getByRole("region", { name: "Web search permission" })).toHaveCount(0);
   await expect(chat(page).getByRole("button", { name: "Allow", exact: true })).toHaveCount(0);
   expect(decisions).toEqual([]);
+});
+
+test("long mobile conversations follow new consent at the bottom and keep a reader's position", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 740, height: 320 });
+  const { api } = await setupResearchConsent(page);
+  api.history = Array.from({ length: 35 }, (_, i) =>
+    question(i + 1, `Question ${i + 1}: ${"Trip notes. ".repeat(20)}`),
+  );
+  const original = api.intercept!;
+  let showConsent = false;
+  api.intercept = async (route) => {
+    if (!showConsent && new URL(route.request().url()).pathname.endsWith("/research-requests")) {
+      await route.fulfill({ json: { requests: [] } });
+      return true;
+    }
+    return original(route);
+  };
+  await openChat(page);
+  const transcript = chat(page).getByRole("region", { name: "Message history" });
+  const distanceToEnd = () =>
+    transcript.evaluate((el) => el.scrollHeight - el.scrollTop - el.clientHeight);
+  const allow = chat(page).getByRole("button", { name: "Allow", exact: true });
+  await expect(transcript.getByText(api.history.at(-1)!.text, { exact: true })).toBeInViewport();
+  await expect.poll(distanceToEnd).toBeLessThanOrEqual(4);
+  await chat(page)
+    .getByRole("textbox", { name: "Message", exact: true })
+    .fill("A longer draft\n".repeat(14));
+  showConsent = true;
+  await expect(allow).toBeVisible();
+  await expect
+    .poll(() =>
+      allow.evaluate((el) => {
+        const box = el.getBoundingClientRect();
+        return el.contains(
+          el.ownerDocument.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2),
+        );
+      }),
+    )
+    .toBe(true);
+  // The transcript scrolls without moving the composer or reading position through a view switch.
+  const oldTop = await transcript.evaluate((el) => {
+    el.scrollTop = Math.floor(el.scrollHeight / 2);
+    return el.scrollTop;
+  });
+  await showHistory(page);
+  await showHistory(page);
+  await chat(page).getByRole("button", { name: "Close chat", exact: true }).click();
+  await page.getByRole("button", { name: "Open chat", exact: true }).click();
+  await expect.poll(() => transcript.evaluate((el) => el.scrollTop)).toBe(oldTop);
+  showConsent = false;
+  await expect(allow).toHaveCount(0);
+  showConsent = true;
+  await expect(allow).toBeVisible();
+  expect(await transcript.evaluate((el) => el.scrollTop)).toBe(oldTop);
 });

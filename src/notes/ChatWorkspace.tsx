@@ -1,4 +1,13 @@
-import { useCallback, useEffect, useId, useMemo, useRef, useState, type FormEvent } from "react";
+import {
+  useCallback,
+  useEffect,
+  useId,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type FormEvent,
+} from "react";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -119,6 +128,37 @@ export function ChatWorkspace({
   const [listPageError, setListPageError] = useState<string | null>(null);
 
   const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
+  const transcriptRef = useRef<HTMLDivElement>(null);
+  const messagesBodyRef = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    const viewport = transcriptRef.current;
+    const body = messagesBodyRef.current;
+    if (!viewport || !body) return;
+    let followLatest = true;
+    let lastTop = viewport.scrollTop;
+    const follow = () => {
+      if (followLatest && viewport.clientHeight) {
+        viewport.scrollTop = viewport.scrollHeight;
+        lastTop = viewport.scrollTop;
+      }
+    };
+    const trackPosition = () => {
+      if (viewport.clientHeight && viewport.scrollTop !== lastTop) {
+        lastTop = viewport.scrollTop;
+        followLatest = viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight <= 4;
+      }
+    };
+    // The running turn, its permission card, and the composer can resize independently.
+    const observer = new ResizeObserver(follow);
+    observer.observe(body);
+    observer.observe(viewport);
+    viewport.addEventListener("scroll", trackPosition);
+    follow();
+    return () => {
+      viewport.removeEventListener("scroll", trackPosition);
+      observer.disconnect();
+    };
+  }, [activeConversationId]);
   const [openingId, setOpeningId] = useState<string | null>(null);
   const [activeRead, setActiveRead] = useState<ConversationRead | null>(null);
   const [messages, setMessages] = useState<ConversationMessage[]>([]);
@@ -1256,215 +1296,227 @@ export function ChatWorkspace({
         </div>
 
         <div className="chat-thread-column" hidden={compact && historyOpen}>
-          <p className="sr-only" aria-live="polite" aria-atomic="true">
-            {openingId
-              ? "Opening conversation."
-              : activeRead
-                ? `${messages.length} messages loaded. ${activeRead.activeTurn ? "Answer in progress." : "History updated."}`
-                : "No conversation selected."}
-          </p>
-          {openingId ? (
-            <p role="note" className="chat-thread-status">
-              Opening conversation...
-            </p>
-          ) : null}
-
-          {openFailure ? (
-            <div className="note-search-feedback">
-              <p role="alert" className="note-search-error">
-                {openFailure.message}
+          <div
+            className="chat-transcript"
+            ref={transcriptRef}
+            role="region"
+            aria-label="Message history"
+            tabIndex={0}
+          >
+            <div className="chat-transcript-body" ref={messagesBodyRef}>
+              <p className="sr-only" aria-live="polite" aria-atomic="true">
+                {openingId
+                  ? "Opening conversation."
+                  : activeRead
+                    ? `${messages.length} messages loaded. ${activeRead.activeTurn ? "Answer in progress." : "History updated."}`
+                    : "No conversation selected."}
               </p>
-              {openFailure.kind === "failed" ? (
-                <Button
-                  type="button"
-                  variant="outline"
-                  disabled={controlsBusy}
-                  onClick={() => void openConversation(openFailure.id)}
-                >
-                  Retry opening conversation
-                </Button>
+              {openingId ? (
+                <p role="note" className="chat-thread-status">
+                  Opening conversation...
+                </p>
               ) : null}
-            </div>
-          ) : null}
 
-          {activeRead ? (
-            <div className="chat-active-body">
-              {activeRead.conversation.queuePaused || recoveryDescription ? (
-                <div role="note" className="chat-queue-banner">
-                  <p>
-                    {recoveryDescription ??
-                      "Queue is paused. Pending messages wait until you explicitly resume."}
+              {openFailure ? (
+                <div className="note-search-feedback">
+                  <p role="alert" className="note-search-error">
+                    {openFailure.message}
+                  </p>
+                  {openFailure.kind === "failed" ? (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      disabled={controlsBusy}
+                      onClick={() => void openConversation(openFailure.id)}
+                    >
+                      Retry opening conversation
+                    </Button>
+                  ) : null}
+                </div>
+              ) : null}
+
+              {activeRead ? (
+                <div className="chat-active-body">
+                  {activeRead.conversation.queuePaused || recoveryDescription ? (
+                    <div role="note" className="chat-queue-banner">
+                      <p>
+                        {recoveryDescription ??
+                          "Queue is paused. Pending messages wait until you explicitly resume."}
+                      </p>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        disabled={controlsBusy}
+                        onClick={() => void handleStopOrResume("resume")}
+                      >
+                        Resume queue
+                      </Button>
+                    </div>
+                  ) : null}
+
+                  {messages.length === 0 ? (
+                    <p className="chat-empty-messages">
+                      No messages in this conversation yet. Send a question below.
+                    </p>
+                  ) : (
+                    <ol aria-label="Conversation messages" className="chat-message-list">
+                      {messages.map((message) => {
+                        if (message.role === "user") {
+                          const isAddressed = addressedInputIds.has(message.id);
+                          const isRunning = runningInputIds.has(message.id);
+                          const userStatus = isRunning
+                            ? "Running"
+                            : isAddressed
+                              ? "Answered"
+                              : activeRead.conversation.queuePaused
+                                ? "Queued (paused)"
+                                : "Queued";
+                          return (
+                            <li
+                              key={message.id}
+                              className="chat-message-item is-user"
+                              data-message-role="user"
+                              data-message-status={userStatus}
+                            >
+                              <div className="chat-message-meta">
+                                <strong className="sr-only">You</strong>
+                                <span
+                                  className={
+                                    isAddressed && !isRunning ? "sr-only" : "chat-message-badge"
+                                  }
+                                >
+                                  {userStatus}
+                                </span>
+                                {message.deliveryPolicy === "steer" ? (
+                                  <span className="chat-message-badge">Steer</span>
+                                ) : null}
+                              </div>
+                              <p className="chat-message-text">{message.text}</p>
+                            </li>
+                          );
+                        }
+
+                        const presentationState = describeAssistantMessageState(message);
+                        return (
+                          <li
+                            key={message.id}
+                            className="chat-message-item is-assistant"
+                            data-message-role="assistant"
+                            data-answer-status={message.status}
+                          >
+                            <div className="chat-message-meta">
+                              <strong className="sr-only">Atlas</strong>
+                              <span className="chat-message-badge">{presentationState.badge}</span>
+                              {message.inputIds.length > 1 ? (
+                                <span className="chat-message-badge">
+                                  Addresses {message.inputIds.length} messages
+                                </span>
+                              ) : null}
+                            </div>
+
+                            {presentationState.warning ? (
+                              <p role="note" className="chat-incomplete-warning">
+                                {presentationState.warning}
+                              </p>
+                            ) : null}
+
+                            {message.text.trim().length > 0 ? (
+                              <p className="chat-message-text">{message.text}</p>
+                            ) : presentationState.emptyFallback ? (
+                              <p className="chat-message-empty">
+                                {presentationState.emptyFallback}
+                              </p>
+                            ) : null}
+
+                            {message.citations.length > 0 ? (
+                              <ul aria-label="Answer citations" className="chat-citation-list">
+                                {message.citations.map((citation, index) =>
+                                  renderCitation(citation, index),
+                                )}
+                              </ul>
+                            ) : null}
+                          </li>
+                        );
+                      })}
+                    </ol>
+                  )}
+
+                  {messagesNextCursor ? (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      disabled={!enabled || loadingMoreMessages}
+                      onClick={() => void loadMoreMessages()}
+                    >
+                      {loadingMoreMessages ? "Loading messages..." : "Load more messages"}
+                    </Button>
+                  ) : null}
+                  {activeRead.activeTurn ? (
+                    <div role="note" className="chat-running-banner">
+                      <div className="chat-running-details">
+                        <strong>Answer in progress</strong>
+                        {activeRead.activeTurn.text ? (
+                          <p className="chat-running-checkpoint">{activeRead.activeTurn.text}</p>
+                        ) : (
+                          <p className="chat-running-fallback">
+                            Searching notes and preparing a grounded answer...
+                          </p>
+                        )}
+                      </div>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        disabled={controlsBusy}
+                        onClick={() => void handleStopOrResume("stop")}
+                      >
+                        Stop answer
+                      </Button>
+                    </div>
+                  ) : null}
+
+                  {enabled &&
+                    activeRead.activeTurn &&
+                    activeRead.conversation.id === activeConversationId && (
+                      <ResearchRequests
+                        key={`${cacheResetToken}:${activeRead.activeTurn.id}`}
+                        conversationId={activeRead.conversation.id}
+                        client={client}
+                        onUnauthenticated={onUnauthenticated}
+                      />
+                    )}
+                </div>
+              ) : !openingId && !openFailure ? (
+                <p className="chat-no-selection">
+                  Select a saved conversation to inspect its history, or compose a message below.
+                </p>
+              ) : null}
+
+              {actionFailure ? (
+                <p role="alert" className="note-search-error">
+                  {actionFailure}
+                </p>
+              ) : null}
+
+              {historyFailure ? (
+                <div className="note-search-feedback">
+                  <p role="alert" className="note-search-error">
+                    {historyFailure}
                   </p>
                   <Button
                     type="button"
                     variant="outline"
                     disabled={controlsBusy}
-                    onClick={() => void handleStopOrResume("resume")}
+                    onClick={() => {
+                      if (activeConversationId)
+                        void refreshActiveConversation(activeConversationId);
+                    }}
                   >
-                    Resume queue
+                    Retry loading messages
                   </Button>
                 </div>
               ) : null}
-
-              {messages.length === 0 ? (
-                <p className="chat-empty-messages">
-                  No messages in this conversation yet. Send a question below.
-                </p>
-              ) : (
-                <ol aria-label="Conversation messages" className="chat-message-list">
-                  {messages.map((message) => {
-                    if (message.role === "user") {
-                      const isAddressed = addressedInputIds.has(message.id);
-                      const isRunning = runningInputIds.has(message.id);
-                      const userStatus = isRunning
-                        ? "Running"
-                        : isAddressed
-                          ? "Answered"
-                          : activeRead.conversation.queuePaused
-                            ? "Queued (paused)"
-                            : "Queued";
-                      return (
-                        <li
-                          key={message.id}
-                          className="chat-message-item is-user"
-                          data-message-role="user"
-                          data-message-status={userStatus}
-                        >
-                          <div className="chat-message-meta">
-                            <strong className="sr-only">You</strong>
-                            <span
-                              className={
-                                isAddressed && !isRunning ? "sr-only" : "chat-message-badge"
-                              }
-                            >
-                              {userStatus}
-                            </span>
-                            {message.deliveryPolicy === "steer" ? (
-                              <span className="chat-message-badge">Steer</span>
-                            ) : null}
-                          </div>
-                          <p className="chat-message-text">{message.text}</p>
-                        </li>
-                      );
-                    }
-
-                    const presentationState = describeAssistantMessageState(message);
-                    return (
-                      <li
-                        key={message.id}
-                        className="chat-message-item is-assistant"
-                        data-message-role="assistant"
-                        data-answer-status={message.status}
-                      >
-                        <div className="chat-message-meta">
-                          <strong className="sr-only">Atlas</strong>
-                          <span className="chat-message-badge">{presentationState.badge}</span>
-                          {message.inputIds.length > 1 ? (
-                            <span className="chat-message-badge">
-                              Addresses {message.inputIds.length} messages
-                            </span>
-                          ) : null}
-                        </div>
-
-                        {presentationState.warning ? (
-                          <p role="note" className="chat-incomplete-warning">
-                            {presentationState.warning}
-                          </p>
-                        ) : null}
-
-                        {message.text.trim().length > 0 ? (
-                          <p className="chat-message-text">{message.text}</p>
-                        ) : presentationState.emptyFallback ? (
-                          <p className="chat-message-empty">{presentationState.emptyFallback}</p>
-                        ) : null}
-
-                        {message.citations.length > 0 ? (
-                          <ul aria-label="Answer citations" className="chat-citation-list">
-                            {message.citations.map((citation, index) =>
-                              renderCitation(citation, index),
-                            )}
-                          </ul>
-                        ) : null}
-                      </li>
-                    );
-                  })}
-                </ol>
-              )}
-
-              {messagesNextCursor ? (
-                <Button
-                  type="button"
-                  variant="outline"
-                  disabled={!enabled || loadingMoreMessages}
-                  onClick={() => void loadMoreMessages()}
-                >
-                  {loadingMoreMessages ? "Loading messages..." : "Load more messages"}
-                </Button>
-              ) : null}
-              {activeRead.activeTurn ? (
-                <div role="note" className="chat-running-banner">
-                  <div className="chat-running-details">
-                    <strong>Answer in progress</strong>
-                    {activeRead.activeTurn.text ? (
-                      <p className="chat-running-checkpoint">{activeRead.activeTurn.text}</p>
-                    ) : (
-                      <p className="chat-running-fallback">
-                        Searching notes and preparing a grounded answer...
-                      </p>
-                    )}
-                  </div>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    disabled={controlsBusy}
-                    onClick={() => void handleStopOrResume("stop")}
-                  >
-                    Stop answer
-                  </Button>
-                </div>
-              ) : null}
-
-              {enabled &&
-                activeRead.activeTurn &&
-                activeRead.conversation.id === activeConversationId && (
-                  <ResearchRequests
-                    key={`${cacheResetToken}:${activeRead.activeTurn.id}`}
-                    conversationId={activeRead.conversation.id}
-                    client={client}
-                    onUnauthenticated={onUnauthenticated}
-                  />
-                )}
             </div>
-          ) : !openingId && !openFailure ? (
-            <p className="chat-no-selection">
-              Select a saved conversation to inspect its history, or compose a message below.
-            </p>
-          ) : null}
-
-          {actionFailure ? (
-            <p role="alert" className="note-search-error">
-              {actionFailure}
-            </p>
-          ) : null}
-
-          {historyFailure ? (
-            <div className="note-search-feedback">
-              <p role="alert" className="note-search-error">
-                {historyFailure}
-              </p>
-              <Button
-                type="button"
-                variant="outline"
-                disabled={controlsBusy}
-                onClick={() => {
-                  if (activeConversationId) void refreshActiveConversation(activeConversationId);
-                }}
-              >
-                Retry loading messages
-              </Button>
-            </div>
-          ) : null}
-
+          </div>
           <form className="chat-composer-form" onSubmit={handleFormSubmit}>
             <Label className="sr-only" htmlFor={composerId}>
               Message
@@ -1518,7 +1570,7 @@ export function ChatWorkspace({
         <AlertDialogContent
           className="notes-dialog chat-dialog"
           initialFocus={discardCancelRef}
-          finalFocus={composerRef}
+          finalFocus={compact && historyOpen ? undefined : composerRef}
         >
           <AlertDialogHeader>
             <AlertDialogTitle>Discard unsent message?</AlertDialogTitle>

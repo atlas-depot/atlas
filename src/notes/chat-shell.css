@@ -125,24 +125,29 @@
   display: none;
 }
 .chat-thread-column {
+  --chat-gutter: max(1.5rem, calc((100% - 40rem) / 2));
   grid-area: thread;
-  display: flex;
-  flex-direction: column;
-  gap: 1.5rem;
-  padding: 2rem max(1.5rem, calc((100% - 40rem) / 2)) max(1.25rem, env(safe-area-inset-bottom));
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
   min-width: 0;
   min-height: 0;
-  overflow: auto;
-  overscroll-behavior: contain;
 }
 .chat-workspace[data-compact="true"] .chat-thread-column {
-  padding: 1.25rem 1rem max(1rem, env(safe-area-inset-bottom));
+  --chat-gutter: 1rem;
 }
-.chat-thread-column > * {
-  flex: none;
+.chat-transcript {
+  overflow: auto;
+  overscroll-behavior: contain;
+  min-width: 0;
+  min-height: 0;
+}
+.chat-transcript-body {
+  display: grid;
+  gap: 1.5rem;
+  padding: 1.5rem var(--chat-gutter) 1rem;
 }
 .chat-thread-column > .chat-composer-form {
-  margin-top: auto;
+  margin: 0 var(--chat-gutter) max(1rem, env(safe-area-inset-bottom));
 }
 .chat-conversation-list {
   display: grid;
