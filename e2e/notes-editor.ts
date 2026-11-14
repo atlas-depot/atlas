@@ -54,3 +54,9 @@ export async function serveNotes(
         route.fulfill({ json: note, headers: { ETag: etag } }),
       );
 }
+
+/** Open the note-specific confirmation without authorizing deletion. */
+export async function openNoteDeleteDialog(page: Page) {
+  await page.getByRole("button", { name: "Note actions", exact: true }).click();
+  await page.getByRole("menuitem", { name: "Delete note", exact: true }).click();
+}

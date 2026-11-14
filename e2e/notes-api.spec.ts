@@ -1,4 +1,4 @@
-import { expectEditorContent, paragraphDocument } from "./notes-editor.ts";
+import { openNoteDeleteDialog, expectEditorContent, paragraphDocument } from "./notes-editor.ts";
 import { randomUUID } from "node:crypto";
 import { expect, test, type BrowserContext, type Page } from "@playwright/test";
 import { noteListSchema, noteSchema } from "../shared/notes.ts";
@@ -63,7 +63,20 @@ test("mobile keyboard CRUD persists through reload and deletion", async ({ page 
     true,
   );
   await page.screenshot({ path: testInfo.outputPath("real-api-mobile.png"), fullPage: true });
-  await page.getByRole("button", { name: "Delete note", exact: true }).click();
+  const actions = page.getByRole("button", { name: "Note actions", exact: true });
+  await actions.focus();
+  await page.keyboard.press("Enter");
+  const remove = page.getByRole("menuitem", { name: "Delete note", exact: true });
+  await expect(remove).toBeFocused();
+  await page.keyboard.press("Enter");
+  const keep = page.getByRole("button", { name: "Keep note", exact: true });
+  await expect(keep).toBeFocused();
+  await page.keyboard.press("Enter");
+  await expect(page.getByRole("alertdialog")).toBeHidden();
+  await expect(actions).toBeFocused();
+  await expect(page.getByRole("menu")).toBeHidden();
+  expect(await readNote(page, created.id)).toMatchObject({ id: created.id });
+  await openNoteDeleteDialog(page);
   await page.getByRole("button", { name: "Delete permanently", exact: true }).click();
   await expect(page.getByText("Note deleted. No notes left.")).toBeVisible();
   expect(await listNotes(page)).toEqual([]);

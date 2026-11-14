@@ -1,4 +1,10 @@
-import { expectEditorContent, paragraphDocument, serveNotes, toListRow } from "./notes-editor.ts";
+import {
+  openNoteDeleteDialog,
+  expectEditorContent,
+  paragraphDocument,
+  serveNotes,
+  toListRow,
+} from "./notes-editor.ts";
 import { readFile, readdir } from "node:fs/promises";
 import { createNoteSchema, updateNoteSchema, type Note, type CreateNote } from "../shared/notes.ts";
 import { formatConversationLabel } from "../src/notes/conversation-store.ts";
@@ -461,7 +467,7 @@ test.describe("create and delete", () => {
     const source = page.getByRole("textbox", { name: /^(Markdown source|Note content)$/ });
     await expectEditorContent(source, "Original text");
     await source.fill("Unsaved delete draft");
-    await page.getByRole("button", { name: "Delete note", exact: true }).click();
+    await openNoteDeleteDialog(page);
     await page.getByRole("button", { name: "Delete permanently", exact: true }).click();
     await expect(page.getByRole("alert")).toContainText("Your session has ended.");
     await expect(page.getByRole("link", { name: "Sign in again", exact: true })).toBeFocused();
@@ -502,22 +508,32 @@ test.describe("create and delete", () => {
     await page.goto("/");
     const source = page.getByRole("textbox", { name: /^(Markdown source|Note content)$/ });
     await expectEditorContent(source, "First content");
-    await page.getByRole("button", { name: "Delete note", exact: true }).click();
-    await expect(page.getByRole("alertdialog")).toContainText('"A"');
-    await page.getByRole("button", { name: "Delete permanently", exact: true }).click();
+    await openNoteDeleteDialog(page);
+    const confirm = page.getByRole("alertdialog", { name: "Delete note?", exact: true });
+    const actions = page.getByRole("button", { name: "Note actions", exact: true });
+    await expect(confirm).toContainText('"A"');
+    await expect(confirm.getByRole("button", { name: "Keep note", exact: true })).toBeFocused();
+    expect(deletedEtags).toEqual([]);
+    await page.keyboard.press("Escape");
+    await expect(confirm).toBeHidden();
+    await expect(actions).toBeFocused();
+    await expect(page.getByRole("menu")).toBeHidden();
+    expect(deletedEtags).toEqual([]);
+    await openNoteDeleteDialog(page);
+    await confirm.getByRole("button", { name: "Delete permanently", exact: true }).click();
     await expect(page.getByRole("textbox", { name: "Title", exact: true })).toHaveValue("B");
     await expectEditorContent(source, "Second content");
     await expect(page.getByRole("button", { name: "A", exact: true })).toHaveCount(0);
 
     await page.getByRole("button", { name: "C", exact: true }).click();
     await expectEditorContent(source, "Third content");
-    await page.getByRole("button", { name: "Delete note", exact: true }).click();
+    await openNoteDeleteDialog(page);
     await page.getByRole("button", { name: "Delete permanently", exact: true }).click();
     await expect(page.getByRole("textbox", { name: "Title", exact: true })).toHaveValue("B");
     await expectEditorContent(source, "Second content");
     await expect(page.getByRole("button", { name: "C", exact: true })).toHaveCount(0);
 
-    await page.getByRole("button", { name: "Delete note", exact: true }).click();
+    await openNoteDeleteDialog(page);
     await page.getByRole("button", { name: "Delete permanently", exact: true }).click();
     await expect(page.getByRole("textbox", { name: "Title", exact: true })).toHaveCount(0);
     await expect(page.getByText("No notes yet. Create a new note to get started.")).toBeVisible();
@@ -557,28 +573,28 @@ test.describe("create and delete", () => {
     const source = page.getByRole("textbox", { name: /^(Markdown source|Note content)$/ });
     await expectEditorContent(source, "Original text");
     await source.fill("Local delete draft");
-    await page.getByRole("button", { name: "Delete note", exact: true }).click();
+    await openNoteDeleteDialog(page);
     await page.getByRole("button", { name: "Delete permanently", exact: true }).click();
     await expect(page.getByRole("alert")).toContainText(
       "This note changed on the server. Nothing was deleted.",
     );
     await expectEditorContent(source, "Local delete draft");
     await expect(page.getByRole("button", { name: "A", exact: true })).toBeVisible();
-    await expect(page.getByRole("button", { name: "Delete note", exact: true })).toBeDisabled();
+    await expect(page.getByRole("button", { name: "Note actions", exact: true })).toBeDisabled();
     await expect(page.getByRole("button", { name: "Save", exact: true })).toBeDisabled();
 
     await page.getByRole("button", { name: "Compare latest", exact: true }).click();
     await expect(page.getByText("A newer server version", { exact: true })).toBeVisible();
-    await expect(page.getByRole("button", { name: "Delete note", exact: true })).toBeDisabled();
+    await expect(page.getByRole("button", { name: "Note actions", exact: true })).toBeDisabled();
     await page.getByRole("button", { name: "Use latest version", exact: true }).click();
     await page.getByRole("button", { name: "Discard changes", exact: true }).click();
     await expectEditorContent(source, "A newer server version");
     await expect(page.getByRole("textbox", { name: "Title", exact: true })).toHaveValue(
       "A renamed",
     );
-    await expect(page.getByRole("button", { name: "Delete note", exact: true })).toBeEnabled();
+    await expect(page.getByRole("button", { name: "Note actions", exact: true })).toBeEnabled();
 
-    await page.getByRole("button", { name: "Delete note", exact: true }).click();
+    await openNoteDeleteDialog(page);
     await page.getByRole("button", { name: "Delete permanently", exact: true }).click();
     await expect(page.getByText("No notes yet. Create a new note to get started.")).toBeVisible();
     expect(deletes).toBe(2);
@@ -594,7 +610,7 @@ test.describe("create and delete", () => {
     await page.goto("/");
     const source = page.getByRole("textbox", { name: /^(Markdown source|Note content)$/ });
     await expectEditorContent(source, "Original text");
-    await page.getByRole("button", { name: "Delete note", exact: true }).click();
+    await openNoteDeleteDialog(page);
     await page.getByRole("button", { name: "Delete permanently", exact: true }).click();
     await expect(page.getByRole("alert")).toHaveText(
       "This note is no longer available. Your unsaved text is preserved. Refresh the notes list or keep your text as a new note.",
@@ -602,7 +618,7 @@ test.describe("create and delete", () => {
     await expect(page.getByRole("button", { name: "A", exact: true })).toHaveCount(0);
     await expect(page.getByRole("textbox", { name: "Title", exact: true })).toHaveValue("A");
     await expectEditorContent(source, "Original text");
-    await expect(page.getByRole("button", { name: "Delete note", exact: true })).toBeDisabled();
+    await expect(page.getByRole("button", { name: "Note actions", exact: true })).toBeDisabled();
     await expect(page.getByRole("button", { name: "Refresh notes", exact: true })).toBeVisible();
     const keepAsNew = page.getByRole("button", { name: "Keep as new note", exact: true });
     await expect(keepAsNew).toBeVisible();
@@ -632,11 +648,11 @@ test.describe("create and delete", () => {
     const source = page.getByRole("textbox", { name: /^(Markdown source|Note content)$/ });
     await expectEditorContent(source, "Original text");
     await source.fill("Uncertain delete draft");
-    await page.getByRole("button", { name: "Delete note", exact: true }).click();
+    await openNoteDeleteDialog(page);
     await page.getByRole("button", { name: "Delete permanently", exact: true }).click();
     await expect(page.getByRole("alert")).toContainText("Could not confirm deletion.");
     await expectEditorContent(source, "Uncertain delete draft");
-    await expect(page.getByRole("button", { name: "Delete note", exact: true })).toBeDisabled();
+    await expect(page.getByRole("button", { name: "Note actions", exact: true })).toBeDisabled();
     await expect(page.getByRole("button", { name: "Save", exact: true })).toBeDisabled();
 
     await page.getByRole("button", { name: "Refresh notes", exact: true }).click();
@@ -645,7 +661,7 @@ test.describe("create and delete", () => {
       "This note is no longer available. Your unsaved text is preserved. Refresh the notes list or keep your text as a new note.",
     );
     await expectEditorContent(source, "Uncertain delete draft");
-    await expect(page.getByRole("button", { name: "Delete note", exact: true })).toBeDisabled();
+    await expect(page.getByRole("button", { name: "Note actions", exact: true })).toBeDisabled();
     await expect(page.getByRole("button", { name: "Keep as new note", exact: true })).toBeVisible();
     await expect(title).toBeFocused();
   });
