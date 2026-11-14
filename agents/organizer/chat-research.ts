@@ -47,6 +47,7 @@ export function createChatResearch({
         contextHash: prepared.contextHash,
       });
       if (claimed === "budget") throw new Error("Research evidence budget is exhausted.");
+      if (claimed === "limit") throw new Error("Research request limit reached for this turn.");
       if (claimed !== "claimed") return notPerformed("stale");
       question = prepared.outboundQuestion;
     } else {
@@ -95,6 +96,7 @@ export function createChatResearch({
         }),
       });
       const recorded = await gate.recordResult(sessionId, output);
+      if (signal.aborted) throw new DOMException("Research cancelled.", "AbortError");
       if (recorded.status !== "recorded")
         throw new Error(
           recorded.status === "budget"
@@ -102,6 +104,7 @@ export function createChatResearch({
             : "Research results could not be recorded.",
         );
       if (request) await gate.finish(sessionId, request.id, request.queryHash, "completed");
+      if (signal.aborted) throw new DOMException("Research cancelled.", "AbortError");
       return output;
     } catch {
       if (request)

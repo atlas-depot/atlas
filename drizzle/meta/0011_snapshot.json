@@ -897,7 +897,7 @@
         },
         "conversation_citations_source_identity": {
           "name": "conversation_citations_source_identity",
-          "value": "(\"conversation_citations\".\"source\"->>'kind' = 'web' AND \"conversation_citations\".\"note_id\" IS NULL) OR (\"conversation_citations\".\"source\"->>'kind' IN ('block', 'markdown') AND \"conversation_citations\".\"note_id\" IS NOT NULL AND \"conversation_citations\".\"source\"->>'noteId' = \"conversation_citations\".\"note_id\"::text)"
+          "value": "(\"conversation_citations\".\"source\"->>'kind' IS NOT NULL) AND ((\"conversation_citations\".\"source\"->>'kind' = 'web' AND \"conversation_citations\".\"note_id\" IS NULL AND NOT jsonb_exists(\"conversation_citations\".\"source\", 'noteId')) OR (\"conversation_citations\".\"source\"->>'kind' IN ('block', 'markdown') AND \"conversation_citations\".\"note_id\" IS NOT NULL AND \"conversation_citations\".\"source\"->>'noteId' = \"conversation_citations\".\"note_id\"::text))"
         },
         "conversation_citations_redaction_valid": {
           "name": "conversation_citations_redaction_valid",
@@ -1786,6 +1786,13 @@
           "notNull": true,
           "default": 0
         },
+        "research_attempts": {
+          "name": "research_attempts",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
         "context_recovery": {
           "name": "context_recovery",
           "type": "text",
@@ -1939,6 +1946,10 @@
         "conversation_turns_retrieval_bound": {
           "name": "conversation_turns_retrieval_bound",
           "value": "\"conversation_turns\".\"retrieval_bytes\" BETWEEN 0 AND 48000"
+        },
+        "conversation_turns_research_attempts_valid": {
+          "name": "conversation_turns_research_attempts_valid",
+          "value": "\"conversation_turns\".\"research_attempts\" BETWEEN 0 AND 3"
         },
         "conversation_turns_recovery_valid": {
           "name": "conversation_turns_recovery_valid",

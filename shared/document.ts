@@ -280,9 +280,10 @@ export function canonicalNoteContent(content: NoteContent): string {
   return canonicalJson(content);
 }
 
-function collectDocumentText(value: unknown, parts: string[]) {
+/** Inline text stays contiguous so a word split across styled spans still matches. */
+function collectInlineText(value: unknown, parts: string[]) {
   if (Array.isArray(value)) {
-    for (const item of value) collectDocumentText(item, parts);
+    for (const item of value) collectInlineText(item, parts);
     return;
   }
   if (value === null || typeof value !== "object") return;
@@ -291,11 +292,37 @@ function collectDocumentText(value: unknown, parts: string[]) {
     parts.push(record.text);
     return;
   }
-  // Link destinations are private source text too, even when the visible label differs.
-  if (typeof record.href === "string") parts.push(record.href);
-  for (const [key, child] of Object.entries(record)) {
-    if (key === "text" || key === "href") continue;
-    collectDocumentText(child, parts);
+  if (record.type === "link") {
+    // The destination is private source text too and must not merge with its visible label.
+    if (typeof record.href === "string") parts.push(record.href, "\n");
+    collectInlineText(record.content, parts);
+    return;
+  }
+  collectInlineText(record.content, parts);
+}
+
+function collectTableText(value: unknown, parts: string[]) {
+  const rows = (value as Record<string, unknown> | null)?.rows;
+  for (const row of Array.isArray(rows) ? rows : []) {
+    const cells = (row as Record<string, unknown> | null)?.cells;
+    for (const cell of Array.isArray(cells) ? cells : []) {
+      // A structured cell wraps inline content; a compact cell is the inline array itself.
+      if (cell && typeof cell === "object" && !Array.isArray(cell))
+        collectInlineText((cell as Record<string, unknown>).content, parts);
+      else collectInlineText(cell, parts);
+      parts.push("\n");
+    }
+  }
+}
+
+function collectBlockText(value: unknown, parts: string[]) {
+  if (value === null || typeof value !== "object") return;
+  const record = value as Record<string, unknown>;
+  if (record.type === "table") collectTableText(record.content, parts);
+  else collectInlineText(record.content, parts);
+  for (const child of Array.isArray(record.children) ? record.children : []) {
+    parts.push("\n");
+    collectBlockText(child, parts);
   }
 }
 
@@ -304,7 +331,7 @@ export function noteContentPlainText(content: NoteContent): string {
   if (typeof content === "string") return content;
   const parts: string[] = [];
   for (const block of content.blocks) {
-    collectDocumentText(block, parts);
+    collectBlockText(block, parts);
     parts.push("\n");
   }
   return parts.join("");

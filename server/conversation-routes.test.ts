@@ -177,6 +177,8 @@ describe("conversation answer HTTP boundary", () => {
         (await denied.app.request(`/api/conversations/${id}/${path}`, send({ text: "x" }))).status,
       ).toBe(401);
     expect(denied.answers.send).not.toHaveBeenCalled();
+    expect(denied.answers.researchRequests).not.toHaveBeenCalled();
+    expect(denied.answers.decideResearchRequest).not.toHaveBeenCalled();
 
     const { app, answers } = answering();
     const response = await app.request(
@@ -296,6 +298,7 @@ describe("conversation answer HTTP boundary", () => {
           id: requestId,
           proposedQuery: "What did Northstar Labs announce?",
           queryHash,
+          status: "pending" as const,
           expiresAt: "2026-11-13T12:02:00.000Z",
         },
       ],

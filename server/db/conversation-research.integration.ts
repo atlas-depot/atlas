@@ -127,8 +127,39 @@ it("lets a query with no private overlap run without approval", async () => {
   ).toBe("claimed");
 });
 
-it("requires approval when a note phrase crosses blocks or styled spans", async () => {
-  const f = await fixture("how does a quarterly budget freeze affect planning", {
+it("counts autonomous attempts toward the same per-turn limit", async () => {
+  const f = await fixture("What are public onboarding practices one?", {
+    input: "Look at my notes.",
+  });
+  for (const suffix of ["one", "two", "three"]) {
+    const question = `What are public onboarding practices ${suffix}?`;
+    const prepared = await f.turns.research.prepare(f.sessionId, { question });
+    if (prepared.status !== "generalized") throw new Error("Expected a generalized query.");
+    expect(
+      await f.turns.research.claimGeneralized(f.sessionId, {
+        question,
+        outboundQuestion: prepared.outboundQuestion,
+        queryHash: prepared.queryHash,
+        contextHash: prepared.contextHash,
+      }),
+    ).toBe("claimed");
+  }
+  const fourth = await f.turns.research.prepare(f.sessionId, {
+    question: "What are public onboarding practices four?",
+  });
+  if (fourth.status !== "generalized") throw new Error("Expected a generalized query.");
+  expect(
+    await f.turns.research.claimGeneralized(f.sessionId, {
+      question: "What are public onboarding practices four?",
+      outboundQuestion: fourth.outboundQuestion,
+      queryHash: fourth.queryHash,
+      contextHash: fourth.contextHash,
+    }),
+  ).toBe("limit");
+});
+
+it("requires approval when a private term crosses styled inline spans", async () => {
+  const f = await fixture("What public information exists about bluebird?", {
     input: "Look at my notes.",
     note: {
       title: "Private planning",
@@ -138,17 +169,10 @@ it("requires approval when a note phrase crosses blocks or styled spans", async 
           type: "paragraph",
           props: {},
           content: [
-            { type: "text", text: "we plan the quarterly budget", styles: {} },
-            { type: "text", text: "\n", styles: {} },
-            { type: "text", text: "freeze for the bluebird", styles: { bold: true } },
+            { type: "text", text: "The internal ", styles: {} },
+            { type: "text", text: "blue", styles: { bold: true } },
+            { type: "text", text: "bird", styles: { italic: true } },
           ],
-          children: [],
-        },
-        {
-          id: "second",
-          type: "paragraph",
-          props: {},
-          content: [{ type: "text", text: "acquisition", styles: {} }],
           children: [],
         },
       ],
@@ -156,7 +180,72 @@ it("requires approval when a note phrase crosses blocks or styled spans", async 
   });
   expect(
     await f.turns.research.prepare(f.sessionId, {
-      question: "how does a quarterly budget freeze affect planning",
+      question: "What public information exists about bluebird?",
+    }),
+  ).toMatchObject({ status: "approval_required" });
+});
+
+it("requires approval when a private term exists only in a nested child block", async () => {
+  const f = await fixture("What public information exists about bluebird?", {
+    input: "Look at my notes.",
+    note: {
+      title: "Private planning",
+      blocks: [
+        {
+          id: "parent",
+          type: "paragraph",
+          props: {},
+          content: [{ type: "text", text: "Look at the planning note", styles: {} }],
+          children: [
+            {
+              id: "child",
+              type: "paragraph",
+              props: {},
+              content: [{ type: "text", text: "bluebird", styles: {} }],
+              children: [],
+            },
+          ],
+        },
+      ],
+    },
+  });
+  expect(
+    await f.turns.research.prepare(f.sessionId, {
+      question: "What public information exists about bluebird?",
+    }),
+  ).toMatchObject({ status: "approval_required" });
+});
+
+it("requires approval when a phrase is split across table cells", async () => {
+  const f = await fixture("What does the secret code unlock?", {
+    input: "Look at my notes.",
+    note: {
+      title: "Private planning",
+      blocks: [
+        {
+          id: "table",
+          type: "table",
+          props: {},
+          content: {
+            type: "tableContent",
+            columnWidths: [180, 180],
+            rows: [
+              {
+                cells: [
+                  [{ type: "text", text: "secret", styles: {} }],
+                  [{ type: "text", text: "code", styles: {} }],
+                ],
+              },
+            ],
+          },
+          children: [],
+        },
+      ],
+    },
+  });
+  expect(
+    await f.turns.research.prepare(f.sessionId, {
+      question: "What does the secret code unlock?",
     }),
   ).toMatchObject({ status: "approval_required" });
 });
@@ -281,7 +370,13 @@ it("presents and authorizes only an owner-bound, exact, current disclosure reque
 
   const listed = await f.turns.research.list(f.owner, f.conversationId);
   expect(listed).toMatchObject({
-    requests: [{ id: prepared.request.id, proposedQuery: prepared.request.proposedQuery }],
+    requests: [
+      {
+        id: prepared.request.id,
+        proposedQuery: prepared.request.proposedQuery,
+        status: "pending",
+      },
+    ],
   });
   expect(await f.turns.research.list(`other-${randomUUID()}`, f.conversationId)).toBeUndefined();
   expect(
@@ -347,6 +442,9 @@ it("claims a successful approval exactly once and clears its payload", async () 
       "approve",
     ),
   ).toEqual({ status: "approved" });
+  expect(await f.turns.research.list(f.owner, f.conversationId)).toMatchObject({
+    requests: [{ id: prepared.request.id, status: "approved" }],
+  });
   expect(
     await f.turns.research.claimApproved(
       f.sessionId,
@@ -360,6 +458,7 @@ it("claims a successful approval exactly once and clears its payload", async () 
     .from(conversationResearchRequests)
     .where(eq(conversationResearchRequests.id, prepared.request.id));
   expect(claimed).toMatchObject({ status: "started", proposedQuery: null });
+  expect(await f.turns.research.list(f.owner, f.conversationId)).toEqual({ requests: [] });
   expect(
     await f.turns.research.claimApproved(
       f.sessionId,

@@ -94,6 +94,54 @@ await test("refuses to spend a provider call when the evidence budget is already
   assert.deepEqual(calls, []);
 });
 
+await test("refuses to spend a provider call when the turn attempt limit is already spent", async () => {
+  const { calls, run } = setup(
+    () => ({
+      status: "generalized",
+      outboundQuestion: "What are public web-safety principles?",
+      queryHash: "b".repeat(64),
+      contextHash: "c".repeat(64),
+    }),
+    {
+      async claimGeneralized() {
+        return "limit";
+      },
+    },
+  );
+  await assert.rejects(
+    run(
+      "session-1",
+      { question: "What are public web-safety principles?" },
+      new AbortController().signal,
+    ),
+    { message: "Research request limit reached for this turn." },
+  );
+  assert.deepEqual(calls, []);
+});
+
+await test("a cancellation during result persistence settles the approval as cancelled", async () => {
+  const controller = new AbortController();
+  const { calls, finishes, run } = setup(
+    () => ({ status: "approval_required", request, contextHash: "c".repeat(64) }),
+    {
+      async recordResult() {
+        controller.abort("stop");
+        return { status: "recorded" };
+      },
+    },
+  );
+  await assert.rejects(
+    run(
+      "session-1",
+      { question: exactQuestion, requiresPrivateDisclosure: true },
+      controller.signal,
+    ),
+    { name: "AbortError", message: "Research cancelled." },
+  );
+  assert.equal(calls.length, 1);
+  assert.deepEqual(finishes, ["cancelled"]);
+});
+
 await test("does not call either research provider until the exact proposed query is approved", async () => {
   let release!: (decision: "approved" | "denied") => void;
   let waiting = false;

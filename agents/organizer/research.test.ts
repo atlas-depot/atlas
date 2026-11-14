@@ -91,6 +91,22 @@ await test("links written in prose do not substitute for provider citation evide
   });
 });
 
+await test("a source without attributed content is not recorded as evidence", async () => {
+  const research = setup(async () =>
+    response({
+      annotations: [
+        {
+          ...annotation,
+          url_citation: { ...annotation.url_citation, start_index: 0, end_index: 0 },
+        },
+      ],
+    }),
+  );
+  await assert.rejects(research("Public question", new AbortController().signal), {
+    message: "Research returned no verified sources.",
+  });
+});
+
 for (const sourceUrl of ["javascript:alert(1)", "https://user:password@example.com", "not a URL"]) {
   await test(`rejects unsafe provider source ${sourceUrl}`, async () => {
     const research = setup(async () =>

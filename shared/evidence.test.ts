@@ -41,8 +41,16 @@ describe("distinct public evidence records", () => {
     expect(
       conversationCitationSchema.safeParse({
         source,
-        excerpt: null,
+        excerpt: "Quote",
         deleted: true,
+        stale: false,
+      }).success,
+    ).toBe(false);
+    expect(
+      conversationCitationSchema.safeParse({
+        source,
+        excerpt: null,
+        deleted: false,
         stale: false,
       }).success,
     ).toBe(false);

@@ -6,6 +6,8 @@ export const researchDisclosureRequestSchema = z.strictObject({
   id: conversationIdSchema,
   proposedQuery: noteTextSchema.min(1).max(500),
   queryHash: z.string().regex(/^[0-9a-f]{64}$/),
+  // Approved requests remain listed until execution starts so the owner can still deny them.
+  status: z.enum(["pending", "approved"]),
   expiresAt: z.iso.datetime(),
 });
 

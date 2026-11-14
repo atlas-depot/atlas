@@ -80,13 +80,12 @@ export function createResearch({
         typeof start === "number" && typeof end === "number" && end > start
           ? result.text.slice(start, end).trim()
           : "";
-      // Provider attribution, not an arbitrary sentence from the model's prose.
-      const snippet = (
-        (typeof content === "string" && content.trim()) ||
-        span ||
-        parsed.data.title.trim() ||
-        parsed.data.url
-      ).slice(0, 8_000);
+      // Provider attribution, not an arbitrary sentence from the model's prose. A title or URL
+      // alone is an identifier, not evidence, so reject a source without attributed content.
+      const snippet = ((typeof content === "string" && content.trim()) || span)
+        .trim()
+        .slice(0, 8_000);
+      if (!snippet) continue;
       const existing = snippets.get(parsed.data.url);
       if (existing) existing.values.add(snippet);
       // Identity comes from provider evidence, never a model-written citation label.

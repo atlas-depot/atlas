@@ -90,6 +90,8 @@ export const conversationTurns = pgTable(
       .default([]),
     provenanceComplete: boolean("provenance_complete").notNull().default(false),
     retrievalBytes: integer("retrieval_bytes").notNull().default(0),
+    /** Durable count of autonomous and approval-gated research attempts in this turn. */
+    researchAttempts: integer("research_attempts").notNull().default(0),
     contextRecovery: text("context_recovery").$type<ContextRecovery>(),
     /** Runtime receipt for the opening input. Private, like the session identity. */
     deliveryId: text("delivery_id"),
@@ -127,6 +129,10 @@ export const conversationTurns = pgTable(
       sql`${table.checkpointVersion} >= 0 AND (${table.status} = 'running' OR ${table.runningText} IS NULL)`,
     ),
     check("conversation_turns_retrieval_bound", sql`${table.retrievalBytes} BETWEEN 0 AND 48000`),
+    check(
+      "conversation_turns_research_attempts_valid",
+      sql`${table.researchAttempts} BETWEEN 0 AND 3`,
+    ),
     check(
       "conversation_turns_recovery_valid",
       sql`${table.contextRecovery} IS NULL OR ${table.contextRecovery} IN ('history_unavailable', 'context_budget', 'summary_failed', 'source_changed', 'runtime_expired')`,
@@ -285,7 +291,7 @@ export const conversationCitations = pgTable(
     check("conversation_citations_ordinal_nonnegative", sql`${table.ordinal} >= 0`),
     check(
       "conversation_citations_source_identity",
-      sql`(${table.source}->>'kind' = 'web' AND ${table.noteId} IS NULL) OR (${table.source}->>'kind' IN ('block', 'markdown') AND ${table.noteId} IS NOT NULL AND ${table.source}->>'noteId' = ${table.noteId}::text)`,
+      sql`(${table.source}->>'kind' IS NOT NULL) AND ((${table.source}->>'kind' = 'web' AND ${table.noteId} IS NULL AND NOT jsonb_exists(${table.source}, 'noteId')) OR (${table.source}->>'kind' IN ('block', 'markdown') AND ${table.noteId} IS NOT NULL AND ${table.source}->>'noteId' = ${table.noteId}::text))`,
     ),
     check(
       "conversation_citations_redaction_valid",

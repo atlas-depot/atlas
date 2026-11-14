@@ -265,6 +265,7 @@ function disclosureRequest(
     id: row.id,
     proposedQuery: row.proposedQuery,
     queryHash: row.queryHash,
+    status: row.status === "approved" ? "approved" : "pending",
     expiresAt: new Date(row.expiresAt).toISOString(),
   });
 }
@@ -280,6 +281,21 @@ async function expireRequestRows(tx: ConversationTransaction, turnId: string) {
         lt(conversationResearchRequests.expiresAt, sql`clock_timestamp()`),
       ),
     );
+}
+
+/** Reserves one paid research attempt in the turn before any provider call can start. */
+async function reserveResearchAttempt(tx: ConversationTransaction, turnId: string) {
+  const [row] = await tx
+    .update(conversationTurns)
+    .set({ researchAttempts: sql`${conversationTurns.researchAttempts} + 1` })
+    .where(
+      and(
+        eq(conversationTurns.id, turnId),
+        lt(conversationTurns.researchAttempts, MAX_RESEARCH_REQUESTS_PER_TURN),
+      ),
+    )
+    .returning({ attempts: conversationTurns.researchAttempts });
+  return row !== undefined;
 }
 
 function sleep(milliseconds: number, signal: AbortSignal) {
@@ -310,18 +326,24 @@ export function createConversationResearchStore(db: Database) {
     const id = conversationIdSchema.parse(requestId);
     return db.transaction(async (tx) => {
       const [row] = await tx
-        .select({ request: conversationResearchRequests, turnStatus: conversationTurns.status })
+        .select({ request: conversationResearchRequests })
         .from(conversationResearchRequests)
-        .innerJoin(conversationTurns, eq(conversationTurns.id, conversationResearchRequests.turnId))
         .where(
           and(
             eq(conversationResearchRequests.id, id),
             eq(conversationResearchRequests.queryHash, expectedHash),
-            eq(conversationTurns.sessionId, sessionId),
           ),
         )
         .for("update");
       if (!row) return "stale";
+      // Read the turn separately. Locking both rows here can deadlock against claimApproved,
+      // which holds a share lock on the turn before updating the request.
+      const [turn] = await tx
+        .select({ sessionId: conversationTurns.sessionId, status: conversationTurns.status })
+        .from(conversationTurns)
+        .where(eq(conversationTurns.id, row.request.turnId))
+        .limit(1);
+      if (!turn || turn.sessionId !== sessionId) return "stale";
       if (
         (row.request.status === "pending" || row.request.status === "approved") &&
         new Date(row.request.expiresAt).getTime() <= Date.now()
@@ -329,7 +351,7 @@ export function createConversationResearchStore(db: Database) {
         await settleRequest(tx, id, "expired", openStatuses);
         return "expired";
       }
-      if (row.turnStatus !== "running" && ["pending", "approved"].includes(row.request.status)) {
+      if (turn.status !== "running" && ["pending", "approved"].includes(row.request.status)) {
         await settleRequest(tx, id, "cancelled", openStatuses);
         return "cancelled";
       }
@@ -411,12 +433,9 @@ export function createConversationResearchStore(db: Database) {
         }
         if (existing) await settleRequest(tx, existing.id, "stale", openStatuses);
 
-        // Count every attempt, including denied and expired ones, so a re-ask cannot loop.
-        const used = await tx
-          .select({ id: conversationResearchRequests.id })
-          .from(conversationResearchRequests)
-          .where(eq(conversationResearchRequests.turnId, context.turnId));
-        if (used.length >= MAX_RESEARCH_REQUESTS_PER_TURN) return { status: "limit" as const };
+        // Count every attempt, including denied, expired and autonomous ones, so a re-ask cannot loop.
+        if (!(await reserveResearchAttempt(tx, context.turnId)))
+          return { status: "limit" as const };
 
         const [request] = await tx
           .insert(conversationResearchRequests)
@@ -477,7 +496,9 @@ export function createConversationResearchStore(db: Database) {
         return inspection.status === "generalized" &&
           inspection.outboundQuestion === input.outboundQuestion &&
           queryHash(inspection.outboundQuestion) === input.queryHash
-          ? ("claimed" as const)
+          ? (await reserveResearchAttempt(tx, context.turnId))
+            ? ("claimed" as const)
+            : ("limit" as const)
           : ("stale" as const);
       });
     },
@@ -680,20 +701,22 @@ export function createConversationResearchStore(db: Database) {
               eq(conversationResearchRequests.conversationId, id),
               inArray(conversationResearchRequests.status, ["pending", "approved"]),
             ),
-          );
+          )
+          .orderBy(asc(conversationResearchRequests.createdAt));
         for (const row of rows) {
           if (new Date(row.expiresAt).getTime() <= Date.now())
             await settleRequest(tx, row.id, "expired", openStatuses);
         }
-        const pending = rows
+        // Approval remains deniable until execution starts, so approved rows stay visible too.
+        const open = rows
           .filter(
             (row) =>
-              row.status === "pending" &&
+              (row.status === "pending" || row.status === "approved") &&
               row.proposedQuery !== null &&
               new Date(row.expiresAt).getTime() > Date.now(),
           )
           .map(disclosureRequest);
-        return researchDisclosureRequestsSchema.parse({ requests: pending });
+        return researchDisclosureRequestsSchema.parse({ requests: open });
       });
     },
 

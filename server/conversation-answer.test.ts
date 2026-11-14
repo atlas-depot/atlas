@@ -34,7 +34,7 @@ it("publishes the server's own source record for a citation that quotes retrieve
   });
 });
 
-it("validates public citations separately and persists only the provider's web source record", () => {
+it("validates public citations separately and returns the provider's web source record", () => {
   const webSource = {
     kind: "web" as const,
     url: "https://example.test/release",

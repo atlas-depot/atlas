@@ -80,6 +80,7 @@ describe("stored note documents", () => {
             { type: "text", text: "The quarterly budget ", styles: {} },
             { type: "text", text: "freeze", styles: { bold: true } },
           ],
+          children: [paragraph("nested", "horizon child")],
         },
         paragraph("next", "for the bluebird acquisition"),
         {
@@ -101,8 +102,15 @@ describe("stored note documents", () => {
           props: {},
           content: {
             type: "tableContent",
-            columnWidths: [180],
-            rows: [{ cells: [[{ type: "text", text: "secret cell", styles: {} }]] }],
+            columnWidths: [180, 180],
+            rows: [
+              {
+                cells: [
+                  [{ type: "text", text: "secret cell", styles: {} }],
+                  [{ type: "text", text: "code", styles: {} }],
+                ],
+              },
+            ],
           },
           children: [],
         },
@@ -110,9 +118,10 @@ describe("stored note documents", () => {
     );
     const text = noteContentPlainText(value);
     expect(text).toContain("The quarterly budget freeze");
-    expect(text).toContain("for the bluebird acquisition");
-    expect(text).toContain("secret cell");
-    expect(text).toContain("https://internal.example.com/secret/roadmap");
+    expect(text).toContain("freeze\nhorizon child");
+    expect(text).toContain("freeze\nhorizon child\nfor the bluebird acquisition");
+    expect(text).toContain("secret cell\ncode\n");
+    expect(text).toContain("https://internal.example.com/secret/roadmap\ndashboard");
     expect(text).not.toContain('"type"');
     expect(text).not.toContain("columnWidths");
   });

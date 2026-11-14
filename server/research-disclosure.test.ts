@@ -63,6 +63,15 @@ describe("public research disclosure boundary", () => {
     ).toEqual({ status: "approval_required", reason: "private_context_overlap" });
   });
 
+  it("preserves URL identity when every label is a single character", () => {
+    expect(
+      inspectResearchQuestion({
+        question: "What does https://a.b.c/d say?",
+        privateTexts: ["Private link: https://a.b.c/d"],
+      }),
+    ).toEqual({ status: "approval_required", reason: "private_context_overlap" });
+  });
+
   it("detects a four-word phrase without leaving its tail", () => {
     expect(
       inspectResearchQuestion({
@@ -102,16 +111,29 @@ describe("public research disclosure boundary", () => {
   it("requires approval for direct identifiers even without private context", () => {
     for (const question of [
       "Find public information for a.person@example.test",
+      "Find public information for user@example.рф",
       "Who owns 550e8400-e29b-41d4-a716-446655440000?",
+      "Who owns id_deadbeef-dead-41d4-a716-deadbeefcafe?",
       "Find 0532 123 45 67 online",
       "Find 4111 1111 1111 1111 online",
       "Find TR33 0006 1005 1978 6457 8413 26 online",
       "Find public records for 1234",
+      "Find public records for １２３４",
+      "Find +٩٠ ٥٣٢ ١٢٣ ٤٥ ٦٧ online",
     ])
       expect(inspectResearchQuestion({ question, privateTexts: [] })).toEqual({
         status: "approval_required",
         reason: "direct_identifier",
       });
+  });
+
+  it("screens Unicode-digit identifiers even when private context contains the same digits", () => {
+    expect(
+      inspectResearchQuestion({
+        question: "Find +٩٠ ٥٣٢ ١٢٣ ٤٥ ٦٧ online",
+        privateTexts: ["My phone number is +٩٠ ٥٣٢ ١٢٣ ٤٥ ٦٧."],
+      }),
+    ).toEqual({ status: "approval_required", reason: "direct_identifier" });
   });
 
   it("honors explicit escalation and uncertain context", () => {

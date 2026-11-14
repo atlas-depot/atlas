@@ -13,8 +13,9 @@ for (const acronym of ["AI", "API", "CEO", "EU", "GDP", "HR", "IT", "PDF", "US",
   genericTerms.add(acronym.toLowerCase());
 
 const emailPattern =
-  /(?:^|[^\p{L}\p{N}._%+-])[\p{L}\p{N}._%+-]{1,64}@[\p{L}\p{N}-]{1,63}(?:\.[\p{L}\p{N}-]{1,63}){0,4}\.[A-Za-z]{2,24}(?=$|[^\p{L}\p{N}])/u;
-const uuidPattern = /\b[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\b/iu;
+  /(?:^|[^\p{L}\p{N}._%+-])[\p{L}\p{N}._%+-]{1,64}@[\p{L}\p{N}-]{1,63}(?:\.[\p{L}\p{N}-]{1,63}){0,4}\.[\p{L}]{2,24}(?=$|[^\p{L}\p{N}])/u;
+// No ASCII word boundary: identifiers are commonly embedded after `_` or inside labels.
+const uuidPattern = /[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}/iu;
 const ibanPattern =
   /(?:^|[^\p{L}\p{N}])[A-Z]{2}\d{2}(?: ?[A-Z0-9]{2,4}){2,12}(?=$|[^\p{L}\p{N}])/iu;
 const digitSequencePattern = /\+?\d[\d ()./:-]{2,}\d/gu;
@@ -22,6 +23,7 @@ const longNumberPattern = /\b\d{4,}\b/gu;
 const yearPattern = /^(?:18|19|20|21)\d{2}$/u;
 const termPattern = /[\p{L}\p{N}]+/gu;
 const nonLatinPattern = /[^\p{Script=Latin}\p{N}\p{M}]/u;
+const urlPattern = /https?:\/\/[^\s"'<>]+/giu;
 
 /** NFKC plus Turkish-safe folding, so NFD text and I/ı/İ/i compare as one form. */
 function fold(value: string) {
@@ -31,6 +33,32 @@ function fold(value: string) {
     .replace(/I/gu, "i")
     .replace(/\p{M}+/gu, "")
     .toLowerCase();
+}
+
+/** Map every Unicode decimal digit to ASCII, so identifier patterns see one form. */
+function asciiDigits(value: string) {
+  let result = "";
+  for (const character of value) {
+    if (!/^\p{Nd}$/u.test(character)) {
+      result += character;
+      continue;
+    }
+    // Decimal digits form contiguous runs of ten starting at a script-specific zero.
+    const digit = character.codePointAt(0)!;
+    let zero = digit;
+    while (/\p{Nd}/u.test(String.fromCodePoint(zero - 1))) zero--;
+    result += String((digit - zero) % 10);
+  }
+  return result;
+}
+
+function normalizedUrls(value: string) {
+  return [...value.normalize("NFKC").matchAll(urlPattern)].map((match) =>
+    match[0]
+      .toLowerCase()
+      .replace(/[.,;:!?)\]]+$/u, "")
+      .replace(/\/+$/u, ""),
+  );
 }
 
 function terms(value: string) {
@@ -55,8 +83,11 @@ function sharesNonLatinFragment(term: string, query: string) {
 function hasPrivateOverlap(question: string, privateTexts: readonly string[]) {
   const query = fold(question);
   const queryTerms = new Set(terms(query));
+  // URL identity survives even when every path label is a single character.
+  const queryUrls = new Set(normalizedUrls(query));
   for (const text of privateTexts) {
     const folded = fold(text);
+    if (queryUrls.size > 0 && normalizedUrls(folded).some((url) => queryUrls.has(url))) return true;
     for (const term of terms(folded)) {
       if (!isSpecificTerm(term)) continue;
       if (queryTerms.has(term) || sharesNonLatinFragment(term, query)) return true;
@@ -66,12 +97,12 @@ function hasPrivateOverlap(question: string, privateTexts: readonly string[]) {
 }
 
 function hasDirectIdentifier(question: string) {
-  if (emailPattern.test(question) || uuidPattern.test(question) || ibanPattern.test(question))
-    return true;
-  for (const match of question.matchAll(digitSequencePattern)) {
+  const text = asciiDigits(question.normalize("NFKC"));
+  if (emailPattern.test(text) || uuidPattern.test(text) || ibanPattern.test(text)) return true;
+  for (const match of text.matchAll(digitSequencePattern)) {
     if (match[0].replace(/\D/gu, "").length >= 7) return true;
   }
-  for (const match of question.matchAll(longNumberPattern)) {
+  for (const match of text.matchAll(longNumberPattern)) {
     if (!yearPattern.test(match[0])) return true;
   }
   return false;

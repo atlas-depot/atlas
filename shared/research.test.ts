@@ -10,9 +10,13 @@ describe("public research approval contract", () => {
       id: "130c3220-dc86-4fb0-828d-0338cae029d3",
       proposedQuery: "What did Northstar Labs announce?",
       queryHash: "a".repeat(64),
+      status: "pending" as const,
       expiresAt: "2026-11-13T12:02:00.000Z",
     };
     expect(researchDisclosureRequestSchema.parse(request)).toEqual(request);
+    expect(researchDisclosureRequestSchema.parse({ ...request, status: "approved" }).status).toBe(
+      "approved",
+    );
     expect(researchDisclosureDecisionInputSchema.parse({ queryHash: request.queryHash })).toEqual({
       queryHash: request.queryHash,
     });
@@ -26,6 +30,7 @@ describe("public research approval contract", () => {
         id: "130c3220-dc86-4fb0-828d-0338cae029d3",
         proposedQuery: "x".repeat(501),
         queryHash: "a".repeat(64),
+        status: "pending",
         expiresAt: "2026-11-13T12:02:00.000Z",
       }).success,
     ).toBe(false);
