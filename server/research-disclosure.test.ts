@@ -78,6 +78,38 @@ describe("public research disclosure boundary", () => {
     ).toEqual({ status: "approval_required", reason: "private_context_overlap" });
   });
 
+  it("catches a four-character private term embedded in a joined query token", () => {
+    expect(
+      inspectResearchQuestion({
+        question: "What funding news involves #WeLoveAcme?",
+        privateTexts: ["Acme is a private client."],
+      }),
+    ).toEqual({ status: "approval_required", reason: "private_context_overlap" });
+    expect(
+      inspectResearchQuestion({
+        question: "What funding news involves TeamAcme2026?",
+        privateTexts: ["Acme is a private client."],
+      }),
+    ).toEqual({ status: "approval_required", reason: "private_context_overlap" });
+  });
+
+  it("treats grouped private figures as identifiers", () => {
+    for (const amount of ["148,000", "148.000", "148 000"]) {
+      expect(
+        inspectResearchQuestion({
+          question: `Is ${amount} enough for a senior engineer?`,
+          privateTexts: [`My salary is ${amount} and my start date is 2026.`],
+        }),
+      ).toEqual({ status: "approval_required", reason: "private_context_overlap" });
+      expect(
+        inspectResearchQuestion({
+          question: `Is ${amount} enough for a senior engineer?`,
+          privateTexts: [],
+        }),
+      ).toEqual({ status: "approval_required", reason: "direct_identifier" });
+    }
+  });
+
   it("preserves URL identity when every label is a single character", () => {
     expect(
       inspectResearchQuestion({
