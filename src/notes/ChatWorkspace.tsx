@@ -137,6 +137,8 @@ export function ChatWorkspace({
   const activeReadRef = useRef<ConversationRead | null>(null);
   const listInitializedRef = useRef(false);
   const deleteRequestIdRef = useRef(0);
+  /** The latest open request, so an interrupted open can tell itself from a superseded one. */
+  const latestOpenRequestRef = useRef<number | null>(null);
 
   const invalidateActive = useCallback(() => {
     openRequestIdRef.current += 1;
@@ -165,6 +167,26 @@ export function ChatWorkspace({
     setMessagesNextCursor(null);
     setHistoryRefreshPending(false);
     setHistoryFailure(null);
+  }
+
+  /**
+   * A session re-check can drop an open in flight. The conversation stays selected, so without
+   * a visible state the screen would say nothing is selected while Send still targets it.
+   */
+  function reportInterruptedOpen(requestId: number, id: string) {
+    if (
+      latestOpenRequestRef.current !== requestId ||
+      activeConversationIdRef.current !== id ||
+      activeReadRef.current !== null ||
+      deletedIdsRef.current.has(id)
+    ) {
+      return;
+    }
+    setOpenFailure({
+      id,
+      kind: "failed",
+      message: "Opening this conversation was interrupted. Try again.",
+    });
   }
 
   /** Keeps the selection ref in step with state so async completions can never act on a stale target. */
@@ -473,6 +495,7 @@ export function ChatWorkspace({
     if (!enabledRef.current || deletedIdsRef.current.has(id)) return;
     invalidateActive();
     const requestId = openRequestIdRef.current;
+    latestOpenRequestRef.current = requestId;
     snapshotNoteTitles();
     setDeleteNotice(null);
     setOpenFailure(null);
@@ -486,9 +509,13 @@ export function ChatWorkspace({
     try {
       // A read can publish a completed answer, so history must be requested after it.
       const readResult = await client.read(id);
-      if (!isCurrentOpenRequest(requestId, id)) return;
+      if (!isCurrentOpenRequest(requestId, id)) {
+        reportInterruptedOpen(requestId, id);
+        return;
+      }
       const historyResult = await fetchLatestHistory(id, true);
       if (!isCurrentOpenRequest(requestId, id)) {
+        reportInterruptedOpen(requestId, id);
         return;
       }
       setConversations((current) => {
@@ -504,6 +531,7 @@ export function ChatWorkspace({
       setOpenFailure(null);
     } catch (error) {
       if (!isCurrentOpenRequest(requestId, id)) {
+        reportInterruptedOpen(requestId, id);
         return;
       }
       const kind = classifyFailure(error);
@@ -572,21 +600,26 @@ export function ChatWorkspace({
     }
   }
 
-  async function createNewConversation() {
-    if (!enabledRef.current || creating || deletingId !== null) return;
-    invalidateActive();
-    const requestId = openRequestIdRef.current;
-    setCreating(true);
-    setDeleteNotice(null);
-    setOpenFailure(null);
-    setActionFailure(null);
-    const key = pendingCreateKeyRef.current ?? crypto.randomUUID();
-    pendingCreateKeyRef.current = key;
-
-    try {
+  /**
+   * Creates an empty conversation and selects it. A create whose response was dropped keeps its
+   * idempotency key, and replaying that key returns the same conversation. If it has been used
+   * since (opened from the list and written to), it is not a new conversation any more, so the
+   * key is discarded and a fresh one is created. Returns null when the request is superseded.
+   */
+  async function createAndSelect(requestId: number): Promise<Conversation | null> {
+    for (;;) {
+      const replayed = pendingCreateKeyRef.current !== null;
+      const key = pendingCreateKeyRef.current ?? crypto.randomUUID();
+      pendingCreateKeyRef.current = key;
       const created = await client.create(key);
-      if (!isCurrentOpenRequest(requestId)) {
-        return;
+      if (!isCurrentOpenRequest(requestId)) return null;
+      if (replayed) {
+        const history = await client.messages(created.id, { limit: 1 });
+        if (!isCurrentOpenRequest(requestId)) return null;
+        if (history.messages.length > 0) {
+          pendingCreateKeyRef.current = null;
+          continue;
+        }
       }
       pendingCreateKeyRef.current = null;
       locallyCreatedIdsRef.current.add(created.id);
@@ -594,13 +627,27 @@ export function ChatWorkspace({
       setListState("ready");
       selectConversation(created.id);
       clearHistory();
-      const read = {
-        conversation: created,
-        activeTurn: null,
-        recovery: null,
-      };
+      setOpenFailure(null);
+      const read = { conversation: created, activeTurn: null, recovery: null };
       activeReadRef.current = read;
       setActiveRead(read);
+      return created;
+    }
+  }
+
+  async function createNewConversation() {
+    if (!enabledRef.current || creating || deletingId !== null) return;
+    invalidateActive();
+    const requestId = openRequestIdRef.current;
+    latestOpenRequestRef.current = null;
+    setCreating(true);
+    setDeleteNotice(null);
+    setOpenFailure(null);
+    setActionFailure(null);
+
+    try {
+      const created = await createAndSelect(requestId);
+      if (!created) return;
       requestAnimationFrame(() => composerRef.current?.focus());
     } catch (error) {
       if (requestId !== openRequestIdRef.current) return;
@@ -664,29 +711,9 @@ export function ChatWorkspace({
 
     try {
       if (!targetId) {
-        const createKey = pendingCreateKeyRef.current ?? crypto.randomUUID();
-        pendingCreateKeyRef.current = createKey;
-        const created = await client.create(createKey);
-        if (!isCurrentOpenRequest(watchId)) {
-          return;
-        }
-        pendingCreateKeyRef.current = null;
-        locallyCreatedIdsRef.current.add(created.id);
+        const created = await createAndSelect(watchId);
+        if (!created) return;
         targetId = created.id;
-        setConversations((current) => [
-          created,
-          ...current.filter((item) => item.id !== created.id),
-        ]);
-        setListState("ready");
-        selectConversation(created.id);
-        clearHistory();
-        const createdRead = {
-          conversation: created,
-          activeTurn: null,
-          recovery: null,
-        };
-        activeReadRef.current = createdRead;
-        setActiveRead(createdRead);
       }
 
       if (deletedIdsRef.current.has(targetId)) {

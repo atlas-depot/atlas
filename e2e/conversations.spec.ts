@@ -232,6 +232,95 @@ test("a stale send after focus verification retains the same key through a lost 
   expect(api.history).toHaveLength(1);
 });
 
+/** Runs one session re-check, as a window focus does, and waits for it to finish. */
+async function recheckSession(page: Page) {
+  const session = gate();
+  const sessionStarted = gate();
+  await page.route("**/api/auth/session", async (route) => {
+    sessionStarted.release();
+    await session.promise;
+    await route.fallback();
+  });
+  await page.evaluate("window.dispatchEvent(new Event('focus'))");
+  await sessionStarted.promise;
+  await expect(chat(page).getByLabel("Message", { exact: true })).toBeDisabled();
+  session.release();
+  await expect(chat(page).getByLabel("Message", { exact: true })).toBeEnabled();
+  await page.unroute("**/api/auth/session");
+}
+
+test("an open dropped by focus verification shows a retry instead of a hidden selection", async ({
+  page,
+}) => {
+  const api = await setupChat(page);
+  api.history.push(question(1));
+  const read = gate();
+  const readStarted = gate();
+  let reads = 0;
+  api.intercept = async (route) => {
+    const request = route.request();
+    if (request.method() !== "GET" || !request.url().endsWith(`/${conversation.id}`)) return false;
+    reads += 1;
+    if (reads === 1) {
+      readStarted.release();
+      await read.promise;
+    }
+    return false;
+  };
+  await page.goto("/");
+  await chat(page).getByRole("button", { name: label, exact: true }).click();
+  await readStarted.promise;
+  await recheckSession(page);
+  const dropped = page.waitForResponse(
+    (response) => response.request().method() === "GET" && response.url().endsWith(conversation.id),
+  );
+  read.release();
+  await dropped;
+
+  await expect(chat(page).getByRole("alert")).toContainText(
+    "Opening this conversation was interrupted",
+  );
+  await expect(chat(page).getByText("Select a saved conversation")).toHaveCount(0);
+  await chat(page).getByRole("button", { name: "Retry opening conversation", exact: true }).click();
+  await expect(chat(page).getByText("Question 1", { exact: true })).toBeVisible();
+  await expect(chat(page).getByRole("alert")).toHaveCount(0);
+});
+
+test("a replayed create key never adopts a conversation that was used since", async ({ page }) => {
+  const api = await setupChat(page);
+  const create = gate();
+  const createStarted = gate();
+  api.intercept = async (route) => {
+    if (route.request().method() === "POST" && api.createKeys.length === 0) {
+      api.createKeys.push(route.request().headers()["idempotency-key"]);
+      createStarted.release();
+      await create.promise;
+      await route.fulfill({ status: 201, json: conversation });
+      return true;
+    }
+    return false;
+  };
+  await page.goto("/");
+  const newConversation = chat(page).getByRole("button", { name: "New conversation", exact: true });
+  await newConversation.click();
+  await createStarted.promise;
+  await recheckSession(page);
+  const dropped = page.waitForResponse(
+    (response) => response.request().method() === "POST" && response.status() === 201,
+  );
+  create.release();
+  await dropped;
+
+  // The conversation that dropped create made has been written to in the meantime.
+  api.history.push(question(1, "Earlier context"));
+  await newConversation.click();
+  await expect(chat(page).getByLabel("Message", { exact: true })).toBeFocused();
+  expect(api.createKeys).toHaveLength(3);
+  expect(api.createKeys[1]).toBe(api.createKeys[0]);
+  expect(api.createKeys[2]).not.toBe(api.createKeys[0]);
+  await expect(chat(page).getByText("Earlier context", { exact: true })).toHaveCount(0);
+});
+
 test("opening reads before history and catches up to a newly published answer past page one", async ({
   page,
 }) => {
