@@ -17,6 +17,17 @@ function notPerformed(reason: "denied" | "expired" | "cancelled" | "stale"): Res
   return { status: "not_performed", reason };
 }
 
+const MAX_SNIPPET_UNITS = 8_000;
+
+/** Keep the evidence bound without ending on half of a surrogate pair. */
+function truncateSnippet(value: string) {
+  const trimmed = value.trim();
+  if (trimmed.length <= MAX_SNIPPET_UNITS) return trimmed;
+  const last = trimmed.charCodeAt(MAX_SNIPPET_UNITS - 1);
+  const end = last >= 0xd800 && last <= 0xdbff ? MAX_SNIPPET_UNITS - 1 : MAX_SNIPPET_UNITS;
+  return trimmed.slice(0, end);
+}
+
 /** Coordinates chat-only disclosure approval before invoking the existing public research path. */
 export function createChatResearch({
   gate,
@@ -93,7 +104,7 @@ export function createChatResearch({
           return {
             id: evidenceId(source),
             source,
-            snippet: (snippet as string).trim().slice(0, 8_000),
+            snippet: truncateSnippet(snippet as string),
           };
         });
       if (mappedSources.length === 0) throw new Error("Research returned no verified sources.");
