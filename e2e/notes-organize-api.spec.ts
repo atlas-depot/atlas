@@ -116,6 +116,9 @@ test("Save & organize keeps its source and saves an edited derivative through re
   await draftContent.press("Enter");
   await page.keyboard.insertText("Keep this edit after reload.");
   await expectEditorContent(draftContent, /Keep this edit after reload\./);
+  await expect(panel.getByRole("textbox", { name: "Draft title", exact: true })).toHaveValue(
+    "My edited derivative",
+  );
   await expect(panel.getByText("Draft saved", { exact: true })).toBeVisible();
   const edited = (await work(page)).drafts[0];
   await page.reload();

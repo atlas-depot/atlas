@@ -68,7 +68,7 @@ function running(sequence: number): NonNullable<ConversationRead["activeTurn"]> 
 }
 
 async function setupChat(page: Page) {
-  await serveNotes(page, [[note]]);
+  await serveNotes(page, [[note, '"v1"']]);
   await page.route("**/api/auth/session", (route) =>
     route.fulfill({
       json: {
