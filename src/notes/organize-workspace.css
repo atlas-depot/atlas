@@ -284,17 +284,31 @@
 .workspace-shell .note-editor-plane .document-title::placeholder {
   color: var(--foreground);
 }
-.note-document-actions {
+.note-title-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.5rem;
+}
+.note-actions-menu [role="menuitem"] {
   display: flex;
-  flex-wrap: wrap;
-  gap: 0.75rem;
-  padding-top: 1rem;
+  align-items: center;
+  min-height: 44px;
+  padding-inline: 0.625rem;
+  border-radius: 0.375rem;
+  font-size: 0.875rem;
+  outline: none;
+}
+.note-actions-menu [role="menuitem"][data-highlighted] {
+  background: var(--accent);
+  color: var(--accent-foreground);
 }
 .workspace-shell > [role="note"] {
   margin: 0;
   padding: 0.75rem 1.5rem;
 }
-.workspace-account-menu {
+.workspace-account-menu,
+.note-actions-menu {
   min-width: 12rem;
   max-width: calc(100vw - 1.5rem);
   padding: 0.375rem;

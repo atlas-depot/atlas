@@ -9,6 +9,8 @@ import {
   useState,
   useSyncExternalStore,
 } from "react";
+import { Menu } from "@base-ui/react/menu";
+import { DotsThreeIcon } from "@phosphor-icons/react/dist/csr/DotsThree";
 import { Button } from "@/components/ui/button";
 import { NotePencilIcon } from "@phosphor-icons/react/dist/csr/NotePencil";
 import { ChatCircleIcon } from "@phosphor-icons/react/dist/csr/ChatCircle";
@@ -159,7 +161,7 @@ export function NotesWorkspace({
   const compareRef = useRef<HTMLButtonElement>(null);
   const deleteRefreshRef = useRef<HTMLButtonElement>(null);
   const deleteCancelRef = useRef<HTMLButtonElement>(null);
-  const deleteButtonRef = useRef<HTMLButtonElement>(null);
+  const noteActionsRef = useRef<HTMLButtonElement>(null);
   const dirty = useMemo(
     () => !editorValid || hasUnsavedChanges(draft, saved?.note ?? null),
     [draft, saved, editorValid],
@@ -530,7 +532,7 @@ export function NotesWorkspace({
         requestAnimationFrame(() => titleRef.current?.focus());
       } else if (deleteWasUnconfirmed) {
         setDeleteFailure(null);
-        requestAnimationFrame(() => deleteButtonRef.current?.focus());
+        requestAnimationFrame(() => noteActionsRef.current?.focus());
       }
     } catch (error) {
       const kind = classifyFailure(error);
@@ -865,16 +867,46 @@ export function NotesWorkspace({
                     <Label htmlFor="note-title" className="sr-only">
                       Title
                     </Label>
-                    <Input
-                      ref={titleRef}
-                      id="note-title"
-                      className="document-title"
-                      placeholder="Untitled note"
-                      value={draft.title}
-                      maxLength={256}
-                      disabled={openingId !== null || deleting}
-                      onChange={(event) => setDraft({ ...draft, title: event.target.value })}
-                    />
+                    <div className="note-title-row">
+                      <Input
+                        ref={titleRef}
+                        id="note-title"
+                        className="document-title"
+                        placeholder="Untitled note"
+                        value={draft.title}
+                        maxLength={256}
+                        disabled={openingId !== null || deleting}
+                        onChange={(event) => setDraft({ ...draft, title: event.target.value })}
+                      />
+                      {saved && (
+                        <Menu.Root>
+                          <Menu.Trigger
+                            ref={noteActionsRef}
+                            render={<Button type="button" variant="ghost" size="icon" />}
+                            aria-label="Note actions"
+                            title="Note actions"
+                            disabled={busy || writeBlocked || deleteBlocked}
+                          >
+                            <DotsThreeIcon weight="bold" aria-hidden="true" />
+                          </Menu.Trigger>
+                          <Menu.Portal>
+                            <Menu.Positioner align="end" sideOffset={4} className="z-50">
+                              <Menu.Popup
+                                className="note-actions-menu"
+                                finalFocus={deleteOpen ? false : undefined}
+                              >
+                                <Menu.Item
+                                  disabled={busy || writeBlocked || deleteBlocked}
+                                  onClick={() => setDeleteOpen(true)}
+                                >
+                                  Delete note
+                                </Menu.Item>
+                              </Menu.Popup>
+                            </Menu.Positioner>
+                          </Menu.Portal>
+                        </Menu.Root>
+                      )}
+                    </div>
                     <Suspense fallback={<p>Opening editor...</p>}>
                       <BlockNoteEditor
                         key={editorKey}
@@ -904,19 +936,6 @@ export function NotesWorkspace({
                         preserved.
                       </p>
                     )}
-                    <div className="note-document-actions">
-                      {saved && (
-                        <Button
-                          ref={deleteButtonRef}
-                          variant="ghost"
-                          className="text-destructive"
-                          disabled={busy || writeBlocked || deleteBlocked}
-                          onClick={() => setDeleteOpen(true)}
-                        >
-                          Delete note
-                        </Button>
-                      )}
-                    </div>
                   </section>
                   {editorMode === "source" && typeof draft.content === "string" && (
                     <Card>
@@ -1047,7 +1066,7 @@ export function NotesWorkspace({
         <AlertDialogContent
           className="notes-dialog"
           initialFocus={deleteCancelRef}
-          finalFocus={saved ? deleteButtonRef : newNoteRef}
+          finalFocus={saved ? noteActionsRef : newNoteRef}
         >
           <AlertDialogHeader>
             <AlertDialogTitle>Delete note?</AlertDialogTitle>
