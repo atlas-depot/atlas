@@ -573,6 +573,37 @@ it("expires an approved request without leaving an outbound payload", async () =
   expect(expired).toMatchObject({ status: "expired", proposedQuery: null });
 });
 
+it("sends nothing autonomously while a disclosure request in the turn is open", async () => {
+  const f = await fixture("What are current public onboarding practices?", {
+    input: "Look at my notes.",
+  });
+  // Prepared before the owner is asked: its egress claim must fail once a request is open.
+  const earlier = await f.turns.research.prepare(f.sessionId, {
+    question: "What are current public onboarding practices?",
+  });
+  if (earlier.status !== "generalized") throw new Error("Expected a generalized query.");
+  const pending = await f.turns.research.prepare(f.sessionId, {
+    question: "Typical notice periods for senior engineers",
+    requiresPrivateDisclosure: true,
+  });
+  if (pending.status !== "approval_required") throw new Error("Expected an approval request.");
+
+  // A reworded copy of the pending question has a different hash and no private overlap.
+  expect(
+    await f.turns.research.prepare(f.sessionId, {
+      question: "Typical notice periods for senior engineers?",
+    }),
+  ).toMatchObject({ status: "approval_required" });
+  expect(
+    await f.turns.research.claimGeneralized(f.sessionId, {
+      question: "What are current public onboarding practices?",
+      outboundQuestion: earlier.outboundQuestion,
+      queryHash: earlier.queryHash,
+      contextHash: earlier.contextHash,
+    }),
+  ).toBe("stale");
+});
+
 it("binds a denial to the rest of the turn even for a new wording", async () => {
   const f = await fixture("What did Maya Chen earn?", { input: "Look at my notes." });
   const first = await f.turns.research.prepare(f.sessionId, {

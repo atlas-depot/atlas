@@ -405,7 +405,7 @@ export function createConversationResearchStore(db: Database) {
           .where(
             and(
               eq(conversationResearchRequests.turnId, context.turnId),
-              eq(conversationResearchRequests.queryHash, expectedHash),
+              // Any wording: while the owner is deciding, nothing leaves this turn unapproved.
               inArray(conversationResearchRequests.status, ["pending", "approved"]),
             ),
           )
@@ -499,7 +499,6 @@ export function createConversationResearchStore(db: Database) {
           .where(
             and(
               eq(conversationResearchRequests.turnId, context.turnId),
-              eq(conversationResearchRequests.queryHash, input.queryHash),
               inArray(conversationResearchRequests.status, ["pending", "approved"]),
             ),
           )
