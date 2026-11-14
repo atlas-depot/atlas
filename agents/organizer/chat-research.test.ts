@@ -32,8 +32,14 @@ function setup(
     async prepare() {
       return prepare();
     },
-    async claimGeneralized(...args: unknown[]) {
-      claims.push(args);
+    async claimGeneralized(sessionId: string, claim: Record<string, unknown>) {
+      // Validate the authorization payload before allowing the provider call, as production does.
+      assert.equal(sessionId, "session-1");
+      assert.equal(typeof claim.question, "string");
+      assert.equal(typeof claim.outboundQuestion, "string");
+      assert.match(String(claim.queryHash), /^[a-f0-9]{64}$/);
+      assert.match(String(claim.contextHash), /^[a-f0-9]{64}$/);
+      claims.push([sessionId, claim]);
       return "claimed";
     },
     async waitForDecision() {
