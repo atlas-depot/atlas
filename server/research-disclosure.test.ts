@@ -184,6 +184,76 @@ describe("public research disclosure boundary", () => {
     ).toEqual({ status: "approval_required", reason: "direct_identifier" });
   });
 
+  it.each([
+    ["Yılmazların şirketinin iflası yakın, kimseye söyleme.", "Yılmaz şirket iflas"],
+    ["Denizin boşanması için avukatla görüştük", "Deniz boşanma avukat"],
+    ["The Hendersons are divorcing.", "Henderson divorce"],
+    ["Henderson is divorcing.", "Hendersons divorce lawyer"],
+    ["Zeynebin hamileliği", "Zeynep doktor"],
+    ["Mehmede söyleme", "Mehmet haber"],
+  ])("matches inflected forms of a private word: %s", (note, question) => {
+    expect(inspectResearchQuestion({ question, privateTexts: [note] }).status).toBe(
+      "approval_required",
+    );
+  });
+
+  it.each([
+    "#NorthstarLabs #MayaChen",
+    "northstarlabs.com mayachen linkedin",
+    "Northstar2026 Maya1",
+  ])("matches a private term joined into a longer query token: %s", (question) => {
+    expect(inspectResearchQuestion({ question, privateTexts: privateContext }).status).toBe(
+      "approval_required",
+    );
+  });
+
+  it.each([
+    ["The appointment was cancelled.", "Can you explain HTTP?"],
+    ["cancel gym", "How can I learn piano"],
+    ["We keep an apiary behind the house.", "What is a REST API?"],
+    ["Mesa trip planning", "average home sales this spring"],
+  ])("keeps short common words and cross-word letters from matching: %s", (note, question) => {
+    expect(inspectResearchQuestion({ question, privateTexts: [note] }).status).toBe("generalized");
+  });
+
+  it.each([
+    ["Ma\u00ADya Chen", "Maya biography"],
+    ["Ma\u200Bya Chen", "Maya biography"],
+    ["North\u200Bstar\u200BLabs", "Northstar funding"],
+    ["Maya\u200BChen", "Chen biography"],
+  ])("screens private text that carries invisible characters", (note, question) => {
+    expect(inspectResearchQuestion({ question, privateTexts: [note] }).status).toBe(
+      "approval_required",
+    );
+  });
+
+  it.each([
+    ["STRAẞE 12 teslimat", "Straße teslimat"],
+    ["Straße teslimat", "STRASSE kargo"],
+    ["Đorđević dosyası", "Dordevic"],
+    ["Þór Guðmundsson", "Thor Gudmundsson"],
+    ["Ægir Sørensen", "Aegir Sorensen"],
+  ])("folds both cases of letters without a decomposition: %s", (note, question) => {
+    expect(inspectResearchQuestion({ question, privateTexts: [note] }).status).toBe(
+      "approval_required",
+    );
+  });
+
+  it("does not let decomposed Hangul make unrelated Korean queries overlap", () => {
+    expect(
+      inspectResearchQuestion({
+        question: "서울 날씨 예보",
+        privateTexts: ["김민수 팀장과 예산 검토"],
+      }).status,
+    ).toBe("generalized");
+    expect(
+      inspectResearchQuestion({
+        question: "김민수 경력",
+        privateTexts: ["김민수 팀장과 예산 검토"],
+      }).status,
+    ).toBe("approval_required");
+  });
+
   it("honors explicit escalation and uncertain context", () => {
     expect(
       inspectResearchQuestion({

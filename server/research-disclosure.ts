@@ -26,17 +26,56 @@ const termPattern = /[\p{L}\p{N}]+/gu;
 const nonLatinPattern = /[^\p{Script=Latin}\p{N}\p{M}]/u;
 const urlPattern = /https?:\/\/[^\s"'<>]+/giu;
 
-/** NFKD, then strip combining marks, then Turkish-safe and special-letter folding. */
+const invisiblePattern = /[\p{Cf}\u{E0000}-\u{E007F}]/gu;
+// Letters that have no Unicode decomposition, mapped to their usual ASCII spelling.
+const undecomposedLetters: Record<string, string> = {
+  ı: "i",
+  ß: "ss",
+  ø: "o",
+  ł: "l",
+  đ: "d",
+  ð: "d",
+  þ: "th",
+  æ: "ae",
+  œ: "oe",
+};
+const undecomposedPattern = /[ıßøłđðþæœ]/gu;
+
+/**
+ * NFKD and a mark strip remove accents (İ becomes I plus a dot). Lowercasing comes before the
+ * letter table so both cases of a letter fold alike, and NFC puts Hangul syllables back together.
+ */
 function fold(value: string) {
   return value
     .normalize("NFKD")
     .replace(/\p{M}+/gu, "")
-    .replace(/[\u0130\u0131]/gu, "i")
-    .replace(/I/gu, "i")
-    .replace(/ß/gu, "ss")
-    .replace(/[øØ]/gu, "o")
-    .replace(/[łŁ]/gu, "l")
-    .toLowerCase();
+    .toLowerCase()
+    .replace(undecomposedPattern, (letter) => undecomposedLetters[letter]!)
+    .normalize("NFC");
+}
+
+/**
+ * Pasted text can carry soft hyphens or zero-width characters inside a word or between two.
+ * Screening both readings keeps `Ma\u00ADya` matching `Maya` without gluing separate words.
+ */
+function privateReadings(text: string) {
+  const joined = text.replace(invisiblePattern, "");
+  return joined === text ? [text] : [joined, text.replace(invisiblePattern, " ")];
+}
+
+// Final consonants that soften before a vowel suffix: kitap/kitabi, Ahmet/Ahmedin, cocuk/cocugu.
+const softened: Record<string, string> = { p: "b", t: "d", k: "g" };
+
+/**
+ * Notes hold inflected forms and search queries hold base forms, in either direction. Both terms
+ * are specific and at least four letters, so short common words cannot act as prefixes.
+ */
+function sharesStem(left: string, right: string) {
+  const [short, long] = left.length <= right.length ? [left, right] : [right, left];
+  if (long.startsWith(short)) return true;
+  if (short.length < 5 || long.length === short.length) return false;
+  const stem = short.slice(0, -1);
+  return long.startsWith(stem) && softened[short.at(-1)!] === long[stem.length];
 }
 
 /** Map every Unicode decimal digit to ASCII, so identifier patterns see one form. */
@@ -95,10 +134,13 @@ function hasPrivateOverlap(question: string, privateTexts: readonly string[]) {
   const query = fold(question);
   const queryTerms = [...terms(query)];
   const queryTermSet = new Set(queryTerms);
-  const querySkeleton = query.replace(/[^\\p{L}\\p{N}]/gu, "");
+  // Only distinctive Latin query terms take part in stem and joined-form matching.
+  const stemQueryTerms = queryTerms.filter(
+    (term) => term.length >= 4 && isSpecificTerm(term) && !nonLatinPattern.test(term),
+  );
   // URL identity survives even when every path label is a single character.
   const queryUrls = new Set(normalizedUrls(query));
-  for (const text of privateTexts) {
+  for (const text of privateTexts.flatMap(privateReadings)) {
     const folded = fold(text);
     if (queryUrls.size > 0 && normalizedUrls(folded).some((url) => queryUrls.has(url))) return true;
     for (const term of terms(folded)) {
@@ -107,17 +149,14 @@ function hasPrivateOverlap(question: string, privateTexts: readonly string[]) {
         if (query.includes(term) || sharesNonLatinFragment(term, query)) return true;
         continue;
       }
-      // Exact token match.
       if (queryTermSet.has(term)) return true;
-      // Inflected Latin forms: a 3+ letter prefix relation catches suffixes.
-      if (term.length >= 3) {
-        for (const queryTerm of queryTerms) {
-          if (!/^[\\p{Script=Latin}]+$/u.test(queryTerm) || queryTerm.length < 3) continue;
-          if (term.startsWith(queryTerm) || queryTerm.startsWith(term)) return true;
-        }
+      if (term.length < 4) continue;
+      for (const queryTerm of stemQueryTerms) {
+        // Inflected forms: Yilmazlarin and Yilmaz, Hendersons and Henderson.
+        if (sharesStem(term, queryTerm)) return true;
+        // Joined forms keep the private term inside one query token: #MayaChen, northstarlabs.
+        if (term.length >= 5 && queryTerm.includes(term)) return true;
       }
-      // Joined forms (e.g. #MayaChen, mayachen): check the query skeleton.
-      if (term.length >= 4 && querySkeleton.includes(term)) return true;
     }
   }
   return false;
