@@ -108,6 +108,39 @@ describe("public research disclosure boundary", () => {
     ).toBe("approval_required");
   });
 
+  it("catches identifiers embedded in labels instead of relying on ASCII word boundaries", () => {
+    expect(
+      inspectResearchQuestion({
+        question: "Find public records for account_1234",
+        privateTexts: [],
+      }),
+    ).toEqual({ status: "approval_required", reason: "direct_identifier" });
+    expect(
+      inspectResearchQuestion({
+        question: "Find public reports for FY2026",
+        privateTexts: [],
+      }).status,
+    ).toBe("generalized");
+  });
+
+  it("matches names whose punctuation differs between notes and the query", () => {
+    expect(
+      inspectResearchQuestion({
+        question: "What did DAngelo publish?",
+        privateTexts: ["D'Angelo is a private contact."],
+      }),
+    ).toEqual({ status: "approval_required", reason: "private_context_overlap" });
+  });
+
+  it("does not let a one-character non-Latin term hide inside a longer query token", () => {
+    expect(
+      inspectResearchQuestion({
+        question: "What is 张伟 known for?",
+        privateTexts: ["The private codename is 张."],
+      }),
+    ).toEqual({ status: "approval_required", reason: "private_context_overlap" });
+  });
+
   it("requires approval for direct identifiers even without private context", () => {
     for (const question of [
       "Find public information for a.person@example.test",

@@ -69,8 +69,8 @@ are removed in bounded batches as subsequent requests arrive.
 | `GET /api/conversations?limit=50&cursor=...` | `200 { conversations, nextCursor }`, newest creation first |
 | `GET /api/conversations/:id` | `200 { conversation, activeTurn, recovery }`, including the current checkpoint when running |
 | `GET /api/conversations/:id/research-requests` | `200 { requests }` with open exact queries, status (`pending`/`approved`), payload hashes and expiry |
-| `POST /api/conversations/:id/research-requests/:requestId/approve`, `{ queryHash }` | `200 { status: "approved" }` for the current owner's exact pending request |
-| `POST /api/conversations/:id/research-requests/:requestId/deny`, `{ queryHash }` | `200 { status: "denied" }`, with the pending payload cleared |
+| `POST /api/conversations/:id/research-requests/:requestId/approve`, `{ queryHash }` | `200 { status: "approved" }` for the current owner's open (`pending` or `approved`) exact request; replay is idempotent |
+| `POST /api/conversations/:id/research-requests/:requestId/deny`, `{ queryHash }` | `200 { status: "denied" }`, revoking an approved request before execution starts and clearing its payload |
 | `GET /api/conversations/:id/messages?limit=50&cursor=...` | `200 { messages, nextCursor }`, ascending immutable sequence |
 | `DELETE /api/conversations/:id`, empty body | `204` after content deletion and durable cleanup-intent recording |
 | `POST /api/conversations/:id/messages`, `{ text, policy? }` plus UUID `Idempotency-Key` | `202 { message, conversation, activeTurn, recovery }` |
@@ -136,11 +136,12 @@ inputs, contains a direct identifier, or cannot be screened against current cont
 approval. The pending request exposes the exact proposed query to the authenticated conversation
 owner and blocks the running tool until approval; the query is never rewritten or redacted.
 Approval is bound to `queryHash`, owner, conversation, turn and a digest of the private context;
-it expires after two minutes. A mismatched hash, changed context, expired request, Stop, terminal
-research decision in the same turn or another account cannot authorize a provider call. Denial
-remains available after approval until execution starts, and the listing keeps approved requests
-visible for that reason. Every research attempt, including denied, expired and autonomous ones,
-counts toward the per-turn limit. The helper receives only the zero-overlap query or the exact
+it expires after two minutes. A mismatched hash, context changed before the claim, expired request,
+Stop, terminal research decision in the same turn or another account cannot authorize a provider
+call. The claim transaction is the egress authorization point for the exact payload, and Stop still
+aborts an in-flight provider call. Denial remains available after approval until execution starts,
+and the listing keeps approved requests visible for that reason. Every research attempt, including
+denied, expired and autonomous ones, counts toward the per-turn limit. The helper receives only the zero-overlap query or the exact
 approved query, never the full note or transcript. Pending query text is cleared on denial, expiry,
 cancellation, staleness or when a provider call starts. The approval covers the helper question;
 the current OpenRouter server tool may derive its own downstream search queries, and Atlas does not

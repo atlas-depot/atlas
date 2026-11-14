@@ -19,7 +19,8 @@ const uuidPattern = /[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-
 const ibanPattern =
   /(?:^|[^\p{L}\p{N}])[A-Z]{2}\d{2}(?: ?[A-Z0-9]{2,4}){2,12}(?=$|[^\p{L}\p{N}])/iu;
 const digitSequencePattern = /\+?\d[\d ()./:-]{2,}\d/gu;
-const longNumberPattern = /\b\d{4,}\b/gu;
+// No ASCII word boundary: `account_1234` is an identifier too.
+const longNumberPattern = /(?<!\d)\d{4,}(?!\d)/gu;
 const yearPattern = /^(?:18|19|20|21)\d{2}$/u;
 const termPattern = /[\p{L}\p{N}]+/gu;
 const nonLatinPattern = /[^\p{Script=Latin}\p{N}\p{M}]/u;
@@ -62,7 +63,13 @@ function normalizedUrls(value: string) {
 }
 
 function terms(value: string) {
-  return [...value.matchAll(termPattern)].map((match) => match[0]);
+  // Compare punctuation-stripped variants too: a private `D'Angelo` still matches `DAngelo`.
+  const variants = [value, value.replace(/['’\p{Pd}]/gu, "")];
+  return [
+    ...new Set(
+      variants.flatMap((variant) => [...variant.matchAll(termPattern)].map((match) => match[0])),
+    ),
+  ];
 }
 
 function isSpecificTerm(term: string) {
@@ -90,7 +97,12 @@ function hasPrivateOverlap(question: string, privateTexts: readonly string[]) {
     if (queryUrls.size > 0 && normalizedUrls(folded).some((url) => queryUrls.has(url))) return true;
     for (const term of terms(folded)) {
       if (!isSpecificTerm(term)) continue;
-      if (queryTerms.has(term) || sharesNonLatinFragment(term, query)) return true;
+      if (
+        queryTerms.has(term) ||
+        (nonLatinPattern.test(term) && query.includes(term)) ||
+        sharesNonLatinFragment(term, query)
+      )
+        return true;
     }
   }
   return false;

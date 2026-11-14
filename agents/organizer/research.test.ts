@@ -78,6 +78,38 @@ await test("one real provider request uses server search and preserves cited evi
   assert.equal(calls, 1);
 });
 
+await test("caps provider sources at the 50-source chat evidence contract", async () => {
+  const annotations = Array.from({ length: 51 }, (_, index) => ({
+    type: "url_citation",
+    url_citation: {
+      url: `https://example.com/${index}`,
+      title: `Source ${index}`,
+      start_index: 0,
+      end_index: 5,
+    },
+  }));
+  const research = setup(async () => response({ annotations }));
+  const result = await research("Public question", new AbortController().signal);
+  assert.equal(result.sources.length, 50);
+});
+
+await test("keeps a later non-empty title for a duplicated source", async () => {
+  const research = setup(async () =>
+    response({
+      annotations: [
+        { type: "url_citation", url_citation: { url, title: "", start_index: 0, end_index: 5 } },
+        {
+          type: "url_citation",
+          url_citation: { url, title: "Official release", start_index: 6, end_index: 12 },
+        },
+      ],
+    }),
+  );
+  const result = await research("Public question", new AbortController().signal);
+  assert.equal(result.sources.length, 1);
+  assert.equal(result.sources[0]?.title, "Official release");
+});
+
 await test("an absent reported cost stays absent rather than becoming a zero-cost claim", async () => {
   const research = setup(async () => response({ cost: null }));
   const result = await research("Public question", new AbortController().signal);

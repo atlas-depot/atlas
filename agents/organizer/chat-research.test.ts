@@ -25,13 +25,15 @@ function setup(
   onResearch: (question: string) => void = () => {},
   response: ResearchResult = result,
 ) {
-  const calls: { question: string }[] = [];
+  const calls: { question: string; signal: AbortSignal }[] = [];
+  const claims: unknown[][] = [];
   const finishes: string[] = [];
   const gate = {
     async prepare() {
       return prepare();
     },
-    async claimGeneralized() {
+    async claimGeneralized(...args: unknown[]) {
+      claims.push(args);
       return "claimed";
     },
     async waitForDecision() {
@@ -50,30 +52,42 @@ function setup(
   } as unknown as Parameters<typeof createChatResearch>[0]["gate"];
   const run = createChatResearch({
     gate,
-    research: async (question) => {
-      calls.push({ question });
+    research: async (question, signal) => {
+      calls.push({ question, signal });
       onResearch(question);
       return response;
     },
     now: () => new Date("2026-11-13T12:00:00.000Z"),
   });
-  return { calls, finishes, run };
+  return { calls, claims, finishes, run };
 }
 
 await test("sends only the generalized query to the existing research provider", async () => {
   const outboundQuestion = "What are public speaking best practices for the subject?";
-  const { calls, run } = setup(() => ({
+  const { calls, claims, run } = setup(() => ({
     status: "generalized",
     outboundQuestion,
     queryHash: "b".repeat(64),
     contextHash: "c".repeat(64),
   }));
+  const signal = new AbortController().signal;
   const output = await run(
     "session-1",
     { question: "What are public speaking best practices for Maya Chen?" },
-    new AbortController().signal,
+    signal,
   );
-  assert.deepEqual(calls, [{ question: outboundQuestion }]);
+  assert.deepEqual(claims, [
+    [
+      "session-1",
+      {
+        question: "What are public speaking best practices for Maya Chen?",
+        outboundQuestion,
+        queryHash: "b".repeat(64),
+        contextHash: "c".repeat(64),
+      },
+    ],
+  ]);
+  assert.deepEqual(calls, [{ question: outboundQuestion, signal }]);
   assert.equal(output.status, "completed");
   if (output.status === "completed") {
     assert.equal(output.question, outboundQuestion);
@@ -142,6 +156,27 @@ await test("a cancellation during result persistence settles the approval as can
   assert.deepEqual(finishes, ["cancelled"]);
 });
 
+await test("passes the caller's signal to research and stops when it aborts mid-call", async () => {
+  const controller = new AbortController();
+  const outboundQuestion = "What are public web-safety principles?";
+  const { calls, run } = setup(
+    () => ({
+      status: "generalized",
+      outboundQuestion,
+      queryHash: "b".repeat(64),
+      contextHash: "c".repeat(64),
+    }),
+    {},
+    () => controller.abort("stop"),
+  );
+  await assert.rejects(run("session-1", { question: outboundQuestion }, controller.signal), {
+    name: "AbortError",
+    message: "Research cancelled.",
+  });
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0]?.signal, controller.signal);
+});
+
 await test("does not call either research provider until the exact proposed query is approved", async () => {
   let release!: (decision: "approved" | "denied") => void;
   let waiting = false;
@@ -201,7 +236,10 @@ await test("approval claims only the same request, exact query and private-conte
     { question: exactQuestion, requiresPrivateDisclosure: true },
     new AbortController().signal,
   );
-  assert.deepEqual(calls, [{ question: exactQuestion }]);
+  assert.deepEqual(
+    calls.map(({ question }) => question),
+    [exactQuestion],
+  );
   assert.equal(output.status, "completed");
   assert.deepEqual(finishes, ["completed"]);
 });

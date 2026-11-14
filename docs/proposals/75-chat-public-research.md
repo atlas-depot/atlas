@@ -36,7 +36,10 @@ permission. A failed or uncertain screen never sends the query autonomously.
   and deny endpoints require that hash.
 - Approval is accepted only for the same pending or approved request, owner, live turn, query
   hash, and unchanged context digest. A different account receives the same `404` as a missing
-  request. Repeating an approve after a lost response returns the same approved result.
+  request. Repeating an approve after a lost response returns the same approved result. The claim
+  transaction is the egress authorization point: once it commits, only the already-authorized
+  exact payload may be sent, and a later context change cannot rewrite it. Stop still aborts the
+  provider call.
 - Denial remains available after approval until execution starts. Denial, expiry, Stop, changed
   context, account mismatch, or a stale/mismatched request results in no provider call. The
   private payload is cleared on those terminal decisions and when an approved request is claimed
@@ -60,8 +63,9 @@ direction rather than inventing a new surface in this backend-focused PR.
 
 Note passage sources remain their existing block/Markdown types. Web evidence is a separate
 `kind: "web"` record containing only a provider-returned HTTP(S) URL, title, and retrieval time.
-Each web record also carries the provider-attributed snippet for that URL, and an answer excerpt
-must come from that snippet rather than the research model's summary. The API recomputes the
+The runtime research tool result additionally carries a provider-attributed snippet per URL;
+persisted citations keep only that source record and the validated excerpt. An answer excerpt must
+come from the snippet rather than the research model's summary. The API recomputes the
 evidence ID from the tool result, validates exact excerpts, and persists web citations separately
 from note dependencies. Deleting a note redacts only note citations; it does not turn a URL into a
 note source or remove public evidence. This records provenance, not claim-to-page attribution

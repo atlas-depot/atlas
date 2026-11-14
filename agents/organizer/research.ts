@@ -87,11 +87,16 @@ export function createResearch({
         .slice(0, 8_000);
       if (!snippet) continue;
       const existing = snippets.get(parsed.data.url);
-      if (existing) existing.values.add(snippet);
+      if (existing) {
+        existing.values.add(snippet);
+        // A later annotation may carry the title the first one omitted.
+        if (!existing.title && parsed.data.title) existing.title = parsed.data.title;
+      }
       // Identity comes from provider evidence, never a model-written citation label.
       else snippets.set(parsed.data.url, { title: parsed.data.title, values: new Set([snippet]) });
     }
-    const sources: ResearchResult["sources"] = [...snippets].map(([url, value]) => ({
+    // The chat evidence contract accepts at most 50 sources.
+    const sources: ResearchResult["sources"] = [...snippets].slice(0, 50).map(([url, value]) => ({
       id: url,
       url,
       title: value.title,
