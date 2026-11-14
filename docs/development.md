@@ -133,6 +133,23 @@ and old note-delete routes do not invalidate derived context. Keep those old rou
 Do not roll back to older writers with chat enabled. Apply migrations only through the existing
 authorized environment/operator procedure; local tests do not apply anything to staging.
 
+### Public-research migration cutover
+
+`0011_conversation-public-research` adds the owner-bound research request table, makes the
+citation note ID nullable for web sources, and adds a source-identity check for `kind: "web"`
+records. It is additive for note-only data, but online and old writers must not overlap while
+chat research is enabled.
+
+Stop accepting new chat answers and let running turns finish or cancel them before applying the
+migration. Deploy the API and the private runtime together: the new API writes and reads web
+citations and settles research requests, while an older API cannot parse a `kind: "web"` citation
+and will fail messages that contain one. Existing note-only citations remain readable. Do not roll
+back to an older API while any conversation contains a web citation, and do not leave an older API
+handling approvals or denials: it cannot clear a pending research payload on denial, expiry or
+cancellation. To roll back, stop chat research first, let pending requests expire or drain them,
+and keep the migrated schema. Apply migrations only through the existing authorized
+environment/operator procedure; local tests do not apply anything to staging.
+
 ### Note-index migration cutover
 
 `0006_note-index` requires a write-paused cutover. Its backfill runs once. Older writers do not create or refresh index intents, and maintenance cannot recover missing or outdated intents. Overlapping old and new writers are unsupported.

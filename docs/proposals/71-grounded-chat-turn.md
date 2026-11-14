@@ -25,9 +25,12 @@ of scope, so no earlier answer is sent back to the model.
 The design assumes a note can talk the model into anything. Authority stays outside it.
 
 - **Job.** The API authenticates to the runtime as `api` for Organize and indexing, and as
-  `chat` for answers. A chat session sees only `search_notes` and the reply tool. An Organize
-  session sees only `research`. Public web research and private note search never share a
-  session, so a note cannot ask for its content to be searched on the web.
+  `chat` for answers. Under this accepted baseline, a chat session sees only `search_notes` and
+  the reply tool, and an Organize session sees only `research`. Public web research and private
+  note search never share a session, so a note cannot ask for its content to be searched on the
+  web. The [#75 proposal](75-chat-public-research.md) would add the existing research tool to the
+  chat session behind a fail-closed disclosure screen and exact-disclosure approval; that change
+  is not accepted until Efe reviews it.
 - **Owner.** `search_notes` takes a query and a limit. The owner comes from the running
   attempt that Atlas bound to the runtime session before any input was sent.
 - **Evidence.** The evidence set is the search output the runtime recorded for Atlas's own
