@@ -6,11 +6,20 @@ import { fileURLToPath } from "node:url";
 import { serve } from "@hono/node-server";
 import { serveStatic } from "@hono/node-server/serve-static";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
+import { eq } from "drizzle-orm";
 import { Hono } from "hono";
 import { Pool } from "pg";
 import { createApp } from "../server/app.ts";
+import { evidenceId, type AnswerRuntime } from "../server/conversation-answer.ts";
+import { createConversationAnswers } from "../server/conversation-answers.ts";
+import type { ContextCompactor } from "../server/conversation-context.ts";
 import { readCookie } from "../server/cookies.ts";
 import { openDatabase, readTestDatabaseUrl } from "../server/db/connection.ts";
+import { createConversationCleanupStore } from "../server/db/conversation-cleanup.ts";
+import { createConversationContextStore } from "../server/db/conversation-contexts.ts";
+import { conversations, conversationTurns } from "../server/db/conversation-schema.ts";
+import { createConversationStore } from "../server/db/conversations.ts";
+import { createConversationTurns } from "../server/db/conversation-turns.ts";
 import { createNoteIndexStore } from "../server/db/note-index.ts";
 import { createNoteIndexJobs } from "../server/db/note-index-jobs.ts";
 import { createNoteSearchStore } from "../server/db/note-search.ts";
@@ -121,6 +130,133 @@ export default async function setup() {
     const indexStore = createNoteIndexStore(database.db);
     const searchStore = createNoteSearchStore(database.db);
     const admitSearch = createSearchAdmission(database.db);
+    const sessionSubmissions = new Map<string, { turnId: string; message: string }>();
+    const syntheticCompactor: ContextCompactor = {
+      async allocate(operationId) {
+        return `summary_${operationId}`;
+      },
+      async submit(_sessionId, operationId) {
+        return { status: "delivered", deliveryId: `summary_delivery_${operationId}` };
+      },
+      async inspect() {
+        return {
+          status: "completed",
+          result: { summary: "Synthetic compacted conversation context." },
+        };
+      },
+      async retire() {
+        return { status: "ended" };
+      },
+    };
+    const syntheticAnswerRuntime: AnswerRuntime = {
+      async allocate(operationId) {
+        return `answer_${operationId}`;
+      },
+      async submit(sessionId, operationId, message) {
+        sessionSubmissions.set(sessionId, { turnId: operationId, message });
+        return {
+          status: "delivered",
+          sessionId,
+          deliveryId: `delivery_${operationId}`,
+        };
+      },
+      async steer(sessionId, operationId, message) {
+        const current = sessionSubmissions.get(sessionId);
+        sessionSubmissions.set(sessionId, {
+          turnId: current?.turnId ?? operationId,
+          message: current ? `${current.message}\n${message}` : message,
+        });
+        return {
+          status: "delivered",
+          sessionId,
+          deliveryId: `steer_${operationId}`,
+        };
+      },
+      async inspect(sessionId) {
+        const submitted = sessionSubmissions.get(sessionId);
+        if (!submitted || !database) {
+          return {
+            status: "result",
+            evidence: [],
+            result: {
+              status: "no-support",
+              text: "No matching passage was found in your indexed notes.",
+              citations: [],
+            },
+          };
+        }
+        if (submitted.message.includes("[stay-running]")) {
+          return {
+            status: "running",
+            text: "Drafting partial response before completion...",
+          };
+        }
+        if (submitted.message.includes("[fail-turn]")) {
+          return {
+            status: "failed",
+            text: "Partial output before failure.",
+          };
+        }
+        const [turnOwner] = await database.db
+          .select({ ownerId: conversations.ownerId })
+          .from(conversationTurns)
+          .innerJoin(conversations, eq(conversations.id, conversationTurns.conversationId))
+          .where(eq(conversationTurns.id, submitted.turnId));
+        if (!turnOwner) {
+          return {
+            status: "result",
+            evidence: [],
+            result: {
+              status: "no-support",
+              text: "No matching passage was found in your indexed notes.",
+              citations: [],
+            },
+          };
+        }
+        const searchResult = await searchStore.candidates(
+          turnOwner.ownerId,
+          syntheticEmbedding(submitted.message),
+          1,
+        );
+        const top = searchResult.passages[0];
+        if (!top) {
+          return {
+            status: "result",
+            evidence: [],
+            result: {
+              status: "no-support",
+              text: "No matching passage was found in your indexed notes.",
+              citations: [],
+            },
+          };
+        }
+        const pid = evidenceId(top.source);
+        let excerpt = top.text.slice(0, 1_000);
+        // Keep an exact source substring without splitting a UTF-16 surrogate pair.
+        if (/\p{Surrogate}/u.test(excerpt)) excerpt = excerpt.slice(0, -1);
+        return {
+          status: "result",
+          evidence: [{ id: pid, text: top.text, source: top.source }],
+          result: {
+            status: "completed",
+            text: `Grounded answer from your notes: ${top.text}`,
+            citations: [{ passageId: pid, excerpt }],
+          },
+        };
+      },
+      async retire(sessionId) {
+        sessionSubmissions.delete(sessionId);
+        return { status: "ended" };
+      },
+    };
+    const conversationAnswers = createConversationAnswers({
+      turns: createConversationTurns(database.db),
+      cleanup: createConversationCleanupStore(database.db),
+      contexts: createConversationContextStore(database.db),
+      compactorFor: () => syntheticCompactor,
+      runtimeUrl: syntheticRuntimeUrl,
+      runtimeFor: () => syntheticAnswerRuntime,
+    });
     const indexSavedNote = async (noteId: string) => {
       const claim = await indexJobs.claim(noteId, syntheticRuntimeUrl);
       if (!claim) return;
@@ -153,6 +289,8 @@ export default async function setup() {
       },
       {
         notes: createNoteStore(database.db),
+        conversations: createConversationStore(database.db),
+        answers: conversationAnswers,
         organizer,
         indexing: indexJobs,
         search: searchStore,
