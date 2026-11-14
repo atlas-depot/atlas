@@ -2,6 +2,8 @@ import type { SessionStreamEvent } from "eve/client";
 import { z } from "zod";
 import {
   answerOutputSchema,
+  answerResultSchema,
+  readResearchEvidence,
   readSearchEvidence,
   type AnswerEvidence,
   type AnswerObservation,
@@ -131,8 +133,10 @@ export function observeAnswer(
   if (pending || turn.data.outcome !== "completed") return { status: "failed", text };
 
   const searches = new Set<string>();
+  const researches = new Set<string>();
   const evidence = new Map<string, AnswerEvidence>();
   let searched = false;
+  let researchMissing = false;
   let result: { value: unknown } | undefined;
   for (const event of scoped) {
     if (
@@ -141,18 +145,46 @@ export function observeAnswer(
       event.data.capability.name === "search_notes"
     )
       searches.add(event.data.callId);
+    else if (
+      event.type === "call.requested" &&
+      event.data.capability.kind === "tool" &&
+      event.data.capability.name === "research"
+    )
+      researches.add(event.data.callId);
     else if (event.type === "call.settled" && searches.has(event.data.callId)) {
       if (event.data.outcome !== "completed") return { status: "failed", text };
       const passages = readSearchEvidence(event.data.output);
       if (!passages) return { status: "failed", text };
       searched = true;
       for (const passage of passages) evidence.set(passage.id, passage);
+    } else if (event.type === "call.settled" && researches.has(event.data.callId)) {
+      // Research is optional evidence. A failed or denied call never invalidates note evidence;
+      // an answer that cites it will still fail because no web source was recorded.
+      if (event.data.outcome === "failed") researchMissing = true;
+      if (event.data.outcome === "completed") {
+        const research = readResearchEvidence(event.data.output);
+        if (!research) researchMissing = true;
+        if (research?.status === "completed") {
+          researchMissing = false;
+          for (const source of research.evidence) evidence.set(source.id, source);
+        }
+      }
     } else if (event.type === "content.completed" && event.scope?.turnId === turnId) {
       const part = resultPartSchema.safeParse(event.data);
       if (part.success) result = { value: part.data.value };
     }
   }
-  return result && searched
-    ? { status: "result", result: result.value, evidence: [...evidence.values()] }
-    : { status: "failed", text };
+  if (!result || !searched) return { status: "failed", text };
+  let value = result.value;
+  if (researchMissing) {
+    const answer = answerResultSchema.safeParse(value);
+    if (answer.success) {
+      const notice = "\n\nA web search returned no usable sources.";
+      const body = answer.data.text
+        .slice(0, MAX_TEXT - notice.length)
+        .replace(/[\uD800-\uDBFF]$/, "");
+      value = { ...answer.data, text: body + notice };
+    }
+  }
+  return { status: "result", result: value, evidence: [...evidence.values()] };
 }

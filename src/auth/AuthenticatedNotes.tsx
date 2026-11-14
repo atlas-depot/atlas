@@ -138,6 +138,14 @@ export function AuthenticatedNotes({ store }: { store: NotesStore }) {
         verified();
         return conversationClient.messages(...args);
       },
+      researchRequests: async (...args) => {
+        verified();
+        return conversationClient.researchRequests(...args);
+      },
+      decideResearch: async (...args) => {
+        verified();
+        return conversationClient.decideResearch(...args);
+      },
       delete: async (...args) => {
         verified();
         return conversationClient.delete(...args);

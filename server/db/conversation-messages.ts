@@ -40,7 +40,9 @@ export async function serializeConversationMessages(
     .from(conversationCitations)
     .where(inArray(conversationCitations.messageId, ids))
     .orderBy(asc(conversationCitations.ordinal));
-  const noteIds = [...new Set(citations.map((citation) => citation.noteId))];
+  const noteIds = [
+    ...new Set(citations.flatMap((citation) => (citation.noteId ? [citation.noteId] : []))),
+  ];
   const currentNotes = noteIds.length
     ? await reader
         .select({ id: notes.id, revision: notes.revision })
@@ -83,13 +85,14 @@ export async function serializeConversationMessages(
         .map((input) => input.messageId),
       citations: citations
         .filter((citation) => citation.messageId === row.id)
-        .map(({ source, excerpt, deleted, noteId }) => {
-          const missing = deleted || !versions.has(noteId);
+        .map(({ source, excerpt, deleted }) => {
+          if (source.kind === "web") return { source, excerpt, deleted, stale: false };
+          const missing = deleted || !versions.has(source.noteId);
           return {
             source,
             excerpt: missing ? null : excerpt,
             deleted: missing,
-            stale: !missing && versions.get(noteId) !== source.version,
+            stale: !missing && versions.get(source.noteId) !== source.version,
           };
         }),
     });

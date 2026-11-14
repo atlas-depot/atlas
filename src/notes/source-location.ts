@@ -72,7 +72,8 @@ export function createSearchSourceTarget(
   };
 }
 
-export function createCitationSourceTarget(citation: ConversationCitation): SourceTarget {
+export function createCitationSourceTarget(citation: ConversationCitation): SourceTarget | null {
+  if (citation.source.kind === "web") return null;
   return {
     origin: "citation",
     source: citation.source,

@@ -14,6 +14,11 @@ import {
 } from "../shared/conversations.ts";
 import type { AuthEnv } from "./auth.ts";
 import type { ConversationAnswerService } from "./conversation-answers.ts";
+import {
+  researchDisclosureDecisionInputSchema,
+  researchDisclosureDecisionSchema,
+  researchDisclosureRequestsSchema,
+} from "../shared/research.ts";
 import type { createConversationStore } from "./db/conversations.ts";
 import { parseConversationCursor, parseMessageCursor } from "./db/conversation-cursors.ts";
 import { reportStorageFailure } from "./http-errors.ts";
@@ -32,6 +37,45 @@ export function createConversationRoutes(
 ) {
   const routes = new Hono<AuthEnv>();
   const conflict = (message: string) => apiError("CONFLICT", message);
+  routes.get("/:id/research-requests", async (c) => {
+    if (!store || !answers) return c.json(unavailable(), 503);
+    const id = conversationIdSchema.safeParse(c.req.param("id"));
+    if (!id.success) return c.json(invalid(), 400);
+    try {
+      const value = await answers.researchRequests(c.get("user").userId, id.data);
+      return value
+        ? c.json(researchDisclosureRequestsSchema.parse(value))
+        : c.json(notFound(), 404);
+    } catch (error) {
+      reportStorageFailure(c, error);
+      return c.json(unavailable(), 503);
+    }
+  });
+  for (const decision of ["approve", "deny"] as const)
+    routes.post(`/:id/research-requests/:requestId/${decision}`, async (c) => {
+      if (!store || !answers) return c.json(unavailable(), 503);
+      const id = conversationIdSchema.safeParse(c.req.param("id"));
+      const requestId = conversationIdSchema.safeParse(c.req.param("requestId"));
+      const input = researchDisclosureDecisionInputSchema.safeParse(await readJson(c.req.raw));
+      if (!id.success || !requestId.success || !input.success) return c.json(invalid(), 400);
+      try {
+        const result = await answers.decideResearchRequest(
+          c.get("user").userId,
+          id.data,
+          requestId.data,
+          input.data.queryHash,
+          decision,
+        );
+        if (result.status === "not_found") return c.json(notFound(), 404);
+        const expected = decision === "approve" ? "approved" : "denied";
+        if (result.status !== expected)
+          return c.json(conflict("This research request is no longer current."), 409);
+        return c.json(researchDisclosureDecisionSchema.parse({ status: result.status }));
+      } catch (error) {
+        reportStorageFailure(c, error);
+        return c.json(unavailable(), 503);
+      }
+    });
   routes.post("/:id/messages", async (c) => {
     if (!store || !answers) return c.json(unavailable(), 503);
     const id = conversationIdSchema.safeParse(c.req.param("id"));

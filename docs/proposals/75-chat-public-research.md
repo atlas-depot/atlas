@@ -1,0 +1,88 @@
+# Public research during a conversation (#75)
+
+## Disclosure boundary
+
+Reuse the current OpenRouter research helper and web-search path from a `chat` session. The
+helper receives only one outbound question. It never receives a full note, transcript, account
+identity, or connector data. The question is screened against the current turn's user inputs,
+recent history, summary, and version-bound note sources before the helper can run.
+
+The screen fails closed. After NFKC normalization and Turkish-safe case folding, a query is sent
+without approval only when it shares no non-stopword token, including inflected and joined forms,
+with that private context and contains no direct identifier. Any shared distinctive term, direct
+identifier, or context that cannot be inspected creates an approval request. The model can
+escalate a query by setting `requiresPrivateDisclosure` when it believes an exact private detail
+is essential; that advisory flag is the only signal for intent that leaves no lexical trace, so a
+zero-overlap, identifier-free query is treated as public. The screen does not redact or rewrite
+the query; the exact outbound text is what the owner sees and decides on. An email, UUID, IBAN,
+phone-like or card-like digit run, non-year number of four or more digits including grouped
+thousands separators, Unicode decimal digits or private URL therefore requires approval.
+
+This is a conservative lexical screen, not semantic entity recognition. It will require approval
+for some public proper nouns and cannot promise detection of every alias or paraphrase. The
+model's advisory `requiresPrivateDisclosure` flag can only escalate to approval; it never grants
+permission. A failed or uncertain screen never sends the query autonomously.
+
+## Approval lifecycle
+
+- The backend persists the exact proposed query, its SHA-256 hash, the owner-bound conversation
+  and turn, a digest of the current transcript context (summary, recent history and this turn's
+  inputs), and a two-minute expiry. Note content participates in screening but not in that digest;
+  an approved payload is the exact text the owner saw, so a later note edit cannot change what is
+  sent.
+- `GET /api/conversations/:id/research-requests` returns the exact query and hash only to the
+  authenticated conversation owner, including approved requests that have not started. The approve
+  and deny endpoints require that hash.
+- Approval is accepted only for the same pending or approved request, owner, live turn, query
+  hash, and unchanged context digest. A different account receives the same `404` as a missing
+  request. Repeating an approve after a lost response returns the same approved result. The claim
+  transaction is the egress authorization point: once it commits, only the already-authorized
+  exact payload may be sent, and a later context change cannot rewrite it. Stop still aborts the
+  provider call.
+- Denial remains available after approval until execution starts. Denial, expiry, Stop, changed
+  context, account mismatch, or a stale/mismatched request results in no provider call. The
+  private payload is cleared on those terminal decisions and when an approved request is claimed
+  for execution. Conversation deletion cascades the remaining content-free outcome record.
+- A terminal research decision in a turn forces every later query in that turn to a new approval
+  request, even when the new wording has no private overlap. Every attempt, including denied,
+  expired and autonomous ones, counts toward the per-turn request limit, so a denial cannot be
+  re-asked and autonomous calls cannot loop without bound.
+- The chat tool waits on the durable request. It rechecks the decision and context immediately
+  before research. A Stop while approval is pending cancels the request; an in-flight provider
+  request is aborted when possible but cannot be recalled after network transmission.
+- The retrieval budget is checked before approval waiting and again before the provider call. A
+  budget that cannot fit useful evidence fails visibly instead of spending a call and discarding
+  the answer.
+
+During an active turn the conversation shows the proposed query and lets the owner allow or deny it. An approved request can still be denied before execution begins. The decision uses the hash returned with the displayed request.
+
+## Evidence and citations
+
+Note passage sources remain their existing block/Markdown types. Web evidence is a separate
+`kind: "web"` record containing only a provider-returned HTTP(S) URL, title, and retrieval time.
+The runtime research tool result additionally carries a provider-attributed snippet per URL;
+persisted citations keep only that source record and the validated excerpt. An answer excerpt must
+come from the snippet rather than the research model's summary. The API recomputes the
+evidence ID from the tool result, validates exact excerpts, and persists web citations separately
+from note dependencies. Deleting a note redacts only note citations; it does not turn a URL into a
+note source or remove public evidence. This records provenance, not claim-to-page attribution
+quality.
+
+A research failure is optional evidence, not a reason to discard a note-supported answer. An
+answer still needs one successful `search_notes` call from the #71 contract; research alone cannot
+replace it. An answer that cites a web source whose research call failed has no recorded evidence
+and fails server resolution.
+
+The owner authorizes the exact text Atlas sends to OpenRouter, including its use in web search.
+The chat shows that OpenRouter's model may rephrase the text into one or more searches.
+The helper receives the stored, hash-verified question as its only user message, plus fixed
+instructions. It receives no extra note content, search history or account identity.
+
+## Verification
+
+Synthetic tests cover zero-overlap queries, token overlap across notes and transcript, direct
+identifiers, private URLs, lowercase/short/uncased names, approval and denial, stale context,
+account change, cancellation, request limits, budget, mixed note/web citations, tool failure,
+the note-search guard, and malicious page text. No private fixture or live provider call is used
+here. Live attribution quality remains a separate, explicitly authorized #76 evaluation; mocks do
+not establish it.
