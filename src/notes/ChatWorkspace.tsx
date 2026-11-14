@@ -124,6 +124,13 @@ export function ChatWorkspace({
   const deletedIdsRef = useRef<Set<string>>(new Set());
   const locallyCreatedIdsRef = useRef<Set<string>>(new Set());
   const turnRefreshBusyRef = useRef(false);
+
+  /** Keeps the selection ref in step with state so async completions can never act on a stale target. */
+  function selectConversation(id: string | null) {
+    activeConversationIdRef.current = id;
+    setActiveConversationId(id);
+  }
+
   const pendingSendKeyRef = useRef<{
     conversationId: string | null;
     text: string;
@@ -162,10 +169,6 @@ export function ChatWorkspace({
       openRequestIdRef.current += 1;
     };
   }, []);
-
-  useEffect(() => {
-    activeConversationIdRef.current = activeConversationId;
-  }, [activeConversationId]);
 
   useEffect(() => {
     if (!hasUnsentInput && !sending && !creating) return;
@@ -252,7 +255,7 @@ export function ChatWorkspace({
           setConversations((current) => current.filter((item) => item.id !== id));
           if (activeConversationIdRef.current === id) {
             openRequestIdRef.current += 1;
-            setActiveConversationId(null);
+            selectConversation(null);
             setActiveRead(null);
             setMessages([]);
             setMessagesNextCursor(null);
@@ -350,7 +353,7 @@ export function ChatWorkspace({
     setActionFailure(null);
     // Clear previous conversation state immediately so another conversation's cached
     // messages are never displayed while loading or after a missing/failed read.
-    setActiveConversationId(id);
+    selectConversation(id);
     setOpeningId(id);
     setActiveRead(null);
     setMessages([]);
@@ -395,7 +398,7 @@ export function ChatWorkspace({
       }
       if (kind === "missing") {
         setConversations((current) => current.filter((item) => item.id !== id));
-        setActiveConversationId(null);
+        selectConversation(null);
         setActiveRead(null);
         setMessages([]);
         setMessagesNextCursor(null);
@@ -483,7 +486,7 @@ export function ChatWorkspace({
       locallyCreatedIdsRef.current.add(created.id);
       setConversations((current) => [created, ...current.filter((item) => item.id !== created.id)]);
       setListState("ready");
-      setActiveConversationId(created.id);
+      selectConversation(created.id);
       setActiveRead({
         conversation: created,
         activeTurn: null,
@@ -568,7 +571,7 @@ export function ChatWorkspace({
           ...current.filter((item) => item.id !== created.id),
         ]);
         setListState("ready");
-        setActiveConversationId(created.id);
+        selectConversation(created.id);
         setActiveRead({
           conversation: created,
           activeTurn: null,
@@ -746,7 +749,7 @@ export function ChatWorkspace({
     if (activeConversationIdRef.current === id) {
       openRequestIdRef.current += 1;
       setOpeningId(null);
-      setActiveConversationId(null);
+      selectConversation(null);
       setActiveRead(null);
       setMessages([]);
       setMessagesNextCursor(null);
