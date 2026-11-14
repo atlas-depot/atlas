@@ -1391,11 +1391,7 @@ export function ChatWorkspace({
                     </div>
                   ) : null}
 
-                  {messages.length === 0 ? (
-                    <p className="chat-empty-messages">
-                      No messages in this conversation yet. Send a question below.
-                    </p>
-                  ) : (
+                  {messages.length > 0 && (
                     <ol aria-label="Conversation messages" className="chat-message-list">
                       {messages.map((message) => {
                         if (message.role === "user") {
@@ -1496,7 +1492,11 @@ export function ChatWorkspace({
                   ) : null}
                   {activeRead.activeTurn ? (
                     <div role="note" className="chat-running-banner">
-                      <span className="chat-running-label">Working…</span>
+                      {activeRead.activeTurn.text.trim() ? (
+                        <p className="chat-running-checkpoint">{activeRead.activeTurn.text}</p>
+                      ) : (
+                        <span>Working…</span>
+                      )}
                       <Button
                         type="button"
                         variant="ghost"
@@ -1507,9 +1507,6 @@ export function ChatWorkspace({
                       >
                         Stop
                       </Button>
-                      {activeRead.activeTurn.text && (
-                        <p className="chat-running-checkpoint">{activeRead.activeTurn.text}</p>
-                      )}
                     </div>
                   ) : null}
 
@@ -1524,10 +1521,6 @@ export function ChatWorkspace({
                       />
                     )}
                 </div>
-              ) : !openingId && !openFailure ? (
-                <p className="chat-no-selection">
-                  Select a saved conversation to inspect its history, or compose a message below.
-                </p>
               ) : null}
 
               {actionFailure ? (

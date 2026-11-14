@@ -1035,3 +1035,42 @@ test("composer aligns a single line with its actions and keeps multiline control
   expect(longer.height).toBeGreaterThan(initial.height);
   expect(Math.abs(longer.y + longer.height - action.y - action.height)).toBeLessThanOrEqual(1);
 });
+
+test("empty and running conversations show only their applicable content", async ({ page }) => {
+  await page.setViewportSize({ width: 320, height: 568 });
+  const api = await setupChat(page);
+  await page.goto("/");
+  await page.getByRole("button", { name: "Open chat", exact: true }).click();
+  const transcript = chat(page).getByRole("region", { name: "Message history" });
+  const composer = chat(page).getByRole("textbox", { name: "Message", exact: true });
+  const stop = chat(page).getByRole("button", { name: "Stop answer", exact: true });
+  await expect(transcript.getByText("Select a saved conversation", { exact: false })).toHaveCount(
+    0,
+  );
+  await expect(composer).toBeEditable();
+  await showHistory(page);
+  await chat(page).getByRole("button", { name: label, exact: true }).click();
+  await expect(
+    chat(page).getByRole("button", { name: "Delete conversation", exact: true }),
+  ).toBeEnabled();
+  await expect(
+    transcript.getByText("No messages in this conversation", { exact: false }),
+  ).toHaveCount(0);
+  await composer.fill("First question");
+  await chat(page).getByRole("button", { name: "Send message", exact: true }).click();
+  await expect(transcript.getByText("First question", { exact: true })).toBeVisible();
+
+  api.history = [];
+  api.activeTurn = { ...running(1), text: "" };
+  await openChat(page);
+  await expect(stop).toBeEnabled();
+  await expect(transcript.getByText("Working…", { exact: true })).toBeVisible();
+  await expect(
+    transcript.getByText("No messages in this conversation", { exact: false }),
+  ).toHaveCount(0);
+  api.activeTurn = { ...api.activeTurn, text: "Friday morning is free.", checkpointVersion: 2 };
+  await expect(transcript.getByText("Friday morning is free.", { exact: true })).toBeVisible();
+  await expect(transcript.getByText("Working…", { exact: true })).toHaveCount(0);
+  await stop.click();
+  await expect(stop).toHaveCount(0);
+});

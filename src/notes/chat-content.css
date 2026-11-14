@@ -45,7 +45,6 @@
 .chat-citation-badge,
 .chat-citation-meta,
 .chat-message-empty,
-.chat-empty-messages,
 .chat-permission-status,
 .chat-citation-deleted-note {
   color: var(--chat-ink);
@@ -142,7 +141,7 @@
   text-underline-offset: 0.2em;
 }
 .chat-running-checkpoint {
-  flex-basis: 100%;
+  max-width: 100%;
   min-width: 0;
 }
 .chat-permission {
