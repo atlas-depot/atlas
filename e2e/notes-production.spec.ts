@@ -2162,7 +2162,9 @@ test.describe("saved conversations and chat history", () => {
         ) {
           const cursor = url.searchParams.get("cursor");
           if (cursor === "50") {
-            return route.fulfill({ json: { messages: [answer], nextCursor: null } });
+            return route.fulfill({
+              json: { messages: turnRunning ? [] : [answer], nextCursor: null },
+            });
           }
           return route.fulfill({ json: { messages: history, nextCursor: "50" } });
         }
@@ -2176,7 +2178,8 @@ test.describe("saved conversations and chat history", () => {
     await expect(chatRegion.getByText("Question 50")).toBeVisible();
     await expect(
       chatRegion.getByRole("button", { name: "Load more messages", exact: true }),
-    ).toBeVisible();
+    ).toHaveCount(0);
+    await expect(chatRegion.getByText("Final grounded answer.")).toHaveCount(0);
     await expect(
       chatRegion.getByRole("button", { name: "Stop answer", exact: true }),
     ).toBeVisible();

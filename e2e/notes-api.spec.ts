@@ -2,6 +2,7 @@ import { expectEditorContent, paragraphDocument } from "./notes-editor.ts";
 import { randomUUID } from "node:crypto";
 import { expect, test, type BrowserContext, type Page } from "@playwright/test";
 import { noteListSchema, noteSchema } from "../shared/notes.ts";
+import { conversationHistorySchema } from "../shared/conversations.ts";
 
 const origin = "http://127.0.0.1:4185";
 const newAccount = () => `test_${randomUUID().replaceAll("-", "")}`;
@@ -412,6 +413,7 @@ test("saved conversations reopen across reload, redact deleted note excerpts, en
   page,
   context,
 }, testInfo) => {
+  const aliceCookies = await context.cookies(origin);
   const noteResponse = await page.request.post("/api/notes", {
     headers: { Origin: origin, "Idempotency-Key": randomUUID() },
     data: {
@@ -529,6 +531,13 @@ test("saved conversations reopen across reload, redact deleted note excerpts, en
     afterNoteDeleteChat.getByText("Source note was deleted; stored excerpt was removed."),
   ).toBeVisible();
   await expect(afterNoteDeleteChat.locator(".note-search-excerpt")).toHaveCount(0);
+  expect(await page.evaluate("document.documentElement.scrollWidth <= window.innerWidth")).toBe(
+    true,
+  );
+  await page.screenshot({
+    path: testInfo.outputPath("conversations-mobile-api.png"),
+    fullPage: true,
+  });
 
   // Verify ownership isolation across synthetic accounts before deleting the conversation.
   const bob = newAccount();
@@ -554,11 +563,61 @@ test("saved conversations reopen across reload, redact deleted note excerpts, en
     ),
   ).toBeVisible();
 
-  expect(await page.evaluate("document.documentElement.scrollWidth <= window.innerWidth")).toBe(
-    true,
+  // A rejected cross-account delete must leave the owner's data intact.
+  await context.addCookies(aliceCookies);
+  const aliceRead = await page.request.get(`/api/conversations/${conversationId}`);
+  expect(aliceRead.status()).toBe(200);
+  const aliceList = await page.request.get("/api/conversations?limit=50");
+  expect(aliceList.status()).toBe(200);
+  expect((await aliceList.json()).conversations).toEqual(
+    expect.arrayContaining([expect.objectContaining({ id: conversationId })]),
   );
-  await page.screenshot({
-    path: testInfo.outputPath("conversations-mobile-api.png"),
-    fullPage: true,
+});
+
+test("long indexed passages produce a bounded exact citation without splitting Unicode", async ({
+  page,
+}) => {
+  // The emoji straddles the 1,000-code-unit limit in the synthetic answer runtime.
+  const content = `${"pgvector ".padEnd(999, "a")}😀${" durability".repeat(100)}`;
+  const created = await page.request.post("/api/notes", {
+    headers: { Origin: origin, "Idempotency-Key": randomUUID() },
+    data: { title: "Long pgvector passage", content, createdAt: "2026-11-08T11:00:00.000Z" },
   });
+  expect(created.status()).toBe(201);
+  const saved = noteSchema.parse(await created.json());
+  await expect
+    .poll(async () => {
+      const response = await page.request.get(`/api/notes/${saved.id}/index`);
+      return response.status() === 200 ? (await response.json()).status : "pending";
+    })
+    .toBe("ready");
+  const createdConversation = await page.request.post("/api/conversations", {
+    headers: { Origin: origin, "Idempotency-Key": randomUUID() },
+    data: {},
+  });
+  expect(createdConversation.status()).toBe(201);
+  const { id } = await createdConversation.json();
+  const sent = await page.request.post(`/api/conversations/${id}/messages`, {
+    headers: { Origin: origin, "Idempotency-Key": randomUUID() },
+    data: { text: "pgvector durability", policy: "queue" },
+  });
+  expect(sent.status()).toBe(202);
+  await expect
+    .poll(async () => {
+      const read = await page.request.get(`/api/conversations/${id}`);
+      expect(read.status()).toBe(200);
+      const history = await page.request.get(`/api/conversations/${id}/messages?limit=50`);
+      expect(history.status()).toBe(200);
+      const body = conversationHistorySchema.parse(await history.json());
+      const assistant = body.messages.find((message) => message.role === "assistant");
+      if (!assistant || assistant.role !== "assistant") return "pending";
+      expect(assistant.citations).toHaveLength(1);
+      const excerpt = assistant.citations[0].excerpt;
+      expect(excerpt).not.toBeNull();
+      expect(excerpt!.length).toBeLessThanOrEqual(1_000);
+      expect(content).toContain(excerpt);
+      expect(excerpt).not.toMatch(/\p{Surrogate}/u);
+      return assistant.status;
+    })
+    .toBe("completed");
 });

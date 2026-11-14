@@ -231,13 +231,16 @@ export default async function setup() {
           };
         }
         const pid = evidenceId(top.source);
+        let excerpt = top.text.slice(0, 1_000);
+        // Keep an exact source substring without splitting a UTF-16 surrogate pair.
+        if (/\p{Surrogate}/u.test(excerpt)) excerpt = excerpt.slice(0, -1);
         return {
           status: "result",
           evidence: [{ id: pid, text: top.text, source: top.source }],
           result: {
             status: "completed",
             text: `Grounded answer from your notes: ${top.text}`,
-            citations: [{ passageId: pid, excerpt: top.text }],
+            citations: [{ passageId: pid, excerpt }],
           },
         };
       },
