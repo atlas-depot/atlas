@@ -24,12 +24,15 @@ function setup(
   overrides: Record<string, unknown> = {},
   onResearch: (question: string) => void = () => {},
   response: ResearchResult = result,
+  researchOverride?: (question: string, signal: AbortSignal) => Promise<ResearchResult>,
 ) {
   const calls: { question: string; signal: AbortSignal }[] = [];
   const claims: unknown[][] = [];
   const finishes: string[] = [];
   const gate = {
-    async prepare() {
+    async prepare(sessionId: string, input: unknown) {
+      assert.equal(sessionId, "session-1");
+      assert.ok(input && typeof input === "object");
       return prepare();
     },
     async claimGeneralized(sessionId: string, claim: Record<string, unknown>) {
@@ -58,11 +61,13 @@ function setup(
   } as unknown as Parameters<typeof createChatResearch>[0]["gate"];
   const run = createChatResearch({
     gate,
-    research: async (question, signal) => {
-      calls.push({ question, signal });
-      onResearch(question);
-      return response;
-    },
+    research:
+      researchOverride ??
+      (async (question, signal) => {
+        calls.push({ question, signal });
+        onResearch(question);
+        return response;
+      }),
     now: () => new Date("2026-11-13T12:00:00.000Z"),
   });
   return { calls, claims, finishes, run };
@@ -160,6 +165,47 @@ await test("a cancellation during result persistence settles the approval as can
   );
   assert.equal(calls.length, 1);
   assert.deepEqual(finishes, ["cancelled"]);
+});
+
+await test("a provider failure finishes the approved request as failed", async () => {
+  const { finishes, run } = setup(
+    () => ({ status: "approval_required", request, contextHash: "c".repeat(64) }),
+    {},
+    () => {},
+    result,
+    async () => {
+      throw new Error("provider down");
+    },
+  );
+  await assert.rejects(
+    run(
+      "session-1",
+      { question: exactQuestion, requiresPrivateDisclosure: true },
+      new AbortController().signal,
+    ),
+    { message: "Public research could not be completed." },
+  );
+  assert.deepEqual(finishes, ["failed"]);
+});
+
+await test("a result-persistence failure finishes the approved request as failed", async () => {
+  const { finishes, run } = setup(
+    () => ({ status: "approval_required", request, contextHash: "c".repeat(64) }),
+    {
+      async recordResult() {
+        return { status: "budget" };
+      },
+    },
+  );
+  await assert.rejects(
+    run(
+      "session-1",
+      { question: exactQuestion, requiresPrivateDisclosure: true },
+      new AbortController().signal,
+    ),
+    { message: "Public research could not be completed." },
+  );
+  assert.deepEqual(finishes, ["failed"]);
 });
 
 await test("passes the caller's signal to research and stops when it aborts mid-call", async () => {

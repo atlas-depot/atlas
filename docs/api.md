@@ -68,7 +68,7 @@ are removed in bounded batches as subsequent requests arrive.
 | `POST /api/conversations`, `{}` plus UUID `Idempotency-Key` | `201` server-generated conversation |
 | `GET /api/conversations?limit=50&cursor=...` | `200 { conversations, nextCursor }`, newest creation first |
 | `GET /api/conversations/:id` | `200 { conversation, activeTurn, recovery }`, including the current checkpoint when running |
-| `GET /api/conversations/:id/research-requests` | `200 { requests }` with open exact queries, status (`pending`/`approved`), payload hashes and expiry |
+| `GET /api/conversations/:id/research-requests` | `200 { requests }` with open exact queries, status (`pending`/`approved`), each request's `queryHash`, and expiry |
 | `POST /api/conversations/:id/research-requests/:requestId/approve`, `{ queryHash }` | `200 { status: "approved" }` for the current owner's open (`pending` or `approved`) exact request; replay is idempotent |
 | `POST /api/conversations/:id/research-requests/:requestId/deny`, `{ queryHash }` | `200 { status: "denied" }`, revoking an approved request before execution starts and clearing its payload |
 | `GET /api/conversations/:id/messages?limit=50&cursor=...` | `200 { messages, nextCursor }`, ascending immutable sequence |
@@ -131,9 +131,9 @@ over the same inputs and keeps the incomplete answer in history. With no private
 configured these four routes return `503`. Runtime identities never appear in a response.
 
 Chat research uses the existing OpenRouter helper only after a fail-closed disclosure screen. A
-query that shares any distinctive term with notes, recent history, the summary or this turn's
-inputs, contains a direct identifier, or cannot be screened against current context requires
-approval. The pending request exposes the exact proposed query to the authenticated conversation
+query that shares any distinctive term with the turn's version-bound note context, recent history,
+the summary or this turn's inputs, contains a direct identifier, or cannot be screened against
+current context requires approval. The pending request exposes the exact proposed query to the authenticated conversation
 owner and blocks the running tool until approval; the query is never rewritten or redacted.
 Approval is bound to `queryHash`, owner, conversation, turn and a digest of the private context;
 it expires after two minutes. A mismatched hash, context changed before the claim, expired request,
