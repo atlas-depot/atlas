@@ -165,9 +165,9 @@ export function NoteSearchWorkspace({
         </Button>
       </form>
 
-      {submittedQuery && (isSearching || submittedQuery !== trimmedQuery) ? (
+      {isSearching || (!failure && outcome && outcome.query !== trimmedQuery) ? (
         <p className="note-search-query-summary" aria-live="polite">
-          {isSearching ? "Searching…" : `Results for “${submittedQuery}”`}
+          {isSearching ? "Searching…" : `Results for “${outcome?.query}”`}
         </p>
       ) : null}
 

@@ -159,7 +159,9 @@ test("switching synthetic accounts clears the editor and cannot read or write an
   const bob = newAccount();
   await signIn(context, bob);
   await page.evaluate("window.dispatchEvent(new Event('focus'))");
-  await expect(page.getByText(`Signed in as ${bob}@example.test`)).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: `Account, ${bob}@example.test`, exact: true }),
+  ).toBeVisible();
   await expect(page.getByRole("textbox", { name: /^(Markdown source|Note content)$/ })).toHaveCount(
     0,
   );
@@ -571,7 +573,9 @@ test("saved conversations reopen across reload, redact deleted note excerpts, en
 
   // Switch browser focus to Bob and confirm Alice's conversation history is cleared.
   await page.evaluate("window.dispatchEvent(new Event('focus'))");
-  await expect(page.getByText(`Signed in as ${bob}@example.test`)).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: `Account, ${bob}@example.test`, exact: true }),
+  ).toBeVisible();
   await page.getByRole("button", { name: "Open chat", exact: true }).click();
   await afterNoteDeleteChat
     .getByRole("button", { name: "Conversation history", exact: true })

@@ -205,7 +205,7 @@ test.describe("loading and selection", () => {
     await expect(page.getByRole("textbox", { name: "Markdown source", exact: true })).toHaveValue(
       content,
     );
-    await expect(page.getByRole("button", { name: "Save", exact: true })).toBeDisabled();
+    await expect(page.getByRole("button", { name: "Save", exact: true })).toBeHidden();
     expect(remoteRequests).toBe(0);
     expect(await page.evaluate("window.atlasInjected")).toBeUndefined();
     await expect(page.locator(".markdown-preview img, .markdown-preview script")).toHaveCount(0);
@@ -373,13 +373,13 @@ test.describe("saving and conflicts", () => {
     await editor.click();
     await page.keyboard.press("ControlOrMeta+z");
     await expectEditorContent(editor, "Original text");
-    await expect(save).toBeDisabled();
+    await expect(save).toBeHidden();
     await page.keyboard.press("End");
     await page.keyboard.type(" edited");
     await expect(save).toBeEnabled();
     await page.keyboard.press("ControlOrMeta+z");
     await expectEditorContent(editor, "Original text");
-    await expect(save).toBeDisabled();
+    await expect(save).toBeHidden();
     await page.getByRole("textbox", { name: "Title", exact: true }).fill("Renamed only");
     await save.click();
     await expect(page.getByRole("status")).toHaveText("Saved");
@@ -390,7 +390,7 @@ test.describe("saving and conflicts", () => {
     expect(note.content).toEqual(paragraphDocument("Edited in blocks"));
     await page.reload();
     await expectEditorContent(editor, "Edited in blocks");
-    await expect(save).toBeDisabled();
+    await expect(save).toBeHidden();
     for (const width of [1440, 375, 320]) {
       await page.setViewportSize({ width, height: 900 });
       await expect(editor).toBeVisible();
@@ -826,7 +826,18 @@ test.describe("recovery and auth", () => {
       page.getByRole("textbox", { name: /^(Markdown source|Note content)$/ }),
       "Private note content",
     );
-    const signOut = page.getByRole("button", { name: "Sign out", exact: true });
+    const account = page.getByRole("button", {
+      name: `Account, ${browserUser.email}`,
+      exact: true,
+    });
+    await expect(page.getByRole("button", { name: "Sign out" })).toBeHidden();
+    await account.press("Enter");
+    const menu = page.getByRole("dialog", { name: "Account" });
+    await expect(menu.getByText(browserUser.email)).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(account).toBeFocused();
+    await account.click();
+    const signOut = menu.getByRole("button", { name: "Sign out", exact: true });
     expect((await signOut.boundingBox())?.height).toBeGreaterThanOrEqual(44);
     expect(await page.evaluate("document.documentElement.scrollWidth <= window.innerWidth")).toBe(
       true,
@@ -848,6 +859,7 @@ test.describe("recovery and auth", () => {
     const source = page.getByRole("textbox", { name: /^(Markdown source|Note content)$/ });
     await expectEditorContent(source, "Private note content");
     await source.fill("Keep this unsaved sign-out draft");
+    await page.getByRole("button", { name: `Account, ${browserUser.email}`, exact: true }).click();
     const warning = page.waitForEvent("dialog");
     const signOut = page.getByRole("button", { name: "Sign out", exact: true }).click();
     const dialog = await warning;
@@ -915,14 +927,18 @@ test.describe("recovery and auth", () => {
     await page.getByRole("button", { name: "Alice second", exact: true }).click();
     account = "bob";
     await page.evaluate("window.dispatchEvent(new Event('focus'))");
-    await expect(page.getByText("Signed in as bob@example.test")).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: "Account, bob@example.test", exact: true }),
+    ).toBeVisible();
     await expectEditorContent(source, "Bob content");
     await expect(page.getByRole("button", { name: "Alice second", exact: true })).toHaveCount(0);
 
     releasePendingRead();
     await expect.poll(() => previousReadFinished).toBe(true);
     await expectEditorContent(source, "Bob content");
-    await expect(page.getByText("Signed in as bob@example.test")).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: "Account, bob@example.test", exact: true }),
+    ).toBeVisible();
   });
 
   for (const operation of ["list", "read", "save"] as const) {
@@ -1054,7 +1070,9 @@ test.describe("recovery and auth", () => {
     await expectEditorContent(source, "Alice private draft");
     expect(privateRequests).toBe(0);
     releaseSession();
-    await expect(page.getByText("Signed in as bob@example.test")).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: "Account, bob@example.test", exact: true }),
+    ).toBeVisible();
     await expect(source).toHaveCount(0);
     await expect(page.getByRole("button", { name: "New note", exact: true })).toBeEnabled();
     await page.getByRole("button", { name: "New note", exact: true }).click();
@@ -1292,7 +1310,9 @@ test.describe("search and source opening", () => {
     await started;
     bob = true;
     await page.evaluate("window.dispatchEvent(new Event('focus'))");
-    await expect(page.getByText("Signed in as bob@example.test")).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: "Account, bob@example.test", exact: true }),
+    ).toBeVisible();
     await expect(query).toHaveValue("");
     await query.fill("Bob query");
     await query.press("Enter");
@@ -1371,7 +1391,7 @@ test.describe("search and source opening", () => {
           expect(await source.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
           await expect(source).toBeInViewport();
         }
-        await expect(page.getByRole("button", { name: "Save", exact: true })).toBeDisabled();
+        await expect(page.getByRole("button", { name: "Save", exact: true })).toBeHidden();
         expect(
           await page.evaluate("document.documentElement.scrollWidth <= window.innerWidth"),
         ).toBe(true);
@@ -2619,7 +2639,9 @@ test.describe("saved conversations and chat history", () => {
       lastName: null,
     };
     await page.evaluate("window.dispatchEvent(new Event('focus'))");
-    await expect(page.getByText("Signed in as bob@example.test")).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: "Account, bob@example.test", exact: true }),
+    ).toBeVisible();
     releaseAliceDetail();
     await page.evaluate(
       "new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))",

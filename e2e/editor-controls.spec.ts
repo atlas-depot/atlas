@@ -375,7 +375,7 @@ test("dragging selected note text into chat copies it as one undoable edit", asy
   await page.mouse.up();
   await expect(input).toHaveValue("Before Studio Nami after");
   await expect(source).toHaveText("Studio Nami");
-  await expect(page.getByRole("button", { name: "Save", exact: true })).toBeDisabled();
+  await expect(page.locator("main > header").getByRole("status")).toHaveText("Saved");
   await input.press("ControlOrMeta+z");
   await expect(input).toHaveValue("Before [place] after");
   await input.press("ControlOrMeta+Shift+z");

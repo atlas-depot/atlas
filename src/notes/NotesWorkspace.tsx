@@ -1,4 +1,5 @@
 import {
+  type ReactNode,
   lazy,
   Suspense,
   useCallback,
@@ -9,6 +10,8 @@ import {
   useSyncExternalStore,
 } from "react";
 import { Button } from "@/components/ui/button";
+import { NotePencilIcon } from "@phosphor-icons/react/dist/csr/NotePencil";
+import { ChatCircleIcon } from "@phosphor-icons/react/dist/csr/ChatCircle";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -80,6 +83,7 @@ function isDesktop() {
 
 export function NotesWorkspace({
   store,
+  account,
   organizer,
   search,
   conversations,
@@ -87,6 +91,7 @@ export function NotesWorkspace({
   requestsEnabled = true,
 }: {
   store: NotesStore;
+  account?: ReactNode;
   organizer?: OrganizeClient;
   search?: NoteSearchClient;
   conversations?: ConversationClient;
@@ -642,22 +647,37 @@ export function NotesWorkspace({
         </h1>
         <Button
           ref={newNoteRef}
+          className="workspace-nav-action"
+          aria-label="New note"
+          title="New note"
           variant="ghost"
           disabled={loadState !== "ready" || busy || blocked}
           onClick={() => requestSelection({ kind: "new" })}
         >
-          New note
+          <NotePencilIcon aria-hidden="true" />
+          <span>New note</span>
         </Button>
         {canShowChat && !chatOpen && (
-          <Button ref={chatLauncherRef} variant="ghost" onClick={() => setChatOpen(true)}>
-            Open chat
+          <Button
+            ref={chatLauncherRef}
+            className="workspace-nav-action"
+            aria-label="Open chat"
+            title="Open chat"
+            variant="ghost"
+            onClick={() => setChatOpen(true)}
+          >
+            <ChatCircleIcon aria-hidden="true" />
+            <span>Open chat</span>
           </Button>
         )}
         <div className="workspace-save-controls">
           <div className="workspace-save-status">
             {/* Both live regions stay mounted so a status-to-failure switch is announced. */}
             <div>
-              <p role="status" className="text-sm">
+              <p
+                role="status"
+                className={status === "Unsaved changes" && !failed ? "sr-only" : "text-sm"}
+              >
                 {failed ? unsavedNotice : status}
               </p>
               <p role="alert" className="text-sm">
@@ -733,37 +753,44 @@ export function NotesWorkspace({
               </Button>
             )}
           </div>
-          {draft && (
-            <div className="flex flex-wrap items-center gap-2">
-              <Button
-                disabled={
-                  (saved !== null && !dirty) ||
-                  busy ||
-                  writeBlocked ||
-                  deleteFailure !== null ||
-                  !valid ||
-                  saveState === "creation-conflict" ||
-                  saveState === "conflict" ||
-                  saveState === "missing"
-                }
-                title="Save (Ctrl/Cmd+S)"
-                onClick={() => void save()}
-              >
-                Save
-              </Button>
-              {(saveState === "conflict" || deleteFailure === "conflict") && saved && (
+          {draft &&
+            (!saved ||
+              dirty ||
+              failed ||
+              writeBlocked ||
+              saveState !== "idle" ||
+              deleteFailure !== null) && (
+              <div className="flex flex-wrap items-center gap-2">
                 <Button
-                  ref={compareRef}
-                  variant="outline"
-                  disabled={busy || blocked}
-                  onClick={() => void openNote(saved.note.id, true)}
+                  disabled={
+                    (saved !== null && !dirty) ||
+                    busy ||
+                    writeBlocked ||
+                    deleteFailure !== null ||
+                    !valid ||
+                    saveState === "creation-conflict" ||
+                    saveState === "conflict" ||
+                    saveState === "missing"
+                  }
+                  title="Save (Ctrl/Cmd+S)"
+                  onClick={() => void save()}
                 >
-                  Compare latest
+                  Save
                 </Button>
-              )}
-            </div>
-          )}
+                {(saveState === "conflict" || deleteFailure === "conflict") && saved && (
+                  <Button
+                    ref={compareRef}
+                    variant="outline"
+                    disabled={busy || blocked}
+                    onClick={() => void openNote(saved.note.id, true)}
+                  >
+                    Compare latest
+                  </Button>
+                )}
+              </div>
+            )}
         </div>
+        {account}
       </header>
       {example && (
         <p className="text-sm text-muted-foreground" role="note">

@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { Popover } from "@base-ui/react/popover";
+import { UserCircleIcon } from "@phosphor-icons/react/dist/csr/UserCircle";
 import type { SessionUser } from "../../shared/auth";
 import { Button } from "@/components/ui/button";
 import { NotesWorkspace } from "@/notes/NotesWorkspace";
@@ -253,16 +255,6 @@ export function AuthenticatedNotes({ store }: { store: NotesStore }) {
 
   return (
     <div className="notes-workspace">
-      <header className="flex flex-wrap items-center justify-between gap-3 p-4 pb-0 sm:p-6 sm:pb-0">
-        <p className="min-w-0 break-all text-sm text-muted-foreground">
-          Signed in as {session.user.email}
-        </p>
-        <form method="post" action="/api/auth/logout">
-          <Button type="submit" variant="outline">
-            Sign out
-          </Button>
-        </form>
-      </header>
       {sessionCheck !== "verified" && (
         <div className="space-y-3 px-4 pt-4 sm:px-6">
           {/* Both live regions stay mounted while paused, so checking-to-failed is announced. */}
@@ -285,6 +277,29 @@ export function AuthenticatedNotes({ store }: { store: NotesStore }) {
       )}
       <NotesWorkspace
         key={session.user.id}
+        account={
+          <Popover.Root>
+            <Popover.Trigger
+              render={<Button type="button" size="icon" variant="ghost" />}
+              aria-label={`Account, ${session.user.email}`}
+              title="Account"
+            >
+              <UserCircleIcon aria-hidden="true" />
+            </Popover.Trigger>
+            <Popover.Portal>
+              <Popover.Positioner side="bottom" align="end" sideOffset={4} className="z-50">
+                <Popover.Popup className="workspace-account-menu" aria-label="Account">
+                  <p>{session.user.email}</p>
+                  <form method="post" action="/api/auth/logout">
+                    <Button type="submit" variant="ghost">
+                      Sign out
+                    </Button>
+                  </form>
+                </Popover.Popup>
+              </Popover.Positioner>
+            </Popover.Portal>
+          </Popover.Root>
+        }
         store={guardedStore}
         organizer={organizer}
         search={search}
