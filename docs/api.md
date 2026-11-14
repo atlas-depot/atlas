@@ -135,8 +135,9 @@ query that shares any distinctive term with the turn's version-bound note contex
 the summary or this turn's inputs, contains a direct identifier, or cannot be screened against
 current context requires approval. The pending request exposes the exact proposed query to the authenticated conversation
 owner and blocks the running tool until approval; the query is never rewritten or redacted.
-Approval is bound to `queryHash`, owner, conversation, turn and a digest of the private context;
-it expires after two minutes. A mismatched hash, context changed before the claim, expired request,
+Approval is bound to `queryHash`, owner, conversation, turn and a digest of the turn's transcript
+context; it expires after two minutes. A mismatched hash, transcript context changed before the claim,
+expired request,
 Stop, terminal research decision in the same turn or another account cannot authorize a provider
 call. The claim transaction is the egress authorization point for the exact payload, and Stop still
 aborts an in-flight provider call. Denial remains available after approval until execution starts,

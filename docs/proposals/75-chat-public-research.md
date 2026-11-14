@@ -12,15 +12,15 @@ identity, or connector data. The question is screened against the current turn's
 recent history, summary, and version-bound note sources before the helper can run.
 
 The screen fails closed. After NFKC normalization and Turkish-safe case folding, a query is sent
-without approval only when it shares no non-stopword token with that private context and contains
-no direct identifier. Any shared distinctive term, direct identifier, or context that cannot be
-inspected creates an approval request. The model can escalate a query by setting
-`requiresPrivateDisclosure` when it believes an exact private detail is essential; that advisory
-flag is the only signal for intent that leaves no lexical trace, so a zero-overlap,
-identifier-free query is treated as public. The screen does not redact or rewrite the query; the
-exact outbound text is what the owner sees and decides on. An email, UUID, IBAN, phone-like or
-card-like digit run, non-year number of four or more digits, Unicode decimal digits or private URL
-therefore requires approval.
+without approval only when it shares no non-stopword token, including inflected and joined forms,
+with that private context and contains no direct identifier. Any shared distinctive term, direct
+identifier, or context that cannot be inspected creates an approval request. The model can
+escalate a query by setting `requiresPrivateDisclosure` when it believes an exact private detail
+is essential; that advisory flag is the only signal for intent that leaves no lexical trace, so a
+zero-overlap, identifier-free query is treated as public. The screen does not redact or rewrite
+the query; the exact outbound text is what the owner sees and decides on. An email, UUID, IBAN,
+phone-like or card-like digit run, non-year number of four or more digits including grouped
+thousands separators, Unicode decimal digits or private URL therefore requires approval.
 
 This is a conservative lexical screen, not semantic entity recognition. It will require approval
 for some public proper nouns and cannot promise detection of every alias or paraphrase. The
@@ -30,7 +30,10 @@ permission. A failed or uncertain screen never sends the query autonomously.
 ## Approval lifecycle
 
 - The backend persists the exact proposed query, its SHA-256 hash, the owner-bound conversation
-  and turn, a digest of the current private context, and a two-minute expiry.
+  and turn, a digest of the current transcript context (summary, recent history and this turn's
+  inputs), and a two-minute expiry. Note content participates in screening but not in that digest;
+  an approved payload is the exact text the owner saw, so a later note edit cannot change what is
+  sent.
 - `GET /api/conversations/:id/research-requests` returns the exact query and hash only to the
   authenticated conversation owner, including approved requests that have not started. The approve
   and deny endpoints require that hash.
