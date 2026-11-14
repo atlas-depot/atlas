@@ -1485,8 +1485,10 @@ test.describe("search and source opening", () => {
     await searchRegion.getByLabel("Search saved notes").fill("pgvector failover");
     await searchRegion.getByRole("button", { name: "Search", exact: true }).click();
 
-    await expect(searchRegion.getByText('Query: "pgvector failover"')).toBeVisible();
+    await expect(searchRegion.getByRole("searchbox")).toHaveValue("pgvector failover");
     await expect(searchRegion.getByText("Database Runbook")).toBeVisible();
+    await searchRegion.getByRole("searchbox").fill("new query");
+    await expect(searchRegion.getByText("Results for “pgvector failover”")).toBeVisible();
     await expect(
       searchRegion.getByText("Storage Recovery - Block block-pgvector - Revision 2"),
     ).toBeVisible();

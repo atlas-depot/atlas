@@ -375,7 +375,7 @@ test("keyboard search and source opening work on narrow mobile through the real 
   await page.keyboard.type("pgvector cosine");
   await page.keyboard.press("Enter");
 
-  await expect(searchRegion.getByText('Query: "pgvector cosine"')).toBeVisible();
+  await expect(searchRegion.getByRole("searchbox")).toHaveValue("pgvector cosine");
   await expect(searchRegion.getByText("Vector Search Architecture").first()).toBeVisible();
   await expect(
     searchRegion.getByText("Retrieval Pipeline - Block vector-block - Revision 1"),

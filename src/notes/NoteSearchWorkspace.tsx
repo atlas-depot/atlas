@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -9,7 +9,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import { MagnifyingGlassIcon } from "@phosphor-icons/react/dist/csr/MagnifyingGlass";
 import type { NoteSummary } from "../../shared/notes";
 import { classifyFailure } from "./editor-state";
 import { NotesRequestError } from "./notes-store";
@@ -57,7 +57,6 @@ export function NoteSearchWorkspace({
   onOpenSource: (target: SourceTarget) => void;
   onUnauthenticated: () => void;
 }) {
-  const queryInputId = useId();
   const [query, setQuery] = useState("");
   const [submittedQuery, setSubmittedQuery] = useState("");
   const [searching, setSearching] = useState(false);
@@ -144,36 +143,31 @@ export function NoteSearchWorkspace({
 
   return (
     <section aria-label="Search notes" className="note-search-workspace">
-      <div className="note-search-header">
-        <h2>Search notes</h2>
-        <form className="note-search-form" onSubmit={handleSubmit}>
-          <div className="note-search-field">
-            <Label htmlFor={queryInputId}>Search saved notes</Label>
-            <Input
-              id={queryInputId}
-              type="search"
-              value={query}
-              placeholder="Find saved passages by keyword or question"
-              maxLength={500}
-              disabled={!enabled}
-              onChange={(event) => setQuery(event.target.value)}
-            />
-          </div>
-          <div className="note-search-actions">
-            <Button
-              type="submit"
-              variant="outline"
-              disabled={!enabled || trimmedQuery.length === 0}
-            >
-              Search
-            </Button>
-          </div>
-        </form>
-      </div>
+      <form className="note-search-form" onSubmit={handleSubmit}>
+        <Input
+          type="search"
+          aria-label="Search saved notes"
+          placeholder="Search notes"
+          value={query}
+          maxLength={500}
+          disabled={!enabled}
+          onChange={(event) => setQuery(event.target.value)}
+        />
+        <Button
+          type="submit"
+          variant="ghost"
+          size="icon"
+          aria-label="Search"
+          title="Search"
+          disabled={!enabled || trimmedQuery.length === 0}
+        >
+          <MagnifyingGlassIcon aria-hidden="true" />
+        </Button>
+      </form>
 
-      {submittedQuery ? (
+      {submittedQuery && (isSearching || submittedQuery !== trimmedQuery) ? (
         <p className="note-search-query-summary" aria-live="polite">
-          {isSearching ? `Searching for "${submittedQuery}"...` : `Query: "${submittedQuery}"`}
+          {isSearching ? "Searching…" : `Results for “${submittedQuery}”`}
         </p>
       ) : null}
 
