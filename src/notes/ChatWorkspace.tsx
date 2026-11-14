@@ -33,6 +33,7 @@ import {
   formatConversationLabel,
   type ConversationClient,
 } from "./conversation-store";
+import { ResearchRequests } from "./ResearchRequests";
 import { classifyFailure } from "./editor-state";
 import {
   createCitationSourceTarget,
@@ -924,6 +925,26 @@ export function ChatWorkspace({
 
   function renderCitation(citation: ConversationCitation, index: number) {
     const { source } = citation;
+    if (source.kind === "web") {
+      return (
+        <li key={`web:${source.url}:${index}`} className="chat-citation-item">
+          <div className="chat-citation-card">
+            <p className="text-sm text-muted-foreground">
+              Web source · {new URL(source.url).hostname}
+            </p>
+            <a
+              href={source.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="break-words underline"
+            >
+              {source.title}
+            </a>
+            <blockquote className="note-search-excerpt">{citation.excerpt}</blockquote>
+          </div>
+        </li>
+      );
+    }
     const locationLabel = formatSourceLocation(source);
     const revisionLabel = formatSourceRevision(source.version);
     const headingPath = formatHeadingPath(source.headingPath);
@@ -970,7 +991,8 @@ export function ChatWorkspace({
                   }));
                 }
                 onPresentationChange("sidebar");
-                onOpenSource(createCitationSourceTarget(citation));
+                const target = createCitationSourceTarget(citation);
+                if (target) onOpenSource(target);
               }}
             >
               Open source
@@ -1230,6 +1252,17 @@ export function ChatWorkspace({
                     </Button>
                   </div>
                 ) : null}
+
+                {enabled &&
+                  activeRead.activeTurn &&
+                  activeRead.conversation.id === activeConversationId && (
+                    <ResearchRequests
+                      key={`${cacheResetToken}:${activeRead.activeTurn.id}`}
+                      conversationId={activeRead.conversation.id}
+                      client={client}
+                      onUnauthenticated={onUnauthenticated}
+                    />
+                  )}
 
                 {messages.length === 0 ? (
                   <p className="chat-empty-messages">

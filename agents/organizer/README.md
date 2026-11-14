@@ -67,9 +67,7 @@ can call the provider.
 ## Question answering
 
 Implements [#71](https://github.com/atlas-depot/atlas/issues/71); its accepted baseline is in the
-[proposal](../../docs/proposals/71-grounded-chat-turn.md). This branch proposes the bounded #75
-exception described in [the public-research proposal](../../docs/proposals/75-chat-public-research.md);
-it changes the #71 tool-separation decision and is pending Efe review. The service username fixes
+[proposal](../../docs/proposals/71-grounded-chat-turn.md). The [#75 disclosure contract](../../docs/proposals/75-chat-public-research.md) adds consent to research during chat. The service username fixes
 the job: `api` runs Organize and indexing, `chat` runs answers. A chat session gets
 `instructions/answer.ts`, `search_notes` and the existing `research` tool. Context jobs get no
 retrieval or research tools, and a session touched by both principals gets neither job's tools.
@@ -91,8 +89,7 @@ input.
 Web citations use a distinct URL/title/retrieval-time source type and carry the provider-attributed
 snippet used for excerpt validation; note deletion redacts note excerpts only. A failed research
 call does not discard a note-supported answer, and the #71 successful `search_notes` requirement
-still applies. The API exposes the approval contract, but this repository has no conversation UI
-to render the request yet.
+still applies. The chat workspace shows the exact query and explains that OpenRouter may rephrase it for web search.
 
 `answer-client.ts` sends inputs with an idempotency key and the reply schema,
 uses `turnPolicy: "steer"` only for an explicit steer, and reads results from bounded

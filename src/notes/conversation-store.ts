@@ -17,6 +17,12 @@ import {
   type ConversationRead,
   type ConversationSend,
 } from "../../shared/conversations";
+import {
+  researchDisclosureDecisionInputSchema,
+  researchDisclosureDecisionSchema,
+  researchDisclosureRequestsSchema,
+  type ResearchDisclosureRequest,
+} from "../../shared/research";
 import { boundedFetch } from "../lib/http";
 import { NotesRequestError } from "./notes-store";
 
@@ -28,6 +34,12 @@ export interface ConversationClient {
   create(key: string): Promise<Conversation>;
   read(id: string): Promise<ConversationRead>;
   messages(id: string, page?: { limit?: number; cursor?: string }): Promise<ConversationHistory>;
+  researchRequests(id: string): Promise<ResearchDisclosureRequest[]>;
+  decideResearch(
+    id: string,
+    request: Pick<ResearchDisclosureRequest, "id" | "queryHash">,
+    decision: "approve" | "deny",
+  ): Promise<void>;
   delete(id: string): Promise<void>;
   send(
     id: string,
@@ -107,6 +119,36 @@ export function createConversationClient(
       const query = buildPageQuery(page);
       const response = await sendRequest(`/${normalizedId}/messages${query}`);
       return conversationHistorySchema.parse(await response.json());
+    },
+
+    async researchRequests(id) {
+      const path = `/${conversationIdSchema.parse(id)}/research-requests`;
+      const response = await sendRequest(path, { cache: "no-store" });
+      const { requests } = researchDisclosureRequestsSchema.parse(await response.json());
+      for (const { proposedQuery, queryHash } of requests) {
+        const bytes = new TextEncoder().encode(proposedQuery);
+        const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", bytes));
+        const visibleQueryHash = Array.from(digest, (byte) =>
+          byte.toString(16).padStart(2, "0"),
+        ).join("");
+        if (visibleQueryHash !== queryHash)
+          throw new Error("Research request text does not match its hash.");
+      }
+      return requests;
+    },
+
+    async decideResearch(id, request, decision) {
+      const path = `/${conversationIdSchema.parse(id)}/research-requests/${conversationIdSchema.parse(request.id)}`;
+      const response = await sendRequest(`${path}/${decision}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(
+          researchDisclosureDecisionInputSchema.parse({ queryHash: request.queryHash }),
+        ),
+      });
+      const result = researchDisclosureDecisionSchema.parse(await response.json());
+      if (result.status !== (decision === "approve" ? "approved" : "denied"))
+        throw new Error("Unexpected research decision response.");
     },
 
     async delete(id) {

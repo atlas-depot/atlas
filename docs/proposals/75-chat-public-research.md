@@ -1,10 +1,6 @@
-# Proposal: public research during a conversation (#75)
+# Public research during a conversation (#75)
 
-Status: implementation proposal in the #75 feature PR; pending Efe review. The accepted #71
-session-separation decision remains the baseline until this proposal is accepted. API-only
-approval presentation is also pending Efe's confirmation because no conversation UI exists.
-
-## Proposed boundary
+## Disclosure boundary
 
 Reuse the current OpenRouter research helper and web-search path from a `chat` session. The
 helper receives only one outbound question. It never receives a full note, transcript, account
@@ -58,9 +54,7 @@ permission. A failed or uncertain screen never sends the query autonomously.
   budget that cannot fit useful evidence fails visibly instead of spending a call and discarding
   the answer.
 
-The endpoints provide a presentation contract, not a chat screen. There is no conversation UI in
-the current scaffold. Adding a visible approval dialog should follow the team's existing UI
-direction rather than inventing a new surface in this backend-focused PR.
+During an active turn the conversation shows the proposed query and lets the owner allow or deny it. An approved request can still be denied before execution begins. The decision uses the hash returned with the displayed request.
 
 ## Evidence and citations
 
@@ -79,13 +73,12 @@ answer still needs one successful `search_notes` call from the #71 contract; res
 replace it. An answer that cites a web source whose research call failed has no recorded evidence
 and fails server resolution.
 
-The existing OpenRouter server tool generates its own search query from the helper prompt and may
-search more than once. The exact approved payload is the question sent to the helper; the helper
-receives no additional private context and is instructed not to add identifying details. If Efe
-requires the exact downstream search string to be shown and approved too, the provider contract
-must change before that can be guaranteed with the current server-tool interface.
+The owner authorizes the exact text Atlas sends to OpenRouter, including its use in web search.
+The chat shows that OpenRouter's model may rephrase the text into one or more searches.
+The helper receives the stored, hash-verified question as its only user message, plus fixed
+instructions. It receives no extra note content, search history or account identity.
 
-## Verification boundary and decisions for review
+## Verification
 
 Synthetic tests cover zero-overlap queries, token overlap across notes and transcript, direct
 identifiers, private URLs, lowercase/short/uncased names, approval and denial, stale context,
@@ -93,8 +86,3 @@ account change, cancellation, request limits, budget, mixed note/web citations, 
 the note-search guard, and malicious page text. No private fixture or live provider call is used
 here. Live attribution quality remains a separate, explicitly authorized #76 evaluation; mocks do
 not establish it.
-
-Efe review is requested for the change to #71's same-session boundary, the fail-closed lexical
-screen, the two-minute approval window and payload retention, whether API-only presentation is
-sufficient before a chat UI exists, and the helper-to-provider query boundary above. No new
-crawler, page archive, authenticated website, PDF/OCR, connector, or external action is introduced.

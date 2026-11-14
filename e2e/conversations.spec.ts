@@ -159,6 +159,9 @@ async function setupChat(page: Page) {
           },
         });
       }
+      if (method === "GET" && path === `/api/conversations/${conversation.id}/research-requests`) {
+        return route.fulfill({ json: { requests: [] } });
+      }
       if (path.endsWith("/stop") || path.endsWith("/resume")) {
         api.activeTurn = null;
         return route.fulfill({ json: read() });
@@ -727,3 +730,118 @@ for (const width of [1280, 375]) {
     await expect(page.locator(".workspace-content")).toBeVisible();
   });
 }
+
+async function setupResearchConsent(page: Page, stale = false) {
+  const api = await setupChat(page);
+  api.history = [question(1, "Find the public announcement")];
+  api.activeTurn = running(1);
+  const request = {
+    id: "7a100001-1234-4000-8000-000000000001",
+    proposedQuery: "Işık  &  Partners: “A+B” <2026>",
+    queryHash: "bac05668a734b00b8cfb9c889565fc45a8fb1d2390736f5adbc9516c6d69337c",
+    expiresAt: new Date(Date.now() + 120_000).toISOString(),
+  };
+  const decisions: Array<{ path: string; body: unknown }> = [];
+  let status: "pending" | "approved" | "denied" = "pending";
+  const path = `/api/conversations/${conversation.id}/research-requests`;
+  api.intercept = async (route) => {
+    const req = route.request();
+    const pathname = new URL(req.url()).pathname;
+    if (pathname === path && req.method() === "GET") {
+      await route.fulfill({
+        json: { requests: status === "denied" ? [] : [{ ...request, status }] },
+      });
+      return true;
+    }
+    if (!pathname.startsWith(path + "/") || req.method() !== "POST") return false;
+    decisions.push({ path: pathname, body: req.postDataJSON() });
+    if (stale) {
+      status = "denied";
+      await route.fulfill({ status: 409, json: { error: "stale" } });
+    } else {
+      status = pathname.endsWith("/approve") ? "approved" : "denied";
+      await route.fulfill({ json: { status } });
+    }
+    return true;
+  };
+  return { request, decisions, decisionPath: `${path}/${request.id}` };
+}
+
+for (const [width, decision] of [
+  [1280, "approve"],
+  [375, "deny"],
+] as const) {
+  test(`research consent shows the exact query and sends an explicit ${decision} at ${width}px`, async ({
+    page,
+  }, testInfo) => {
+    await page.setViewportSize({ width, height: 900 });
+    const { request, decisions, decisionPath } = await setupResearchConsent(page);
+    await openChat(page);
+    const allow = chat(page).getByRole("button", { name: "Allow", exact: true });
+    const deny = chat(page).getByRole("button", { name: "Deny", exact: true });
+    const query = chat(page).getByText(request.proposedQuery, { exact: true });
+    await expect(allow).toBeEnabled();
+    await expect(deny).toBeEnabled();
+    await expect(
+      chat(page).getByText(
+        "Atlas sends this text to OpenRouter. Its model may rephrase it for web search.",
+        { exact: true },
+      ),
+    ).toBeVisible();
+    expect(await query.textContent()).toBe(request.proposedQuery);
+    expect(await page.evaluate("document.documentElement.scrollWidth <= window.innerWidth")).toBe(
+      true,
+    );
+    expect(decisions).toEqual([]);
+    await deny.scrollIntoViewIfNeeded();
+    await page.screenshot({ path: testInfo.outputPath(`research-consent-${width}.png`) });
+    if (decision === "approve") {
+      await allow.focus();
+      await page.keyboard.press("Enter");
+      await expect
+        .poll(() => decisions)
+        .toEqual([{ path: decisionPath + "/approve", body: { queryHash: request.queryHash } }]);
+      await expect(allow).toHaveCount(0);
+      await expect(deny).toBeEnabled();
+      await deny.focus();
+      await page.keyboard.press("Enter");
+    } else {
+      await deny.click();
+    }
+    await expect(query).toHaveCount(0);
+    await expect(deny).toHaveCount(0);
+    expect(decisions.map((item) => item.path)).toEqual(
+      decision === "approve"
+        ? [decisionPath + "/approve", decisionPath + "/deny"]
+        : [decisionPath + "/deny"],
+    );
+    expect(decisions.at(-1)?.body).toEqual({ queryHash: request.queryHash });
+  });
+}
+
+test("a stale research consent decision removes the old query without replaying approval", async ({
+  page,
+}) => {
+  const { request, decisions, decisionPath } = await setupResearchConsent(page, true);
+  await openChat(page);
+  await chat(page).getByRole("button", { name: "Allow", exact: true }).click();
+  await expect(
+    chat(page).getByText("This request is no longer available.", { exact: true }),
+  ).toBeVisible();
+  await expect(chat(page).getByText(request.proposedQuery, { exact: true })).toHaveCount(0);
+  expect(decisions).toEqual([
+    { path: decisionPath + "/approve", body: { queryHash: request.queryHash } },
+  ]);
+});
+
+test("a research consent query with a mismatched hash cannot be approved", async ({ page }) => {
+  const { request, decisions } = await setupResearchConsent(page);
+  request.proposedQuery += " (amended)";
+  await openChat(page);
+  await expect(
+    chat(page).getByText("Could not check web search requests. Retrying...", { exact: true }),
+  ).toBeVisible();
+  await expect(chat(page).getByRole("region", { name: "Web search permission" })).toHaveCount(0);
+  await expect(chat(page).getByRole("button", { name: "Allow", exact: true })).toHaveCount(0);
+  expect(decisions).toEqual([]);
+});

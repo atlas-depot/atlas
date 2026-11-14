@@ -144,12 +144,7 @@ aborts an in-flight provider call. Denial remains available after approval until
 and the listing keeps approved requests visible for that reason. Every research attempt, including
 denied, expired and autonomous ones, counts toward the per-turn limit. The helper receives only the zero-overlap query or the exact
 approved query, never the full note or transcript. Pending query text is cleared on denial, expiry,
-cancellation, staleness or when a provider call starts. The approval covers the helper question;
-the current OpenRouter server tool may derive its own downstream search queries, and Atlas does not
-receive that text, so exact downstream-query approval would require a provider-contract change. A
-failed research call does not invalidate a note-supported answer, but a web citation without
-recorded research evidence fails server resolution. This API exposes the approval contract; no
-conversation UI currently consumes it. Without an answer runtime, the approval routes return `503`.
+cancellation, staleness or when a provider call starts. The conversation shows the exact text and explains that OpenRouter may rephrase it for web search. An ordinary edit to a source note preserves approval. Removing a source or losing access prevents a claim. A failed research call leaves a visible notice on an otherwise supported answer, and web citations require recorded provider evidence. Without an answer runtime, the approval routes return `503`.
 
 `recovery` is normally `null`. `{ turnId, reason }` identifies an incomplete attempt whose
 context could not be used: `history_unavailable`, `context_budget`, `summary_failed`,
