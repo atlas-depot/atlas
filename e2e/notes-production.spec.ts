@@ -1,4 +1,10 @@
-import { expectEditorContent, paragraphDocument, serveNotes, toListRow } from "./notes-editor.ts";
+import {
+  openNoteDeleteDialog,
+  expectEditorContent,
+  paragraphDocument,
+  serveNotes,
+  toListRow,
+} from "./notes-editor.ts";
 import { readFile, readdir } from "node:fs/promises";
 import { createNoteSchema, updateNoteSchema, type Note, type CreateNote } from "../shared/notes.ts";
 import { formatConversationLabel } from "../src/notes/conversation-store.ts";
@@ -205,7 +211,7 @@ test.describe("loading and selection", () => {
     await expect(page.getByRole("textbox", { name: "Markdown source", exact: true })).toHaveValue(
       content,
     );
-    await expect(page.getByRole("button", { name: "Save", exact: true })).toBeDisabled();
+    await expect(page.getByRole("button", { name: "Save", exact: true })).toBeHidden();
     expect(remoteRequests).toBe(0);
     expect(await page.evaluate("window.atlasInjected")).toBeUndefined();
     await expect(page.locator(".markdown-preview img, .markdown-preview script")).toHaveCount(0);
@@ -373,13 +379,13 @@ test.describe("saving and conflicts", () => {
     await editor.click();
     await page.keyboard.press("ControlOrMeta+z");
     await expectEditorContent(editor, "Original text");
-    await expect(save).toBeDisabled();
+    await expect(save).toBeHidden();
     await page.keyboard.press("End");
     await page.keyboard.type(" edited");
     await expect(save).toBeEnabled();
     await page.keyboard.press("ControlOrMeta+z");
     await expectEditorContent(editor, "Original text");
-    await expect(save).toBeDisabled();
+    await expect(save).toBeHidden();
     await page.getByRole("textbox", { name: "Title", exact: true }).fill("Renamed only");
     await save.click();
     await expect(page.getByRole("status")).toHaveText("Saved");
@@ -390,9 +396,10 @@ test.describe("saving and conflicts", () => {
     expect(note.content).toEqual(paragraphDocument("Edited in blocks"));
     await page.reload();
     await expectEditorContent(editor, "Edited in blocks");
-    await expect(save).toBeDisabled();
+    await expect(save).toBeHidden();
     for (const width of [1440, 375, 320]) {
       await page.setViewportSize({ width, height: 900 });
+      await expect(editor).toBeVisible();
       expect(await page.evaluate("document.documentElement.scrollWidth <= window.innerWidth")).toBe(
         true,
       );
@@ -460,7 +467,7 @@ test.describe("create and delete", () => {
     const source = page.getByRole("textbox", { name: /^(Markdown source|Note content)$/ });
     await expectEditorContent(source, "Original text");
     await source.fill("Unsaved delete draft");
-    await page.getByRole("button", { name: "Delete note", exact: true }).click();
+    await openNoteDeleteDialog(page);
     await page.getByRole("button", { name: "Delete permanently", exact: true }).click();
     await expect(page.getByRole("alert")).toContainText("Your session has ended.");
     await expect(page.getByRole("link", { name: "Sign in again", exact: true })).toBeFocused();
@@ -501,22 +508,32 @@ test.describe("create and delete", () => {
     await page.goto("/");
     const source = page.getByRole("textbox", { name: /^(Markdown source|Note content)$/ });
     await expectEditorContent(source, "First content");
-    await page.getByRole("button", { name: "Delete note", exact: true }).click();
-    await expect(page.getByRole("alertdialog")).toContainText('"A"');
-    await page.getByRole("button", { name: "Delete permanently", exact: true }).click();
+    await openNoteDeleteDialog(page);
+    const confirm = page.getByRole("alertdialog", { name: "Delete note?", exact: true });
+    const actions = page.getByRole("button", { name: "Note actions", exact: true });
+    await expect(confirm).toContainText('"A"');
+    await expect(confirm.getByRole("button", { name: "Keep note", exact: true })).toBeFocused();
+    expect(deletedEtags).toEqual([]);
+    await page.keyboard.press("Escape");
+    await expect(confirm).toBeHidden();
+    await expect(actions).toBeFocused();
+    await expect(page.getByRole("menu")).toBeHidden();
+    expect(deletedEtags).toEqual([]);
+    await openNoteDeleteDialog(page);
+    await confirm.getByRole("button", { name: "Delete permanently", exact: true }).click();
     await expect(page.getByRole("textbox", { name: "Title", exact: true })).toHaveValue("B");
     await expectEditorContent(source, "Second content");
     await expect(page.getByRole("button", { name: "A", exact: true })).toHaveCount(0);
 
     await page.getByRole("button", { name: "C", exact: true }).click();
     await expectEditorContent(source, "Third content");
-    await page.getByRole("button", { name: "Delete note", exact: true }).click();
+    await openNoteDeleteDialog(page);
     await page.getByRole("button", { name: "Delete permanently", exact: true }).click();
     await expect(page.getByRole("textbox", { name: "Title", exact: true })).toHaveValue("B");
     await expectEditorContent(source, "Second content");
     await expect(page.getByRole("button", { name: "C", exact: true })).toHaveCount(0);
 
-    await page.getByRole("button", { name: "Delete note", exact: true }).click();
+    await openNoteDeleteDialog(page);
     await page.getByRole("button", { name: "Delete permanently", exact: true }).click();
     await expect(page.getByRole("textbox", { name: "Title", exact: true })).toHaveCount(0);
     await expect(page.getByText("No notes yet. Create a new note to get started.")).toBeVisible();
@@ -556,28 +573,28 @@ test.describe("create and delete", () => {
     const source = page.getByRole("textbox", { name: /^(Markdown source|Note content)$/ });
     await expectEditorContent(source, "Original text");
     await source.fill("Local delete draft");
-    await page.getByRole("button", { name: "Delete note", exact: true }).click();
+    await openNoteDeleteDialog(page);
     await page.getByRole("button", { name: "Delete permanently", exact: true }).click();
     await expect(page.getByRole("alert")).toContainText(
       "This note changed on the server. Nothing was deleted.",
     );
     await expectEditorContent(source, "Local delete draft");
     await expect(page.getByRole("button", { name: "A", exact: true })).toBeVisible();
-    await expect(page.getByRole("button", { name: "Delete note", exact: true })).toBeDisabled();
+    await expect(page.getByRole("button", { name: "Note actions", exact: true })).toBeDisabled();
     await expect(page.getByRole("button", { name: "Save", exact: true })).toBeDisabled();
 
     await page.getByRole("button", { name: "Compare latest", exact: true }).click();
     await expect(page.getByText("A newer server version", { exact: true })).toBeVisible();
-    await expect(page.getByRole("button", { name: "Delete note", exact: true })).toBeDisabled();
+    await expect(page.getByRole("button", { name: "Note actions", exact: true })).toBeDisabled();
     await page.getByRole("button", { name: "Use latest version", exact: true }).click();
     await page.getByRole("button", { name: "Discard changes", exact: true }).click();
     await expectEditorContent(source, "A newer server version");
     await expect(page.getByRole("textbox", { name: "Title", exact: true })).toHaveValue(
       "A renamed",
     );
-    await expect(page.getByRole("button", { name: "Delete note", exact: true })).toBeEnabled();
+    await expect(page.getByRole("button", { name: "Note actions", exact: true })).toBeEnabled();
 
-    await page.getByRole("button", { name: "Delete note", exact: true }).click();
+    await openNoteDeleteDialog(page);
     await page.getByRole("button", { name: "Delete permanently", exact: true }).click();
     await expect(page.getByText("No notes yet. Create a new note to get started.")).toBeVisible();
     expect(deletes).toBe(2);
@@ -593,7 +610,7 @@ test.describe("create and delete", () => {
     await page.goto("/");
     const source = page.getByRole("textbox", { name: /^(Markdown source|Note content)$/ });
     await expectEditorContent(source, "Original text");
-    await page.getByRole("button", { name: "Delete note", exact: true }).click();
+    await openNoteDeleteDialog(page);
     await page.getByRole("button", { name: "Delete permanently", exact: true }).click();
     await expect(page.getByRole("alert")).toHaveText(
       "This note is no longer available. Your unsaved text is preserved. Refresh the notes list or keep your text as a new note.",
@@ -601,7 +618,7 @@ test.describe("create and delete", () => {
     await expect(page.getByRole("button", { name: "A", exact: true })).toHaveCount(0);
     await expect(page.getByRole("textbox", { name: "Title", exact: true })).toHaveValue("A");
     await expectEditorContent(source, "Original text");
-    await expect(page.getByRole("button", { name: "Delete note", exact: true })).toBeDisabled();
+    await expect(page.getByRole("button", { name: "Note actions", exact: true })).toBeDisabled();
     await expect(page.getByRole("button", { name: "Refresh notes", exact: true })).toBeVisible();
     const keepAsNew = page.getByRole("button", { name: "Keep as new note", exact: true });
     await expect(keepAsNew).toBeVisible();
@@ -631,11 +648,11 @@ test.describe("create and delete", () => {
     const source = page.getByRole("textbox", { name: /^(Markdown source|Note content)$/ });
     await expectEditorContent(source, "Original text");
     await source.fill("Uncertain delete draft");
-    await page.getByRole("button", { name: "Delete note", exact: true }).click();
+    await openNoteDeleteDialog(page);
     await page.getByRole("button", { name: "Delete permanently", exact: true }).click();
     await expect(page.getByRole("alert")).toContainText("Could not confirm deletion.");
     await expectEditorContent(source, "Uncertain delete draft");
-    await expect(page.getByRole("button", { name: "Delete note", exact: true })).toBeDisabled();
+    await expect(page.getByRole("button", { name: "Note actions", exact: true })).toBeDisabled();
     await expect(page.getByRole("button", { name: "Save", exact: true })).toBeDisabled();
 
     await page.getByRole("button", { name: "Refresh notes", exact: true }).click();
@@ -644,7 +661,7 @@ test.describe("create and delete", () => {
       "This note is no longer available. Your unsaved text is preserved. Refresh the notes list or keep your text as a new note.",
     );
     await expectEditorContent(source, "Uncertain delete draft");
-    await expect(page.getByRole("button", { name: "Delete note", exact: true })).toBeDisabled();
+    await expect(page.getByRole("button", { name: "Note actions", exact: true })).toBeDisabled();
     await expect(page.getByRole("button", { name: "Keep as new note", exact: true })).toBeVisible();
     await expect(title).toBeFocused();
   });
@@ -825,7 +842,18 @@ test.describe("recovery and auth", () => {
       page.getByRole("textbox", { name: /^(Markdown source|Note content)$/ }),
       "Private note content",
     );
-    const signOut = page.getByRole("button", { name: "Sign out", exact: true });
+    const account = page.getByRole("button", {
+      name: `Account, ${browserUser.email}`,
+      exact: true,
+    });
+    await expect(page.getByRole("button", { name: "Sign out" })).toBeHidden();
+    await account.press("Enter");
+    const menu = page.getByRole("dialog", { name: "Account" });
+    await expect(menu.getByText(browserUser.email)).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(account).toBeFocused();
+    await account.click();
+    const signOut = menu.getByRole("button", { name: "Sign out", exact: true });
     expect((await signOut.boundingBox())?.height).toBeGreaterThanOrEqual(44);
     expect(await page.evaluate("document.documentElement.scrollWidth <= window.innerWidth")).toBe(
       true,
@@ -847,6 +875,7 @@ test.describe("recovery and auth", () => {
     const source = page.getByRole("textbox", { name: /^(Markdown source|Note content)$/ });
     await expectEditorContent(source, "Private note content");
     await source.fill("Keep this unsaved sign-out draft");
+    await page.getByRole("button", { name: `Account, ${browserUser.email}`, exact: true }).click();
     const warning = page.waitForEvent("dialog");
     const signOut = page.getByRole("button", { name: "Sign out", exact: true }).click();
     const dialog = await warning;
@@ -914,14 +943,18 @@ test.describe("recovery and auth", () => {
     await page.getByRole("button", { name: "Alice second", exact: true }).click();
     account = "bob";
     await page.evaluate("window.dispatchEvent(new Event('focus'))");
-    await expect(page.getByText("Signed in as bob@example.test")).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: "Account, bob@example.test", exact: true }),
+    ).toBeVisible();
     await expectEditorContent(source, "Bob content");
     await expect(page.getByRole("button", { name: "Alice second", exact: true })).toHaveCount(0);
 
     releasePendingRead();
     await expect.poll(() => previousReadFinished).toBe(true);
     await expectEditorContent(source, "Bob content");
-    await expect(page.getByText("Signed in as bob@example.test")).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: "Account, bob@example.test", exact: true }),
+    ).toBeVisible();
   });
 
   for (const operation of ["list", "read", "save"] as const) {
@@ -1053,7 +1086,9 @@ test.describe("recovery and auth", () => {
     await expectEditorContent(source, "Alice private draft");
     expect(privateRequests).toBe(0);
     releaseSession();
-    await expect(page.getByText("Signed in as bob@example.test")).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: "Account, bob@example.test", exact: true }),
+    ).toBeVisible();
     await expect(source).toHaveCount(0);
     await expect(page.getByRole("button", { name: "New note", exact: true })).toBeEnabled();
     await page.getByRole("button", { name: "New note", exact: true }).click();
@@ -1291,7 +1326,9 @@ test.describe("search and source opening", () => {
     await started;
     bob = true;
     await page.evaluate("window.dispatchEvent(new Event('focus'))");
-    await expect(page.getByText("Signed in as bob@example.test")).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: "Account, bob@example.test", exact: true }),
+    ).toBeVisible();
     await expect(query).toHaveValue("");
     await query.fill("Bob query");
     await query.press("Enter");
@@ -1370,7 +1407,7 @@ test.describe("search and source opening", () => {
           expect(await source.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
           await expect(source).toBeInViewport();
         }
-        await expect(page.getByRole("button", { name: "Save", exact: true })).toBeDisabled();
+        await expect(page.getByRole("button", { name: "Save", exact: true })).toBeHidden();
         expect(
           await page.evaluate("document.documentElement.scrollWidth <= window.innerWidth"),
         ).toBe(true);
@@ -1484,8 +1521,10 @@ test.describe("search and source opening", () => {
     await searchRegion.getByLabel("Search saved notes").fill("pgvector failover");
     await searchRegion.getByRole("button", { name: "Search", exact: true }).click();
 
-    await expect(searchRegion.getByText('Query: "pgvector failover"')).toBeVisible();
+    await expect(searchRegion.getByRole("searchbox")).toHaveValue("pgvector failover");
     await expect(searchRegion.getByText("Database Runbook")).toBeVisible();
+    await searchRegion.getByRole("searchbox").fill("new query");
+    await expect(searchRegion.getByText("Results for “pgvector failover”")).toBeVisible();
     await expect(
       searchRegion.getByText("Storage Recovery - Block block-pgvector - Revision 2"),
     ).toBeVisible();
@@ -2021,6 +2060,7 @@ test.describe("saved conversations and chat history", () => {
 
     await page.goto("/");
     const chatRegion = page.getByRole("region", { name: "Chat workspace" });
+    await chatRegion.getByRole("button", { name: "Full screen chat", exact: true }).click();
     await expect(chatRegion.getByRole("alert")).toContainText(
       "Could not load saved conversations. Check your connection and try again.",
     );
@@ -2057,7 +2097,6 @@ test.describe("saved conversations and chat history", () => {
     // Toggle full-screen and sidebar chat without losing conversation state or unsent input.
     const messageInput = chatRegion.getByRole("textbox", { name: "Message", exact: true });
     await messageInput.fill("Draft question kept across layout toggle");
-    await chatRegion.getByRole("button", { name: "Full screen chat", exact: true }).click();
     await expect(chatRegion).toHaveAttribute("data-chat-presentation", "fullscreen");
     await expect(messageInput).toHaveValue("Draft question kept across layout toggle");
     await chatRegion.getByRole("button", { name: "Sidebar chat", exact: true }).click();
@@ -2174,6 +2213,7 @@ test.describe("saved conversations and chat history", () => {
 
     await page.goto("/");
     const chatRegion = page.getByRole("region", { name: "Chat workspace" });
+    await chatRegion.getByRole("button", { name: "Full screen chat", exact: true }).click();
     await chatRegion.getByRole("button", { name: conversationName(convOneLabel) }).click();
     await expect(chatRegion.getByText("Question 50")).toBeVisible();
     await expect(
@@ -2335,8 +2375,13 @@ test.describe("saved conversations and chat history", () => {
 
     await page.goto("/");
     const chatRegion = page.getByRole("region", { name: "Chat workspace" });
+    await chatRegion.getByRole("button", { name: "Full screen chat", exact: true }).click();
     await chatRegion.getByRole("button", { name: conversationName(convOneLabel) }).click();
-    await expect(chatRegion.getByText("Unique message from First thread")).toBeVisible();
+    await expect(
+      chatRegion
+        .getByRole("list", { name: "Conversation messages" })
+        .getByText("Unique message from First thread"),
+    ).toBeVisible();
 
     // Type an unsent message and attempt to switch to Second thread.
     const messageInput = chatRegion.getByRole("textbox", { name: "Message", exact: true });
@@ -2347,14 +2392,26 @@ test.describe("saved conversations and chat history", () => {
     await expect(discardDialog).toBeVisible();
     await discardDialog.getByRole("button", { name: "Keep message", exact: true }).click();
     await expect(messageInput).toHaveValue("Unsent draft for First thread");
-    await expect(chatRegion.getByText("Unique message from First thread")).toBeVisible();
+    await expect(
+      chatRegion
+        .getByRole("list", { name: "Conversation messages" })
+        .getByText("Unique message from First thread"),
+    ).toBeVisible();
 
     // Explicitly discard unsent message to switch to Second thread.
     await chatRegion.getByRole("button", { name: conversationName(convTwoLabel) }).click();
     await discardDialog.getByRole("button", { name: "Discard message", exact: true }).click();
     await expect(messageInput).toHaveValue("");
-    await expect(chatRegion.getByText("Unique message from Second thread")).toBeVisible();
-    await expect(chatRegion.getByText("Unique message from First thread")).toHaveCount(0);
+    await expect(
+      chatRegion
+        .getByRole("list", { name: "Conversation messages" })
+        .getByText("Unique message from Second thread"),
+    ).toBeVisible();
+    await expect(
+      chatRegion
+        .getByRole("list", { name: "Conversation messages" })
+        .getByText("Unique message from First thread"),
+    ).toHaveCount(0);
 
     // A slow read keeps the workspace busy: no other conversation can be selected
     // while it is pending, so its late response cannot replace a newer selection.
@@ -2368,7 +2425,11 @@ test.describe("saved conversations and chat history", () => {
       chatRegion.getByRole("button", { name: conversationName(convTwoLabel) }),
     ).toBeDisabled();
     resolveSlowFirstRead();
-    await expect(chatRegion.getByText("Unique message from First thread")).toBeVisible();
+    await expect(
+      chatRegion
+        .getByRole("list", { name: "Conversation messages" })
+        .getByText("Unique message from First thread"),
+    ).toBeVisible();
     slowFirstMode = false;
 
     // Now make Second thread missing (404) and click it: First thread's messages must clear immediately.
@@ -2377,7 +2438,11 @@ test.describe("saved conversations and chat history", () => {
     await expect(chatRegion.getByRole("alert")).toContainText(
       "This conversation is no longer available.",
     );
-    await expect(chatRegion.getByText("Unique message from First thread")).toHaveCount(0);
+    await expect(
+      chatRegion
+        .getByRole("list", { name: "Conversation messages" })
+        .getByText("Unique message from First thread"),
+    ).toHaveCount(0);
     await expect(
       chatRegion.getByRole("button", { name: conversationName(convTwoLabel) }),
     ).toHaveCount(0);
@@ -2531,8 +2596,13 @@ test.describe("saved conversations and chat history", () => {
 
     await page.goto("/");
     const chatRegion = page.getByRole("region", { name: "Chat workspace" });
+    await chatRegion.getByRole("button", { name: "Full screen chat", exact: true }).click();
     await chatRegion.getByRole("button", { name: conversationName(convTwoLabel) }).click();
-    await expect(chatRegion.getByText("Message inside Thread to delete")).toBeVisible();
+    await expect(
+      chatRegion
+        .getByRole("list", { name: "Conversation messages" })
+        .getByText("Message inside Thread to delete"),
+    ).toBeVisible();
 
     // Open delete confirmation and cancel first.
     await chatRegion.getByRole("button", { name: `Delete ${convTwoLabel}` }).click();
@@ -2552,7 +2622,11 @@ test.describe("saved conversations and chat history", () => {
     await expect(
       chatRegion.getByRole("button", { name: conversationName(convTwoLabel) }),
     ).toBeVisible();
-    await expect(chatRegion.getByText("Message inside Thread to delete")).toBeVisible();
+    await expect(
+      chatRegion
+        .getByRole("list", { name: "Conversation messages" })
+        .getByText("Message inside Thread to delete"),
+    ).toBeVisible();
 
     // Retry delete succeeds (204) and clears the active conversation view.
     await chatRegion.getByRole("button", { name: "Retry delete", exact: true }).click();
@@ -2560,7 +2634,11 @@ test.describe("saved conversations and chat history", () => {
     await expect(
       chatRegion.getByRole("button", { name: conversationName(convTwoLabel) }),
     ).toHaveCount(0);
-    await expect(chatRegion.getByText("Message inside Thread to delete")).toHaveCount(0);
+    await expect(
+      chatRegion
+        .getByRole("list", { name: "Conversation messages" })
+        .getByText("Message inside Thread to delete"),
+    ).toHaveCount(0);
 
     // Start a slow read of Alice's thread, then switch accounts while the read is held.
     // Wait for the intercepted request so the gate is armed before the account changes.
@@ -2577,11 +2655,14 @@ test.describe("saved conversations and chat history", () => {
       lastName: null,
     };
     await page.evaluate("window.dispatchEvent(new Event('focus'))");
-    await expect(page.getByText("Signed in as bob@example.test")).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: "Account, bob@example.test", exact: true }),
+    ).toBeVisible();
     releaseAliceDetail();
     await page.evaluate(
       "new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))",
     );
+    await chatRegion.getByRole("button", { name: "Conversation history", exact: true }).click();
     await expect(
       chatRegion.getByText(
         "No saved conversations yet. Start a new conversation to ask about your notes.",

@@ -1,5 +1,19 @@
-import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  type ReactNode,
+  lazy,
+  Suspense,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
+import { Menu } from "@base-ui/react/menu";
+import { DotsThreeIcon } from "@phosphor-icons/react/dist/csr/DotsThree";
 import { Button } from "@/components/ui/button";
+import { NotePencilIcon } from "@phosphor-icons/react/dist/csr/NotePencil";
+import { ChatCircleIcon } from "@phosphor-icons/react/dist/csr/ChatCircle";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -17,6 +31,7 @@ import { noteContentSchema, type CreateNote, type NoteSummary } from "../../shar
 import { SignInLink } from "@/auth/SignInLink";
 import { MarkdownPreview } from "./MarkdownPreview";
 import { NoteContentView } from "./NoteContentView";
+import { markNoteSelection } from "./note-text-drag";
 import { ChatWorkspace } from "./ChatWorkspace";
 import type { ConversationClient } from "./conversation-store";
 import { NoteSearchWorkspace } from "./NoteSearchWorkspace";
@@ -56,8 +71,21 @@ const BlockNoteEditor = lazy(() =>
   import("./BlockNoteEditor").then((module) => ({ default: module.BlockNoteEditor })),
 );
 
+const desktopQuery = "(min-width: 1024px)";
+
+function subscribeDesktop(onChange: () => void) {
+  const query = window.matchMedia(desktopQuery);
+  query.addEventListener("change", onChange);
+  return () => query.removeEventListener("change", onChange);
+}
+
+function isDesktop() {
+  return window.matchMedia(desktopQuery).matches;
+}
+
 export function NotesWorkspace({
   store,
+  account,
   organizer,
   search,
   conversations,
@@ -65,6 +93,7 @@ export function NotesWorkspace({
   requestsEnabled = true,
 }: {
   store: NotesStore;
+  account?: ReactNode;
   organizer?: OrganizeClient;
   search?: NoteSearchClient;
   conversations?: ConversationClient;
@@ -97,7 +126,33 @@ export function NotesWorkspace({
   const [activeSourceTarget, setActiveSourceTarget] = useState<SourceTarget | null>(null);
   const [unavailableSourceTarget, setUnavailableSourceTarget] = useState<SourceTarget | null>(null);
   const [searchResetToken, setSearchResetToken] = useState(0);
+  const desktop = useSyncExternalStore(subscribeDesktop, isDesktop);
+  const [chatVisibility, setChatOpen] = useState<boolean | null>(null);
+  const chatOpen = chatVisibility ?? desktop;
+  const chatLauncherRef = useRef<HTMLButtonElement>(null);
   const [chatPresentation, setChatPresentation] = useState<"sidebar" | "fullscreen">("sidebar");
+  const canShowChat =
+    !example &&
+    conversations &&
+    (loadState === "ready" || loadState === "unauthenticated" || draft !== null);
+  const presentation = desktop ? chatPresentation : "fullscreen";
+
+  function closeChat() {
+    setChatOpen(false);
+    requestAnimationFrame(() => chatLauncherRef.current?.focus());
+  }
+
+  function preferNotesOnNarrowScreen(event: { target: EventTarget | null }) {
+    if (
+      desktop &&
+      chatVisibility === true &&
+      event.target instanceof Element &&
+      event.target.closest(".workspace-content, .workspace-sidebar, .workspace-header")
+    ) {
+      setChatOpen(null);
+    }
+  }
+
   const busyRef = useRef(false);
   const titleRef = useRef<HTMLInputElement>(null);
   const cancelRef = useRef<HTMLButtonElement>(null);
@@ -106,7 +161,7 @@ export function NotesWorkspace({
   const compareRef = useRef<HTMLButtonElement>(null);
   const deleteRefreshRef = useRef<HTMLButtonElement>(null);
   const deleteCancelRef = useRef<HTMLButtonElement>(null);
-  const deleteButtonRef = useRef<HTMLButtonElement>(null);
+  const noteActionsRef = useRef<HTMLButtonElement>(null);
   const dirty = useMemo(
     () => !editorValid || hasUnsavedChanges(draft, saved?.note ?? null),
     [draft, saved, editorValid],
@@ -401,7 +456,12 @@ export function NotesWorkspace({
     const onKeyDown = (event: KeyboardEvent) => {
       if (!(event.ctrlKey || event.metaKey) || event.key.toLowerCase() !== "s") return;
       event.preventDefault();
-      if (!pending && !deleteOpen) void save();
+      if (
+        !pending &&
+        !deleteOpen &&
+        !(event.target instanceof Element && event.target.closest(".chat-workspace"))
+      )
+        void save();
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
@@ -472,7 +532,7 @@ export function NotesWorkspace({
         requestAnimationFrame(() => titleRef.current?.focus());
       } else if (deleteWasUnconfirmed) {
         setDeleteFailure(null);
-        requestAnimationFrame(() => deleteButtonRef.current?.focus());
+        requestAnimationFrame(() => noteActionsRef.current?.focus());
       }
     } catch (error) {
       const kind = classifyFailure(error);
@@ -576,24 +636,50 @@ export function NotesWorkspace({
   }
 
   return (
-    <main className="notes-workspace workspace-shell">
+    <main
+      className="notes-workspace workspace-shell"
+      onFocusCapture={preferNotesOnNarrowScreen}
+      onPointerDownCapture={preferNotesOnNarrowScreen}
+      onDragStart={markNoteSelection}
+      data-chat-view={canShowChat && chatOpen ? presentation : undefined}
+    >
       <header className="workspace-header">
         <h1 className="workspace-brand" aria-label="Atlas notes">
           atlas
         </h1>
         <Button
           ref={newNoteRef}
+          className="workspace-nav-action"
+          aria-label="New note"
+          title="New note"
           variant="ghost"
           disabled={loadState !== "ready" || busy || blocked}
           onClick={() => requestSelection({ kind: "new" })}
         >
-          New note
+          <NotePencilIcon aria-hidden="true" />
+          <span>New note</span>
         </Button>
+        {canShowChat && !chatOpen && (
+          <Button
+            ref={chatLauncherRef}
+            className="workspace-nav-action"
+            aria-label="Open chat"
+            title="Open chat"
+            variant="ghost"
+            onClick={() => setChatOpen(true)}
+          >
+            <ChatCircleIcon aria-hidden="true" />
+            <span>Open chat</span>
+          </Button>
+        )}
         <div className="workspace-save-controls">
           <div className="workspace-save-status">
             {/* Both live regions stay mounted so a status-to-failure switch is announced. */}
             <div>
-              <p role="status" className="text-sm">
+              <p
+                role="status"
+                className={status === "Unsaved changes" && !failed ? "sr-only" : "text-sm"}
+              >
                 {failed ? unsavedNotice : status}
               </p>
               <p role="alert" className="text-sm">
@@ -669,37 +755,44 @@ export function NotesWorkspace({
               </Button>
             )}
           </div>
-          {draft && (
-            <div className="flex flex-wrap items-center gap-2">
-              <Button
-                disabled={
-                  (saved !== null && !dirty) ||
-                  busy ||
-                  writeBlocked ||
-                  deleteFailure !== null ||
-                  !valid ||
-                  saveState === "creation-conflict" ||
-                  saveState === "conflict" ||
-                  saveState === "missing"
-                }
-                title="Save (Ctrl/Cmd+S)"
-                onClick={() => void save()}
-              >
-                Save
-              </Button>
-              {(saveState === "conflict" || deleteFailure === "conflict") && saved && (
+          {draft &&
+            (!saved ||
+              dirty ||
+              failed ||
+              writeBlocked ||
+              saveState !== "idle" ||
+              deleteFailure !== null) && (
+              <div className="flex flex-wrap items-center gap-2">
                 <Button
-                  ref={compareRef}
-                  variant="outline"
-                  disabled={busy || blocked}
-                  onClick={() => void openNote(saved.note.id, true)}
+                  disabled={
+                    (saved !== null && !dirty) ||
+                    busy ||
+                    writeBlocked ||
+                    deleteFailure !== null ||
+                    !valid ||
+                    saveState === "creation-conflict" ||
+                    saveState === "conflict" ||
+                    saveState === "missing"
+                  }
+                  title="Save (Ctrl/Cmd+S)"
+                  onClick={() => void save()}
                 >
-                  Compare latest
+                  Save
                 </Button>
-              )}
-            </div>
-          )}
+                {(saveState === "conflict" || deleteFailure === "conflict") && saved && (
+                  <Button
+                    ref={compareRef}
+                    variant="outline"
+                    disabled={busy || blocked}
+                    onClick={() => void openNote(saved.note.id, true)}
+                  >
+                    Compare latest
+                  </Button>
+                )}
+              </div>
+            )}
         </div>
+        {account}
       </header>
       {example && (
         <p className="text-sm text-muted-foreground" role="note">
@@ -774,16 +867,46 @@ export function NotesWorkspace({
                     <Label htmlFor="note-title" className="sr-only">
                       Title
                     </Label>
-                    <Input
-                      ref={titleRef}
-                      id="note-title"
-                      className="document-title"
-                      placeholder="Untitled note"
-                      value={draft.title}
-                      maxLength={256}
-                      disabled={openingId !== null || deleting}
-                      onChange={(event) => setDraft({ ...draft, title: event.target.value })}
-                    />
+                    <div className="note-title-row">
+                      <Input
+                        ref={titleRef}
+                        id="note-title"
+                        className="document-title"
+                        placeholder="Untitled note"
+                        value={draft.title}
+                        maxLength={256}
+                        disabled={openingId !== null || deleting}
+                        onChange={(event) => setDraft({ ...draft, title: event.target.value })}
+                      />
+                      {saved && (
+                        <Menu.Root>
+                          <Menu.Trigger
+                            ref={noteActionsRef}
+                            render={<Button type="button" variant="ghost" size="icon" />}
+                            aria-label="Note actions"
+                            title="Note actions"
+                            disabled={busy || writeBlocked || deleteBlocked}
+                          >
+                            <DotsThreeIcon weight="bold" aria-hidden="true" />
+                          </Menu.Trigger>
+                          <Menu.Portal>
+                            <Menu.Positioner align="end" sideOffset={4} className="z-50">
+                              <Menu.Popup
+                                className="note-actions-menu"
+                                finalFocus={deleteOpen ? false : undefined}
+                              >
+                                <Menu.Item
+                                  disabled={busy || writeBlocked || deleteBlocked}
+                                  onClick={() => setDeleteOpen(true)}
+                                >
+                                  Delete note
+                                </Menu.Item>
+                              </Menu.Popup>
+                            </Menu.Positioner>
+                          </Menu.Portal>
+                        </Menu.Root>
+                      )}
+                    </div>
                     <Suspense fallback={<p>Opening editor...</p>}>
                       <BlockNoteEditor
                         key={editorKey}
@@ -813,19 +936,6 @@ export function NotesWorkspace({
                         preserved.
                       </p>
                     )}
-                    <div className="note-document-actions">
-                      {saved && (
-                        <Button
-                          ref={deleteButtonRef}
-                          variant="ghost"
-                          className="text-destructive"
-                          disabled={busy || writeBlocked || deleteBlocked}
-                          onClick={() => setDeleteOpen(true)}
-                        >
-                          Delete note
-                        </Button>
-                      )}
-                    </div>
                   </section>
                   {editorMode === "source" && typeof draft.content === "string" && (
                     <Card>
@@ -894,22 +1004,31 @@ export function NotesWorkspace({
             />
           )}
         </div>
-        {!example &&
-          conversations &&
-          (loadState === "ready" || loadState === "unauthenticated" || draft !== null) && (
-            <ChatWorkspace
-              cacheResetToken={searchResetToken}
-              client={conversations}
-              notes={notes}
-              enabled={requestsEnabled && !writeBlocked}
-              canOpenSource={!busy}
-              activeSourceTarget={unavailableSourceTarget ?? activeSourceTarget}
-              presentation={chatPresentation}
-              onPresentationChange={setChatPresentation}
-              onOpenSource={requestOpenSource}
-              onUnauthenticated={handleSearchUnauthenticated}
-            />
-          )}
+        {canShowChat && (
+          <ChatWorkspace
+            cacheResetToken={searchResetToken}
+            client={conversations}
+            notes={notes}
+            enabled={requestsEnabled && !writeBlocked}
+            canOpenSource={!busy}
+            activeSourceTarget={unavailableSourceTarget ?? activeSourceTarget}
+            presentation={presentation}
+            compact={!desktop || presentation === "sidebar"}
+            hidden={!chatOpen}
+            onClose={closeChat}
+            onPresentationChange={(next) => {
+              setChatOpen(true);
+              setChatPresentation(next);
+            }}
+            onFocusChat={() => setChatOpen(true)}
+            focusOnOpen={chatVisibility === true}
+            onOpenSource={(target) => {
+              if (!desktop) setChatOpen(false);
+              requestOpenSource(target);
+            }}
+            onUnauthenticated={handleSearchUnauthenticated}
+          />
+        )}
       </div>
       <AlertDialog
         open={pending !== null}
@@ -947,7 +1066,7 @@ export function NotesWorkspace({
         <AlertDialogContent
           className="notes-dialog"
           initialFocus={deleteCancelRef}
-          finalFocus={saved ? deleteButtonRef : newNoteRef}
+          finalFocus={saved ? noteActionsRef : newNoteRef}
         >
           <AlertDialogHeader>
             <AlertDialogTitle>Delete note?</AlertDialogTitle>

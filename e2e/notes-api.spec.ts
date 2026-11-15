@@ -1,4 +1,4 @@
-import { expectEditorContent, paragraphDocument } from "./notes-editor.ts";
+import { openNoteDeleteDialog, expectEditorContent, paragraphDocument } from "./notes-editor.ts";
 import { randomUUID } from "node:crypto";
 import { expect, test, type BrowserContext, type Page } from "@playwright/test";
 import { noteListSchema, noteSchema } from "../shared/notes.ts";
@@ -63,7 +63,20 @@ test("mobile keyboard CRUD persists through reload and deletion", async ({ page 
     true,
   );
   await page.screenshot({ path: testInfo.outputPath("real-api-mobile.png"), fullPage: true });
-  await page.getByRole("button", { name: "Delete note", exact: true }).click();
+  const actions = page.getByRole("button", { name: "Note actions", exact: true });
+  await actions.focus();
+  await page.keyboard.press("Enter");
+  const remove = page.getByRole("menuitem", { name: "Delete note", exact: true });
+  await expect(remove).toBeFocused();
+  await page.keyboard.press("Enter");
+  const keep = page.getByRole("button", { name: "Keep note", exact: true });
+  await expect(keep).toBeFocused();
+  await page.keyboard.press("Enter");
+  await expect(page.getByRole("alertdialog")).toBeHidden();
+  await expect(actions).toBeFocused();
+  await expect(page.getByRole("menu")).toBeHidden();
+  expect(await readNote(page, created.id)).toMatchObject({ id: created.id });
+  await openNoteDeleteDialog(page);
   await page.getByRole("button", { name: "Delete permanently", exact: true }).click();
   await expect(page.getByText("Note deleted. No notes left.")).toBeVisible();
   expect(await listNotes(page)).toEqual([]);
@@ -159,7 +172,9 @@ test("switching synthetic accounts clears the editor and cannot read or write an
   const bob = newAccount();
   await signIn(context, bob);
   await page.evaluate("window.dispatchEvent(new Event('focus'))");
-  await expect(page.getByText(`Signed in as ${bob}@example.test`)).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: `Account, ${bob}@example.test`, exact: true }),
+  ).toBeVisible();
   await expect(page.getByRole("textbox", { name: /^(Markdown source|Note content)$/ })).toHaveCount(
     0,
   );
@@ -375,7 +390,7 @@ test("keyboard search and source opening work on narrow mobile through the real 
   await page.keyboard.type("pgvector cosine");
   await page.keyboard.press("Enter");
 
-  await expect(searchRegion.getByText('Query: "pgvector cosine"')).toBeVisible();
+  await expect(searchRegion.getByRole("searchbox")).toHaveValue("pgvector cosine");
   await expect(searchRegion.getByText("Vector Search Architecture").first()).toBeVisible();
   await expect(
     searchRegion.getByText("Retrieval Pipeline - Block vector-block - Revision 1"),
@@ -466,12 +481,17 @@ test("saved conversations reopen across reload, redact deleted note excerpts, en
   await page.goto("/");
 
   const chatRegion = page.getByRole("region", { name: "Chat workspace" });
-  const messageInput = chatRegion.getByLabel("Message");
+  await page.getByRole("button", { name: "Open chat", exact: true }).click();
+  const messageInput = chatRegion.getByRole("textbox", { name: "Message", exact: true });
   await messageInput.focus();
   await page.keyboard.type("How does pgvector durability work?");
   await chatRegion.getByRole("button", { name: "Send message", exact: true }).click();
 
-  await expect(chatRegion.getByText("How does pgvector durability work?")).toBeVisible();
+  await expect(
+    chatRegion
+      .getByRole("list", { name: "Conversation messages" })
+      .getByText("How does pgvector durability work?"),
+  ).toBeVisible();
   await expect(
     chatRegion.getByText(
       "Grounded answer from your notes: PostgreSQL pgvector durability relies on synchronous WAL flushing.",
@@ -494,6 +514,8 @@ test("saved conversations reopen across reload, redact deleted note excerpts, en
   // Reload and reopen the persisted conversation on narrow mobile using keyboard.
   await page.reload();
   const reopenedChat = page.getByRole("region", { name: "Chat workspace" });
+  await page.getByRole("button", { name: "Open chat", exact: true }).click();
+  await reopenedChat.getByRole("button", { name: "Conversation history", exact: true }).click();
   const convButton = reopenedChat
     .getByRole("navigation", { name: "Saved conversations" })
     .getByRole("button")
@@ -501,7 +523,11 @@ test("saved conversations reopen across reload, redact deleted note excerpts, en
   await convButton.focus();
   await page.keyboard.press("Enter");
 
-  await expect(reopenedChat.getByText("How does pgvector durability work?")).toBeVisible();
+  await expect(
+    reopenedChat
+      .getByRole("list", { name: "Conversation messages" })
+      .getByText("How does pgvector durability work?"),
+  ).toBeVisible();
   await expect(
     reopenedChat.getByText("PostgreSQL pgvector durability relies on synchronous WAL flushing.", {
       exact: true,
@@ -516,6 +542,10 @@ test("saved conversations reopen across reload, redact deleted note excerpts, en
 
   await page.reload();
   const afterNoteDeleteChat = page.getByRole("region", { name: "Chat workspace" });
+  await page.getByRole("button", { name: "Open chat", exact: true }).click();
+  await afterNoteDeleteChat
+    .getByRole("button", { name: "Conversation history", exact: true })
+    .click();
   await afterNoteDeleteChat
     .getByRole("navigation", { name: "Saved conversations" })
     .getByRole("button")
@@ -556,7 +586,13 @@ test("saved conversations reopen across reload, redact deleted note excerpts, en
 
   // Switch browser focus to Bob and confirm Alice's conversation history is cleared.
   await page.evaluate("window.dispatchEvent(new Event('focus'))");
-  await expect(page.getByText(`Signed in as ${bob}@example.test`)).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: `Account, ${bob}@example.test`, exact: true }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "Open chat", exact: true }).click();
+  await afterNoteDeleteChat
+    .getByRole("button", { name: "Conversation history", exact: true })
+    .click();
   await expect(
     afterNoteDeleteChat.getByText(
       "No saved conversations yet. Start a new conversation to ask about your notes.",

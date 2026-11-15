@@ -265,9 +265,7 @@ test("Save & organize binds the saved revision and preserves source while draft 
     "href",
     "https://example.com/reference",
   );
-  await expect(
-    page.locator("main > header").getByRole("button", { name: "Save", exact: true }),
-  ).toBeVisible();
+  await expect(page.locator("main > header").getByRole("status")).toHaveText("Saved");
   await expect(
     panel(page).locator("header").getByRole("button", { name: "Save as new note", exact: true }),
   ).toBeVisible();
@@ -509,7 +507,9 @@ test("session revalidation pauses draft autosave and account switching clears pr
   );
   await page.route("**/api/notes", (route) => route.fulfill({ json: { notes: [] } }));
   finishSession?.();
-  await expect(page.getByText("Signed in as bob@example.test")).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Account, bob@example.test", exact: true }),
+  ).toBeVisible();
   await expect(panel(page)).toHaveCount(0);
   await expect(page.getByText("Private Alice draft")).toHaveCount(0);
 });

@@ -192,9 +192,8 @@ export function createConversationClient(
 }
 
 export function formatConversationLabel(conversation: Conversation): string {
-  const shortId = conversation.id.slice(0, 8);
   const datePart = conversation.createdAt.slice(0, 16).replace("T", " ");
-  return `Conversation ${shortId} (${datePart} UTC)`;
+  return `${datePart} UTC`;
 }
 
 export type AssistantAnswerPresentation = {

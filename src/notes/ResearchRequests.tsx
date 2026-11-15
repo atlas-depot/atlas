@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { GlobeIcon } from "@phosphor-icons/react/dist/csr/Globe";
 import { Button } from "@/components/ui/button";
 import type { ResearchDisclosureRequest } from "../../shared/research";
 import type { ConversationClient } from "./conversation-store";
@@ -16,14 +17,11 @@ function ExactQuery({ text }: { text: string }) {
   );
   return (
     <>
-      <blockquote
-        dir="auto"
-        className="note-search-excerpt whitespace-pre-wrap [overflow-wrap:anywhere]"
-      >
+      <blockquote dir="auto" className="chat-permission-query">
         {text}
       </blockquote>
       {visible !== text && (
-        <p className="text-sm [overflow-wrap:anywhere]">
+        <p className="chat-permission-disclosure">
           With control characters shown: <bdi>{visible}</bdi>
         </p>
       )}
@@ -116,25 +114,37 @@ export function ResearchRequests({
 
   return (
     <>
-      <p role="status" className={notice || readFailed ? "text-sm" : "sr-only"}>
+      <p role="status" className={notice || readFailed ? "chat-permission-status" : "sr-only"}>
         {readFailed ? "Could not check web search requests. Retrying..." : notice}
       </p>
       {requests.map((request) => (
-        <section aria-label="Web search permission" key={request.id} className="grid min-w-0 gap-2">
-          <h3 className="font-medium">Allow this web search?</h3>
-          <p className="text-sm">
+        <section aria-label="Web search permission" key={request.id} className="chat-permission">
+          <h3>
+            <GlobeIcon aria-hidden="true" />
+            Allow this web search?
+          </h3>
+          <ExactQuery text={request.proposedQuery} />
+          <p className="chat-permission-disclosure">
             Atlas sends this text to OpenRouter. Its model may rephrase it for web search.
           </p>
-          <ExactQuery text={request.proposedQuery} />
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="chat-permission-actions">
             {request.status === "pending" ? (
-              <Button disabled={busy} onClick={() => void decide(request, "approve")}>
+              <Button
+                className="chat-allow"
+                disabled={busy}
+                onClick={() => void decide(request, "approve")}
+              >
                 Allow
               </Button>
             ) : (
               <span>Allowed, awaiting search.</span>
             )}
-            <Button variant="outline" disabled={busy} onClick={() => void decide(request, "deny")}>
+            <Button
+              className="chat-deny"
+              variant="outline"
+              disabled={busy}
+              onClick={() => void decide(request, "deny")}
+            >
               Deny
             </Button>
           </div>

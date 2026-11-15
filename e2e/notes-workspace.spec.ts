@@ -1,4 +1,4 @@
-import { expectEditorContent } from "./notes-editor.ts";
+import { openNoteDeleteDialog, expectEditorContent } from "./notes-editor.ts";
 import { expect, test } from "@playwright/test";
 
 test("edit, keyboard save, and switching notes preserve the literal Markdown", async ({ page }) => {
@@ -392,7 +392,7 @@ test("deleting asks for confirmation, warns about unsaved edits, and selects the
   const source = page.getByRole("textbox", { name: /^(Markdown source|Note content)$/ });
   await expectEditorContent(source, /Prepare the/);
   await source.fill("Unsaved deletion draft");
-  await page.getByRole("button", { name: "Delete note", exact: true }).click();
+  await openNoteDeleteDialog(page);
   const dialog = page.getByRole("alertdialog");
   await expect(dialog).toContainText('"Project review"');
   await expect(dialog).toContainText("Your unsaved changes will also be discarded.");
@@ -401,7 +401,7 @@ test("deleting asks for confirmation, warns about unsaved edits, and selects the
   await expect(dialog).toHaveCount(0);
   await expectEditorContent(source, "Unsaved deletion draft");
 
-  await page.getByRole("button", { name: "Delete note", exact: true }).click();
+  await openNoteDeleteDialog(page);
   await page.getByRole("button", { name: "Delete permanently", exact: true }).click();
   await expect(page.getByRole("textbox", { name: "Title", exact: true })).toHaveValue(
     "Reading notes",
@@ -411,7 +411,7 @@ test("deleting asks for confirmation, warns about unsaved edits, and selects the
     page.getByRole("navigation", { name: "Notes" }).getByRole("button", { name: "Project review" }),
   ).toHaveCount(0);
 
-  await page.getByRole("button", { name: "Delete note", exact: true }).click();
+  await openNoteDeleteDialog(page);
   await page.getByRole("button", { name: "Delete permanently", exact: true }).click();
   await expect(page.getByRole("textbox", { name: "Title", exact: true })).toHaveCount(0);
   await expect(page.getByText("No notes yet. Create a new note to get started.")).toBeVisible();
@@ -425,7 +425,7 @@ test("a stale delete keeps the note and requires comparison before a new confirm
   await page.goto("/?notesExample=delete-conflict");
   const source = page.getByRole("textbox", { name: /^(Markdown source|Note content)$/ });
   await source.fill("Local delete draft");
-  await page.getByRole("button", { name: "Delete note", exact: true }).click();
+  await openNoteDeleteDialog(page);
   await page.getByRole("button", { name: "Delete permanently", exact: true }).click();
   await expect(page.getByRole("alert")).toContainText(
     "This note changed on the server. Nothing was deleted.",
@@ -436,7 +436,7 @@ test("a stale delete keeps the note and requires comparison before a new confirm
       .getByRole("navigation", { name: "Notes" })
       .getByRole("button", { name: "Project review", exact: true }),
   ).toBeVisible();
-  await expect(page.getByRole("button", { name: "Delete note", exact: true })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "Note actions", exact: true })).toBeDisabled();
   await expect(page.getByRole("button", { name: "Compare latest", exact: true })).toBeFocused();
 
   await page.getByRole("button", { name: "Compare latest", exact: true }).click();
@@ -446,9 +446,9 @@ test("a stale delete keeps the note and requires comparison before a new confirm
   await page.getByRole("button", { name: "Use latest version", exact: true }).click();
   await page.getByRole("button", { name: "Discard changes", exact: true }).click();
   await expectEditorContent(source, "A newer version saved by another client.");
-  await expect(page.getByRole("button", { name: "Delete note", exact: true })).toBeEnabled();
+  await expect(page.getByRole("button", { name: "Note actions", exact: true })).toBeEnabled();
 
-  await page.getByRole("button", { name: "Delete note", exact: true }).click();
+  await openNoteDeleteDialog(page);
   await page.getByRole("button", { name: "Delete permanently", exact: true }).click();
   await expect(page.getByRole("textbox", { name: "Title", exact: true })).toHaveValue(
     "Reading notes",
@@ -463,7 +463,7 @@ test("a stale delete keeps the note and requires comparison before a new confirm
 test("a failed delete keeps the note and can be retried", async ({ page }) => {
   await page.goto("/?notesExample=delete-failure");
   const source = page.getByRole("textbox", { name: /^(Markdown source|Note content)$/ });
-  await page.getByRole("button", { name: "Delete note", exact: true }).click();
+  await openNoteDeleteDialog(page);
   await page.getByRole("button", { name: "Delete permanently", exact: true }).click();
   await expect(page.getByRole("alert")).toHaveText(
     "Could not confirm deletion. Your text is preserved. Refresh the notes list before trying again; the note may already be gone.",
@@ -474,12 +474,12 @@ test("a failed delete keeps the note and can be retried", async ({ page }) => {
       .getByRole("navigation", { name: "Notes" })
       .getByRole("button", { name: "Project review", exact: true }),
   ).toBeVisible();
-  await expect(page.getByRole("button", { name: "Delete note", exact: true })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "Note actions", exact: true })).toBeDisabled();
   await expect(page.getByRole("button", { name: "Refresh notes", exact: true })).toBeFocused();
 
   await page.getByRole("button", { name: "Refresh notes", exact: true }).click();
-  await expect(page.getByRole("button", { name: "Delete note", exact: true })).toBeEnabled();
-  await page.getByRole("button", { name: "Delete note", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Note actions", exact: true })).toBeEnabled();
+  await openNoteDeleteDialog(page);
   await page.getByRole("button", { name: "Delete permanently", exact: true }).click();
   await expect(page.getByRole("textbox", { name: "Title", exact: true })).toHaveValue(
     "Reading notes",

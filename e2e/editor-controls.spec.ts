@@ -331,3 +331,62 @@ for (const width of [375, 320])
       fullPage: true,
     });
   });
+
+test("dragging selected note text into chat copies it as one undoable edit", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  const state = await openDocument(page, [paragraph("Studio Nami")]);
+  const source = page.locator(".bn-editor .bn-inline-content").first();
+  const chat = page.getByRole("region", { name: "Chat workspace" });
+  const input = chat.getByRole("textbox", { name: "Message", exact: true });
+  await input.fill("Before [place] after");
+  await input.press("Home");
+  for (let i = 0; i < 7; i++) await input.press("ArrowRight");
+  for (let i = 0; i < 7; i++) await input.press("Shift+ArrowRight");
+  const text = await source.evaluate((el) => {
+    const range = el.ownerDocument.createRange();
+    range.selectNodeContents(el);
+    const box = range.getBoundingClientRect();
+    return { left: box.left, right: box.right, y: box.top + box.height / 2 };
+  });
+  await page.mouse.move(text.left + 1, text.y);
+  await page.mouse.down();
+  await page.mouse.move(text.right - 1, text.y, { steps: 6 });
+  await page.mouse.up();
+  await expect
+    .poll(() => source.evaluate((el) => el.ownerDocument.getSelection()?.toString()))
+    .toBe("Studio Nami");
+
+  // Find a point inside the composer's selected word, independent of font metrics.
+  const drop = await input.evaluate((el) => {
+    const bounds = el.getBoundingClientRect();
+    const y = bounds.top + bounds.height / 2;
+    for (let x = bounds.left; x < bounds.right; x += 2) {
+      const caret = el.ownerDocument.caretPositionFromPoint(x, y);
+      if (caret?.offsetNode === el && caret.offset === 10) return { x, y };
+    }
+    throw new Error("Could not locate the selected word.");
+  });
+  await page.mouse.move((text.left + text.right) / 2, text.y);
+  await page.mouse.down();
+  // Chromium requires a sustained press to drag the selection rather than start a new one.
+  await page.waitForTimeout(250);
+  await page.mouse.move(drop.x, drop.y, { steps: 24 });
+  await page.mouse.move(drop.x + 1, drop.y);
+  await page.mouse.up();
+  await expect(input).toHaveValue("Before Studio Nami after");
+  await expect(source).toHaveText("Studio Nami");
+  await expect(page.locator("main > header").getByRole("status")).toHaveText("Saved");
+  await input.press("ControlOrMeta+z");
+  await expect(input).toHaveValue("Before [place] after");
+  await input.press("ControlOrMeta+Shift+z");
+  await expect(input).toHaveValue("Before Studio Nami after");
+
+  // Return to the editor before narrowing. An earlier chat interaction must not hide it.
+  await source.click();
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(source).toBeVisible();
+  await expect(chat).toBeHidden();
+  await page.getByRole("button", { name: "Open chat", exact: true }).click();
+  await expect(input).toHaveValue("Before Studio Nami after");
+  expect(state.writes()).toBe(0);
+});

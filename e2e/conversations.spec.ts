@@ -173,10 +173,20 @@ async function setupChat(page: Page) {
 }
 
 const chat = (page: Page) => page.getByRole("region", { name: "Chat workspace" });
+async function showHistory(page: Page) {
+  await chat(page).getByRole("button", { name: "Conversation history", exact: true }).click();
+}
+
 async function openChat(page: Page) {
   await page.goto("/");
+  const launcher = page.getByRole("button", { name: "Open chat", exact: true });
+  await expect(launcher.or(chat(page))).toBeVisible();
+  if (await launcher.isVisible()) await launcher.click();
+  await showHistory(page);
   await chat(page).getByRole("button", { name: label, exact: true }).click();
-  await expect(chat(page).getByText(label, { exact: true })).toHaveCount(2);
+  await expect(
+    chat(page).getByRole("button", { name: "Delete conversation", exact: true }),
+  ).toBeEnabled();
 }
 
 test("a stale send after focus verification retains the same key through a lost retry response", async ({
@@ -229,7 +239,11 @@ test("a stale send after focus verification retains the same key through a lost 
   await expect(chat(page).getByRole("alert")).toContainText("Your unsent message is preserved");
   await chat(page).getByRole("button", { name: "Send message", exact: true }).click();
   await expect(input).toBeEmpty();
-  await expect(chat(page).getByText("Send exactly once", { exact: true })).toHaveCount(1);
+  await expect(
+    chat(page)
+      .getByRole("list", { name: "Conversation messages" })
+      .getByText("Send exactly once", { exact: true }),
+  ).toHaveCount(1);
   expect(api.sendKeys).toHaveLength(3);
   expect(new Set(api.sendKeys).size).toBe(1);
   expect(api.history).toHaveLength(1);
@@ -271,6 +285,7 @@ test("an open dropped by focus verification shows a retry instead of a hidden se
     return false;
   };
   await page.goto("/");
+  await showHistory(page);
   await chat(page).getByRole("button", { name: label, exact: true }).click();
   await readStarted.promise;
   await recheckSession(page);
@@ -285,7 +300,11 @@ test("an open dropped by focus verification shows a retry instead of a hidden se
   );
   await expect(chat(page).getByText("Select a saved conversation")).toHaveCount(0);
   await chat(page).getByRole("button", { name: "Retry opening conversation", exact: true }).click();
-  await expect(chat(page).getByText("Question 1", { exact: true })).toBeVisible();
+  await expect(
+    chat(page)
+      .getByRole("list", { name: "Conversation messages" })
+      .getByText("Question 1", { exact: true }),
+  ).toBeVisible();
   await expect(chat(page).getByRole("alert")).toHaveCount(0);
 });
 
@@ -340,6 +359,7 @@ test("opening reads before history and catches up to a newly published answer pa
     return false;
   };
   await page.goto("/");
+  await showHistory(page);
   await chat(page).getByRole("button", { name: label, exact: true }).click();
   await started.promise;
   expect(api.historyCursors).toEqual([]);
@@ -482,7 +502,9 @@ for (const operation of ["new", "send"] as const) {
     await button.click();
     await expect(chat(page).getByRole("alert")).toHaveCount(0);
     if (operation === "new")
-      await expect(chat(page).getByText(label, { exact: true })).toHaveCount(2);
+      await expect(
+        chat(page).getByRole("button", { name: "Delete conversation", exact: true }),
+      ).toBeEnabled();
     else await expect(chat(page).getByLabel("Message", { exact: true })).toBeEmpty();
     expect(createKeys).toHaveLength(2);
     expect(createKeys[1]).not.toBe(createKeys[0]);
@@ -598,7 +620,11 @@ test("a post-send history error offers a retry that never re-sends the message",
   failHistory = false;
   await chat(page).getByRole("button", { name: "Retry loading messages", exact: true }).click();
   await expect(chat(page).getByRole("alert")).toHaveCount(0);
-  await expect(chat(page).getByText("Already accepted", { exact: true })).toHaveCount(1);
+  await expect(
+    chat(page)
+      .getByRole("list", { name: "Conversation messages" })
+      .getByText("Already accepted", { exact: true }),
+  ).toHaveCount(1);
   expect(api.sendKeys).toHaveLength(1);
 });
 
@@ -627,6 +653,7 @@ test("focus verification preserves older list pages and their next cursor", asyn
     return true;
   };
   await page.goto("/");
+  await showHistory(page);
   await chat(page).getByRole("button", { name: "Load older conversations", exact: true }).click();
   await expect(
     chat(page).getByRole("button", { name: formatConversationLabel(older), exact: true }),
@@ -645,6 +672,39 @@ test("focus verification preserves older list pages and their next cursor", asyn
   ).toBeVisible();
 });
 
+test("keeping a draft from compact history returns focus to the selected conversation row", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 375, height: 812 });
+  await setupChat(page);
+  await page.goto("/");
+  await page.getByRole("button", { name: "Open chat", exact: true }).click();
+  const input = chat(page).getByRole("textbox", { name: "Message", exact: true });
+  await input.fill("Keep this unsent draft");
+  const historyButton = chat(page).getByRole("button", { name: "Conversation history" });
+  await historyButton.press("Enter");
+  await expect(
+    chat(page)
+      .locator(".chat-history-column")
+      .getByRole("button", { name: "Conversation history" }),
+  ).toBeFocused();
+  await expect(historyButton).toHaveAttribute("aria-expanded", "true");
+  const row = chat(page).getByRole("button", { name: label, exact: true });
+  const keep = page.getByRole("alertdialog").getByRole("button", { name: "Keep message" });
+  for (const key of ["Escape", "Enter"]) {
+    await row.press("Enter");
+    await expect(keep).toBeFocused();
+    await page.keyboard.press(key);
+    await expect(row).toBeFocused();
+  }
+  await historyButton.press("Enter");
+  await expect(
+    chat(page).locator("header").getByRole("button", { name: "Conversation history" }),
+  ).toBeFocused();
+  await expect(historyButton).toHaveAttribute("aria-expanded", "false");
+  await expect(input).toHaveValue("Keep this unsent draft");
+});
+
 for (const width of [1280, 375]) {
   test(`chat layout and dialog keyboard focus work at ${width}px with an open conversation`, async ({
     page,
@@ -656,12 +716,11 @@ for (const width of [1280, 375]) {
     const input = chat(page).getByLabel("Message", { exact: true });
     await input.focus();
     await page.keyboard.type("Draft kept across layouts");
-    await page.screenshot({
-      path: testInfo.outputPath(`chat-sidebar-${width}.png`),
-      fullPage: true,
-    });
-    await chat(page).getByRole("button", { name: "Full screen chat", exact: true }).focus();
-    await page.keyboard.press("Enter");
+    if (width === 1280) {
+      await expect(page.locator(".workspace-content")).toBeVisible();
+      await chat(page).getByRole("button", { name: "Full screen chat", exact: true }).focus();
+      await page.keyboard.press("Enter");
+    }
     await expect(chat(page)).toHaveAttribute("data-chat-presentation", "fullscreen");
     await expect(page.locator(".workspace-content")).toBeHidden();
     await expect(page.locator(".workspace-sidebar")).toBeHidden();
@@ -719,13 +778,13 @@ for (const width of [1280, 375]) {
     await page.keyboard.press("Enter");
     await expect.poll(() => deleteStarted).toBe(true);
     await expect(dialog).toBeHidden();
-    await expect(
-      chat(page).getByRole("heading", { name: "Saved conversations", exact: true }),
-    ).toBeFocused();
+    await expect(chat(page).getByRole("heading", { level: 2 }).first()).toBeFocused();
     deleting.release();
     await expect(newButton).toBeFocused();
     await expect(input).toBeEmpty();
-    await chat(page).getByRole("button", { name: "Sidebar chat", exact: true }).focus();
+    await chat(page)
+      .getByRole("button", { name: width === 1280 ? "Sidebar chat" : "Close chat", exact: true })
+      .focus();
     await page.keyboard.press("Enter");
     await expect(page.locator(".workspace-content")).toBeVisible();
   });
@@ -764,17 +823,19 @@ async function setupResearchConsent(page: Page, stale = false) {
     }
     return true;
   };
-  return { request, decisions, decisionPath: `${path}/${request.id}` };
+  return { api, request, decisions, decisionPath: `${path}/${request.id}` };
 }
 
 for (const [width, decision] of [
   [1280, "approve"],
   [375, "deny"],
+  [375, "approve"],
 ] as const) {
   test(`research consent shows the exact query and sends an explicit ${decision} at ${width}px`, async ({
     page,
   }, testInfo) => {
-    await page.setViewportSize({ width, height: 900 });
+    await page.setViewportSize({ width, height: width === 375 ? 667 : 900 });
+    await page.emulateMedia({ colorScheme: "light" });
     const { request, decisions, decisionPath } = await setupResearchConsent(page);
     await openChat(page);
     const allow = chat(page).getByRole("button", { name: "Allow", exact: true });
@@ -793,7 +854,40 @@ for (const [width, decision] of [
       true,
     );
     expect(decisions).toEqual([]);
+    if (width === 1280) {
+      await expect(chat(page)).toHaveAttribute("data-chat-presentation", "sidebar");
+      await page.screenshot({ path: testInfo.outputPath("research-consent-panel.png") });
+      const input = chat(page).getByRole("textbox", { name: "Message", exact: true });
+      await input.fill("Keep this draft on resize");
+      await page.setViewportSize({ width: 375, height: 667 });
+      await expect(chat(page)).toHaveAttribute("data-chat-presentation", "fullscreen");
+      await expect(input).toHaveValue("Keep this draft on resize");
+      await expect(allow).toBeEnabled();
+      await page.setViewportSize({ width, height: 900 });
+      await chat(page).getByRole("button", { name: "Full screen chat", exact: true }).click();
+    }
+    await expect(chat(page)).toHaveAttribute("data-chat-presentation", "fullscreen");
+    if (width === 375 && decision === "approve") {
+      const input = chat(page).getByRole("textbox", { name: "Message", exact: true });
+      await input.fill("Unsent follow-up");
+      await chat(page).getByRole("button", { name: "Close chat", exact: true }).click();
+      const launcher = page.getByRole("button", { name: "Open chat", exact: true });
+      await expect(launcher).toBeFocused();
+      await launcher.click();
+      await expect(input).toHaveValue("Unsent follow-up");
+      expect(decisions).toEqual([]);
+    }
     await deny.scrollIntoViewIfNeeded();
+    await expect(allow).toBeInViewport();
+    await expect(deny).toBeInViewport();
+    const surface = () =>
+      chat(page).evaluate(
+        (el) => el.ownerDocument.defaultView!.getComputedStyle(el).backgroundColor,
+      );
+    const lightSurface = await surface();
+    await page.emulateMedia({ colorScheme: "dark" });
+    await expect.poll(surface).not.toBe(lightSurface);
+    await expect(query).toHaveText(request.proposedQuery);
     await page.screenshot({ path: testInfo.outputPath(`research-consent-${width}.png`) });
     if (decision === "approve") {
       await allow.focus();
@@ -822,6 +916,7 @@ for (const [width, decision] of [
 test("a stale research consent decision removes the old query without replaying approval", async ({
   page,
 }) => {
+  await page.setViewportSize({ width: 320, height: 568 });
   const { request, decisions, decisionPath } = await setupResearchConsent(page, true);
   await openChat(page);
   await chat(page).getByRole("button", { name: "Allow", exact: true }).click();
@@ -844,4 +939,138 @@ test("a research consent query with a mismatched hash cannot be approved", async
   await expect(chat(page).getByRole("region", { name: "Web search permission" })).toHaveCount(0);
   await expect(chat(page).getByRole("button", { name: "Allow", exact: true })).toHaveCount(0);
   expect(decisions).toEqual([]);
+});
+
+test("long mobile conversations follow new consent at the bottom and keep a reader's position", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 740, height: 320 });
+  const { api } = await setupResearchConsent(page);
+  api.history = Array.from({ length: 35 }, (_, i) =>
+    question(i + 1, `Question ${i + 1}: ${"Trip notes. ".repeat(20)}`),
+  );
+  const original = api.intercept!;
+  let showConsent = false;
+  api.intercept = async (route) => {
+    if (!showConsent && new URL(route.request().url()).pathname.endsWith("/research-requests")) {
+      await route.fulfill({ json: { requests: [] } });
+      return true;
+    }
+    return original(route);
+  };
+  await openChat(page);
+  const transcript = chat(page).getByRole("region", { name: "Message history" });
+  const distanceToEnd = () =>
+    transcript.evaluate((el) => el.scrollHeight - el.scrollTop - el.clientHeight);
+  const allow = chat(page).getByRole("button", { name: "Allow", exact: true });
+  await expect(transcript.getByText(api.history.at(-1)!.text, { exact: true })).toBeInViewport();
+  await expect.poll(distanceToEnd).toBeLessThanOrEqual(4);
+  await chat(page)
+    .getByRole("textbox", { name: "Message", exact: true })
+    .fill("A longer draft\n".repeat(14));
+  showConsent = true;
+  await expect(allow).toBeVisible();
+  await expect
+    .poll(() =>
+      allow.evaluate((el) => {
+        const box = el.getBoundingClientRect();
+        return el.contains(
+          el.ownerDocument.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2),
+        );
+      }),
+    )
+    .toBe(true);
+  // The transcript scrolls without moving the composer or reading position through a view switch.
+  const oldTop = await transcript.evaluate((el) => {
+    el.scrollTop = Math.floor(el.scrollHeight / 2);
+    return el.scrollTop;
+  });
+  await showHistory(page);
+  await showHistory(page);
+  await chat(page).getByRole("button", { name: "Close chat", exact: true }).click();
+  await page.getByRole("button", { name: "Open chat", exact: true }).click();
+  await expect.poll(() => transcript.evaluate((el) => el.scrollTop)).toBe(oldTop);
+  showConsent = false;
+  await expect(allow).toHaveCount(0);
+  showConsent = true;
+  await expect(allow).toBeVisible();
+  expect(await transcript.evaluate((el) => el.scrollTop)).toBe(oldTop);
+});
+
+test("composer aligns a single line with its actions and keeps multiline controls at the bottom", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 320, height: 650 });
+  const api = await setupChat(page);
+  await openChat(page);
+  const input = chat(page).getByRole("textbox", { name: "Message", exact: true });
+  const submit = chat(page).getByRole("button", { name: "Send message", exact: true });
+  const box = async (target: typeof submit) => {
+    const bounds = await target.boundingBox();
+    if (!bounds) throw new Error("The composer control must be visible.");
+    return bounds;
+  };
+  const send = await box(submit);
+  expect(Math.abs(send.width - send.height)).toBeLessThanOrEqual(1);
+  api.activeTurn = running(1);
+  await page.reload();
+  await page.getByRole("button", { name: "Open chat", exact: true }).click();
+  await showHistory(page);
+  await chat(page).getByRole("button", { name: label, exact: true }).click();
+  const queue = chat(page).getByRole("button", { name: "Queue message", exact: true });
+  const steer = chat(page).getByRole("button", { name: "Steer answer", exact: true });
+  const initial = await box(input);
+  for (const action of [queue, steer]) {
+    const bounds = await box(action);
+    expect(bounds.height).toBeGreaterThanOrEqual(44);
+    expect(
+      Math.abs(initial.y + initial.height / 2 - bounds.y - bounds.height / 2),
+    ).toBeLessThanOrEqual(1);
+  }
+  await input.fill("A thought");
+  expect((await box(input)).height).toBe(initial.height);
+  await input.fill("A longer thought\n".repeat(5));
+  const longer = await box(input);
+  const action = await box(queue);
+  expect(longer.height).toBeGreaterThan(initial.height);
+  expect(Math.abs(longer.y + longer.height - action.y - action.height)).toBeLessThanOrEqual(1);
+});
+
+test("empty and running conversations show only their applicable content", async ({ page }) => {
+  await page.setViewportSize({ width: 320, height: 568 });
+  const api = await setupChat(page);
+  await page.goto("/");
+  await page.getByRole("button", { name: "Open chat", exact: true }).click();
+  const transcript = chat(page).getByRole("region", { name: "Message history" });
+  const composer = chat(page).getByRole("textbox", { name: "Message", exact: true });
+  const stop = chat(page).getByRole("button", { name: "Stop answer", exact: true });
+  await expect(transcript.getByText("Select a saved conversation", { exact: false })).toHaveCount(
+    0,
+  );
+  await expect(composer).toBeEditable();
+  await showHistory(page);
+  await chat(page).getByRole("button", { name: label, exact: true }).click();
+  await expect(
+    chat(page).getByRole("button", { name: "Delete conversation", exact: true }),
+  ).toBeEnabled();
+  await expect(
+    transcript.getByText("No messages in this conversation", { exact: false }),
+  ).toHaveCount(0);
+  await composer.fill("First question");
+  await chat(page).getByRole("button", { name: "Send message", exact: true }).click();
+  await expect(transcript.getByText("First question", { exact: true })).toBeVisible();
+
+  api.history = [];
+  api.activeTurn = { ...running(1), text: "" };
+  await openChat(page);
+  await expect(stop).toBeEnabled();
+  await expect(transcript.getByText("Working…", { exact: true })).toBeVisible();
+  await expect(
+    transcript.getByText("No messages in this conversation", { exact: false }),
+  ).toHaveCount(0);
+  api.activeTurn = { ...api.activeTurn, text: "Friday morning is free.", checkpointVersion: 2 };
+  await expect(transcript.getByText("Friday morning is free.", { exact: true })).toBeVisible();
+  await expect(transcript.getByText("Working…", { exact: true })).toHaveCount(0);
+  await stop.click();
+  await expect(stop).toHaveCount(0);
 });

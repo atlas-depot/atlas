@@ -159,9 +159,7 @@ describe("conversation client and presentation helpers", () => {
   });
 
   it("formats conversation labels and distinguishes completed, no-support, and incomplete answers", () => {
-    expect(formatConversationLabel(sampleConversation)).toBe(
-      "Conversation 130c3220 (2026-11-10 12:00 UTC)",
-    );
+    expect(formatConversationLabel(sampleConversation)).toBe("2026-11-10 12:00 UTC");
 
     const completed = describeAssistantMessageState({
       id: messageId,
