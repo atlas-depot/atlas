@@ -171,7 +171,7 @@ export function createConversationStore(db: Database) {
           .limit(page.limit + 1);
         const selected = rows.slice(0, page.limit);
         return {
-          messages: await serializeConversationMessages(tx, selected),
+          messages: await serializeConversationMessages(tx, owner, selected),
           nextCursor: rows.length > page.limit ? String(selected.at(-1)!.sequence) : null,
         };
       });

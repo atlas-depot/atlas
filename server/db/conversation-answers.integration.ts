@@ -964,6 +964,112 @@ it("rebuilds against edited sources without silently reusing their historical fa
   });
 });
 
+it("regenerates a changed citation from its original inputs in a fresh session, preserving both answers", async () => {
+  const f = await fixture();
+  const notes = createNoteStore(database.db);
+  const original = await f.note("Schedule", "Tuesday");
+  const question = "When is the meeting?";
+  f.fake.observe(
+    f.result([original], [{ source: original.source, excerpt: "Tuesday" }], "We meet Tuesday."),
+  );
+  await f.first.send(f.owner, f.id, randomUUID(), { text: question });
+  const first = (await f.history()).at(-1)!;
+  if (first.role !== "assistant") throw new Error("Expected original answer");
+  const key = randomUUID();
+  expect(await f.first.regenerate(f.owner, f.id, first.turnId, key)).toMatchObject({
+    status: "conflict",
+  });
+  expect(
+    await notes.update(f.owner, original.noteId, original.revision, {
+      title: "Schedule",
+      content: "Wednesday",
+    }),
+  ).toMatchObject({ status: "saved" });
+
+  f.fake.observe({ status: "running", text: "" });
+  expect(await f.first.regenerate(randomUUID(), f.id, first.turnId, key)).toMatchObject({
+    status: "not_found",
+  });
+  const [a, b] = await Promise.all([
+    f.first.regenerate(f.owner, f.id, first.turnId, key),
+    f.second.regenerate(f.owner, f.id, first.turnId, key),
+  ]);
+  if (a.status !== "saved" || b.status !== "saved")
+    throw new Error("Expected regeneration and replay");
+  expect(a.value.id).toBe(b.value.id);
+  expect(a.value.id).not.toBe(first.turnId);
+  expect(await f.first.regenerate(f.owner, f.id, first.turnId, randomUUID())).toMatchObject({
+    status: "busy",
+  });
+  expect(await f.first.retry(f.owner, f.id, first.turnId, key)).toMatchObject({
+    status: "conflict",
+  });
+  const sent = f.fake.calls.submit.at(-1)!;
+  expect(sent.key).toBe(a.value.id);
+  expect(sent.message).toContain(question);
+  expect(sent.message).not.toContain("Tuesday");
+  const current = {
+    text: "Wednesday",
+    source: {
+      ...original.source,
+      version: noteTag(original.noteId, 2),
+      endOffset: "Wednesday".length,
+    },
+  };
+  f.fake.observe(
+    f.result([current], [{ source: current.source, excerpt: "Wednesday" }], "We meet Wednesday."),
+  );
+  await f.second.refresh(f.owner, f.id);
+  expect(await f.history()).toMatchObject([
+    { role: "user", text: question },
+    {
+      role: "assistant",
+      turnId: first.turnId,
+      inputIds: first.inputIds,
+      text: "We meet Tuesday.",
+      citations: [{ stale: true, excerpt: "Tuesday" }],
+    },
+    {
+      role: "assistant",
+      turnId: a.value.id,
+      inputIds: first.inputIds,
+      text: "We meet Wednesday.",
+      citations: [{ stale: false, excerpt: "Wednesday", source: current.source }],
+    },
+  ]);
+  expect(await f.first.regenerate(f.owner, f.id, first.turnId, key)).toMatchObject({
+    status: "saved",
+    value: { id: a.value.id },
+  });
+  expect(await notes.delete(f.owner, original.noteId, 2)).toEqual({ status: "deleted" });
+  expect(await f.first.regenerate(f.owner, f.id, first.turnId, randomUUID())).toMatchObject({
+    status: "conflict",
+  });
+  expect(new Set(f.fake.calls.allocate).size).toBe(2);
+});
+
+it("redacts the citation and refuses regeneration after the owner loses access to the source", async () => {
+  const f = await fixture();
+  const original = await f.note("Launch", "Friday");
+  f.fake.observe(f.result([original], [{ source: original.source, excerpt: "Friday" }]));
+  await f.first.send(f.owner, f.id, randomUUID(), { text: "When is the launch?" });
+  const answer = (await f.history()).at(-1)!;
+  if (answer.role !== "assistant") throw new Error("Expected a delivered answer");
+  await database.other
+    .update(noteRows)
+    .set({ ownerId: randomUUID(), revision: 2 })
+    .where(eq(noteRows.id, original.noteId));
+  expect((await f.history()).at(-1)).toMatchObject({
+    id: answer.id,
+    text: answer.text,
+    citations: [{ excerpt: null, deleted: true, stale: false }],
+  });
+  expect(await f.first.regenerate(f.owner, f.id, answer.turnId, randomUUID())).toMatchObject({
+    status: "conflict",
+  });
+  expect(f.fake.calls.allocate).toHaveLength(1);
+});
+
 it("stops a compaction session and retains its queued input until an explicit resume", async () => {
   const f = await fixture();
   f.fake.observe(f.result([], [], "old ".repeat(3_000)));

@@ -12,6 +12,9 @@ const date = "2026-11-05T12:00:00.000Z";
 /** GET /api/notes rows carry no content; per-note routes return the full note. */
 const listRow = ({ content: _content, ...row }: Note) => row;
 
+// Reproduce the hosted edge weakening ETags while compressing JSON responses.
+const compressedHeaders = (tag: string) => ({ ETag: `W/${tag}`, "Atlas-Revision": tag });
+
 /** Intercepted HTTP state machine; real API/storage coverage lives in notes-organize-api. */
 async function fixture(page: Page) {
   let source: Note = {
@@ -71,7 +74,10 @@ async function fixture(page: Page) {
       sourceRevision++;
       if (storedDraft) storedDraft.source.stale = true;
     }
-    return route.fulfill({ json: source, headers: { ETag: `"source-${sourceRevision}"` } });
+    return route.fulfill({
+      json: source,
+      headers: compressedHeaders(`"source-${sourceRevision}"`),
+    });
   });
   await page.route("**/api/organize-work", (route) =>
     route.fulfill({
@@ -109,7 +115,7 @@ async function fixture(page: Page) {
       loseHandoff = false;
       return route.abort("failed");
     }
-    return route.fulfill({ json: storedDraft, headers: { ETag: storedDraft.etag } });
+    return route.fulfill({ json: storedDraft, headers: compressedHeaders(storedDraft.etag) });
   });
   await page.route(`**/api/note-drafts/${draftId}`, (route) => {
     if (!storedDraft)
@@ -141,7 +147,7 @@ async function fixture(page: Page) {
         return route.abort("failed");
       }
     }
-    return route.fulfill({ json: storedDraft, headers: { ETag: storedDraft.etag } });
+    return route.fulfill({ json: storedDraft, headers: compressedHeaders(storedDraft.etag) });
   });
   await page.route(`**/api/note-drafts/${draftId}/save`, async (route) => {
     saves++;
@@ -187,7 +193,7 @@ async function fixture(page: Page) {
       loseFinalSave = false;
       return route.abort("failed");
     }
-    return route.fulfill({ status: 201, json: saved, headers: { ETag: '"saved-1"' } });
+    return route.fulfill({ status: 201, json: saved, headers: compressedHeaders('"saved-1"') });
   });
   return {
     starts,

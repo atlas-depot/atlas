@@ -46,6 +46,7 @@ export interface ConversationClient {
     input: { text: string; policy?: "queue" | "steer" },
     key: string,
   ): Promise<ConversationSend>;
+  regenerate(id: string, turnId: string, key: string): Promise<ConversationRead>;
   stop(id: string): Promise<ConversationRead>;
   resume(id: string): Promise<ConversationRead>;
 }
@@ -173,6 +174,16 @@ export function createConversationClient(
       return conversationSendSchema.parse(await response.json());
     },
 
+    async regenerate(id, turnId, key) {
+      const conversation = conversationIdSchema.parse(id);
+      const turn = conversationIdSchema.parse(turnId);
+      const response = await sendRequest(`/${conversation}/turns/${turn}/regenerate`, {
+        method: "POST",
+        headers: { "Idempotency-Key": conversationOperationKeySchema.parse(key) },
+      });
+      return conversationReadSchema.parse(await response.json());
+    },
+
     async stop(id) {
       const normalizedId = conversationIdSchema.parse(id);
       const response = await sendRequest(`/${normalizedId}/stop`, {
@@ -192,8 +203,10 @@ export function createConversationClient(
 }
 
 export function formatConversationLabel(conversation: Conversation): string {
-  const datePart = conversation.createdAt.slice(0, 16).replace("T", " ");
-  return `${datePart} UTC`;
+  // Include seconds so conversations created in the same minute have distinct names,
+  // delete confirmations and accessible labels.
+  const timestamp = conversation.createdAt.slice(0, 19).replace("T", " ");
+  return `${timestamp} UTC`;
 }
 
 export type AssistantAnswerPresentation = {

@@ -1,6 +1,6 @@
 import { wakeNoteIndex, type NoteSaved } from "./note-index-routes.ts";
 import { Hono } from "hono";
-import { apiError, ifMatchSchema } from "../shared/http.ts";
+import { apiError, ifMatchSchema, revisionHeaders } from "../shared/http.ts";
 import { noteContentSchema, noteIdSchema } from "../shared/notes.ts";
 import type { AuthEnv } from "./auth.ts";
 import { noteTag } from "./db/notes.ts";
@@ -34,7 +34,7 @@ export function createDraftRoutes(service?: OrganizeService, onSaved?: NoteSaved
       if (result.status === "not_found") return c.json(missing(), 404);
       if (result.status !== "ready")
         return c.json(apiError("CONFLICT", "This run has no draft to deliver."), 409);
-      return c.json(result.draft, 200, { ETag: result.draft.etag });
+      return c.json(result.draft, 200, revisionHeaders(result.draft.etag));
     } catch (error) {
       reportStorageFailure(c, error);
       return c.json(unavailable(), 503);
@@ -46,7 +46,7 @@ export function createDraftRoutes(service?: OrganizeService, onSaved?: NoteSaved
     if (!service?.drafts) return c.json(unavailable(), 503);
     try {
       const draft = await service.drafts.read(c.get("user").userId, id.data);
-      return draft ? c.json(draft, 200, { ETag: draft.etag }) : c.json(missing(), 404);
+      return draft ? c.json(draft, 200, revisionHeaders(draft.etag)) : c.json(missing(), 404);
     } catch (error) {
       reportStorageFailure(c, error);
       return c.json(unavailable(), 503);
@@ -84,12 +84,15 @@ export function createDraftRoutes(service?: OrganizeService, onSaved?: NoteSaved
               : c.json(stale(), 412);
           if (result.status === "stale") return c.json(stale(), 412);
           if (result.status === "deleted") return c.body(null, 204);
-          if ("draft" in result) return c.json(result.draft, 200, { ETag: result.draft.etag });
+          if ("draft" in result)
+            return c.json(result.draft, 200, revisionHeaders(result.draft.etag));
           if ("value" in result) {
             wakeNoteIndex(onSaved, result.value.note.id);
-            return c.json(result.value.note, 201, {
-              ETag: noteTag(result.value.note.id, result.value.revision),
-            });
+            return c.json(
+              result.value.note,
+              201,
+              revisionHeaders(noteTag(result.value.note.id, result.value.revision)),
+            );
           }
           return c.json(unavailable(), 503);
         } catch (error) {

@@ -30,6 +30,7 @@ export const conversationTimestamp = (value: string) => {
 /** Serializes only public columns. Replays reread citations so note deletion redactions take effect. */
 export async function serializeConversationMessages(
   reader: ConversationReader,
+  owner: string,
   rows: (typeof conversationMessages.$inferSelect)[],
 ): Promise<ConversationMessage[]> {
   if (rows.length === 0) return [];
@@ -47,7 +48,7 @@ export async function serializeConversationMessages(
     ? await reader
         .select({ id: notes.id, revision: notes.revision })
         .from(notes)
-        .where(inArray(notes.id, noteIds))
+        .where(and(eq(notes.ownerId, owner), inArray(notes.id, noteIds)))
     : [];
   const versions = new Map(currentNotes.map((note) => [note.id, noteTag(note.id, note.revision)]));
   const turns = turnIds.length
@@ -102,6 +103,7 @@ export async function serializeConversationMessages(
 /** Caller must establish ownership and hold the conversation lock for mutation/replay. */
 export async function readConversationMessage(
   reader: ConversationReader,
+  owner: string,
   conversationId: string,
   messageId: string,
 ) {
@@ -114,5 +116,5 @@ export async function readConversationMessage(
         eq(conversationMessages.id, messageId),
       ),
     );
-  return (await serializeConversationMessages(reader, rows))[0];
+  return (await serializeConversationMessages(reader, owner, rows))[0];
 }

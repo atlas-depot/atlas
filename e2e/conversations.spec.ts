@@ -5,6 +5,7 @@ import type {
   ConversationRead,
   ConversationSend,
 } from "../shared/conversations.ts";
+import type { Note } from "../shared/notes.ts";
 import { formatConversationLabel } from "../src/notes/conversation-store.ts";
 import { serveNotes } from "./notes-editor.ts";
 
@@ -42,7 +43,10 @@ function question(sequence: number, text = `Question ${sequence}`): Conversation
   };
 }
 
-function answer(sequence: number, text: string): ConversationMessage {
+function answer(
+  sequence: number,
+  text: string,
+): Extract<ConversationMessage, { role: "assistant" }> {
   return {
     id: `ca200001-1234-4000-8000-${String(sequence).padStart(12, "0")}`,
     sequence,
@@ -89,9 +93,13 @@ async function setupChat(page: Page) {
     activeTurn: ConversationRead["activeTurn"];
     pageSize: number;
     deleted: boolean;
+    queuePaused: boolean;
     sendKeys: string[];
+    sendPolicies: Array<"queue" | "steer">;
     createKeys: string[];
     historyCursors: Array<string | null>;
+    stopCalls: number;
+    resumeCalls: number;
     intercept?: (route: Route) => Promise<boolean>;
     afterSend?: (route: Route, sent: ConversationSend) => Promise<boolean>;
   } = {
@@ -99,9 +107,13 @@ async function setupChat(page: Page) {
     activeTurn: null,
     pageSize: 50,
     deleted: false,
+    queuePaused: false,
     sendKeys: [],
+    sendPolicies: [],
     createKeys: [],
     historyCursors: [],
+    stopCalls: 0,
+    resumeCalls: 0,
   };
   const receipts = new Map<string, ConversationSend>();
   await page.route(
@@ -112,14 +124,21 @@ async function setupChat(page: Page) {
       const url = new URL(request.url());
       const path = url.pathname;
       const method = request.method();
-      const read = () => ({ conversation, activeTurn: api.activeTurn, recovery: null });
+      const read = () => ({
+        conversation: { ...conversation, queuePaused: api.queuePaused },
+        activeTurn: api.activeTurn,
+        recovery: null,
+      });
       if (path === "/api/conversations") {
         if (method === "POST") {
           api.createKeys.push(request.headers()["idempotency-key"]);
           return route.fulfill({ status: 201, json: conversation });
         }
         return route.fulfill({
-          json: { conversations: api.deleted ? [] : [conversation], nextCursor: null },
+          json: {
+            conversations: api.deleted ? [] : [{ ...conversation, queuePaused: api.queuePaused }],
+            nextCursor: null,
+          },
         });
       }
       if (path === `/api/conversations/${conversation.id}`) {
@@ -136,10 +155,15 @@ async function setupChat(page: Page) {
           api.sendKeys.push(key);
           let sent = receipts.get(key);
           if (!sent) {
-            const message = question(
-              (api.history.at(-1)?.sequence ?? 0) + 1,
-              request.postDataJSON().text,
-            );
+            const payload = request.postDataJSON() as {
+              text: string;
+              policy?: "queue" | "steer";
+            };
+            api.sendPolicies.push(payload.policy ?? "queue");
+            const message = {
+              ...question((api.history.at(-1)?.sequence ?? 0) + 1, payload.text),
+              deliveryPolicy: payload.policy ?? "queue",
+            };
             api.history.push(message);
             sent = { ...read(), message };
             receipts.set(key, sent);
@@ -162,8 +186,15 @@ async function setupChat(page: Page) {
       if (method === "GET" && path === `/api/conversations/${conversation.id}/research-requests`) {
         return route.fulfill({ json: { requests: [] } });
       }
-      if (path.endsWith("/stop") || path.endsWith("/resume")) {
+      if (path.endsWith("/stop")) {
+        api.stopCalls += 1;
         api.activeTurn = null;
+        api.queuePaused = true;
+        return route.fulfill({ json: read() });
+      }
+      if (path.endsWith("/resume")) {
+        api.resumeCalls += 1;
+        api.queuePaused = false;
         return route.fulfill({ json: read() });
       }
       throw new Error(`Unexpected conversation request: ${method} ${path}`);
@@ -845,7 +876,7 @@ for (const [width, decision] of [
     await expect(deny).toBeEnabled();
     await expect(
       chat(page).getByText(
-        "Atlas sends this text to OpenRouter. Its model may rephrase it for web search.",
+        "Atlas sends this text to OpenRouter. Its model may rephrase it before searching with Exa.",
         { exact: true },
       ),
     ).toBeVisible();
@@ -1073,4 +1104,179 @@ test("empty and running conversations show only their applicable content", async
   await expect(transcript.getByText("Working…", { exact: true })).toHaveCount(0);
   await stop.click();
   await expect(stop).toHaveCount(0);
+});
+
+test("queue and steer send distinct policies and stop pauses accepted messages until resume", async ({
+  page,
+}) => {
+  const api = await setupChat(page);
+  api.history = [question(1, "Original question")];
+  api.activeTurn = running(2);
+  await openChat(page);
+  const input = chat(page).getByRole("textbox", { name: "Message", exact: true });
+  const transcript = chat(page).getByRole("list", { name: "Conversation messages" });
+
+  await input.fill("Queued follow-up");
+  await chat(page).getByRole("button", { name: "Queue message", exact: true }).click();
+  await expect(transcript.getByText("Queued follow-up", { exact: true })).toBeVisible();
+  await expect(transcript.getByText("Queued", { exact: true })).toBeVisible();
+
+  await input.fill("Redirect this answer");
+  await chat(page).getByRole("button", { name: "Steer answer", exact: true }).click();
+  await expect(transcript.getByText("Redirect this answer", { exact: true })).toBeVisible();
+  await expect(transcript.getByText("Steer", { exact: true })).toBeVisible();
+  expect(api.sendPolicies).toEqual(["queue", "steer"]);
+
+  await chat(page).getByRole("button", { name: "Stop answer", exact: true }).click();
+  await expect(chat(page).getByRole("button", { name: "Resume queue", exact: true })).toBeVisible();
+  await expect(chat(page).getByText("Queued follow-up", { exact: true })).toBeVisible();
+  expect(api.stopCalls).toBe(1);
+
+  await chat(page).getByRole("button", { name: "Resume queue", exact: true }).click();
+  await expect(chat(page).getByRole("button", { name: "Resume queue", exact: true })).toHaveCount(
+    0,
+  );
+  expect(api.resumeCalls).toBe(1);
+});
+
+test("system dark theme declares a dark color scheme for native controls", async ({ page }) => {
+  await page.emulateMedia({ colorScheme: "dark" });
+  await setupChat(page);
+  await page.goto("/");
+  await expect(page.locator("html")).toHaveClass(/dark/);
+  await expect
+    .poll(() => page.evaluate("getComputedStyle(document.documentElement).colorScheme"))
+    .toBe("dark");
+});
+
+test("a stale citation keeps its used revision and warns that the source changed", async ({
+  page,
+}) => {
+  const api = await setupChat(page);
+  const changedNote: Note = {
+    ...note,
+    title: "Changed runbook",
+    content: {
+      format: "blocknote" as const,
+      schemaVersion: 1 as const,
+      blocks: [
+        {
+          id: "changed-block",
+          type: "paragraph",
+          props: {
+            backgroundColor: "default",
+            textColor: "default",
+            textAlignment: "left",
+          },
+          content: [{ type: "text", text: "Current revision sentence.", styles: {} }],
+          children: [],
+        },
+      ],
+    },
+  };
+  await serveNotes(page, [[changedNote, '"v2"']]);
+  api.history = [
+    question(1),
+    {
+      ...answer(2, "The earlier revision said this."),
+      citations: [
+        {
+          source: {
+            kind: "block",
+            noteId: changedNote.id,
+            version: '"changed-note:1"',
+            blockId: "changed-block",
+            headingPath: ["Changed section"],
+          },
+          excerpt: "Earlier revision sentence.",
+          stale: true,
+          deleted: false,
+        },
+      ],
+    },
+  ];
+  await openChat(page);
+  const transcript = chat(page).getByRole("list", { name: "Conversation messages" });
+  await expect(transcript.getByText("The earlier revision said this.")).toBeVisible();
+  await expect(transcript.getByText("Source note changed", { exact: true })).toBeVisible();
+  await expect(transcript.getByText(/Revision 1/)).toBeVisible();
+  await expect(transcript.getByText("Earlier revision sentence.", { exact: true })).toBeVisible();
+});
+
+test("a changed citation offers one explicit regeneration and retains the original answer", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 375, height: 812 });
+  const api = await setupChat(page);
+  const original = answer(
+    2,
+    [
+      "Original answer",
+      "",
+      "| Stage | Cost |",
+      "| --- | --- |",
+      "| Pilot | 5 |",
+      "",
+      "```sql",
+      "select 5;",
+      "```",
+      "![Cover](https://media.example.test/cover.png)",
+    ].join("\n"),
+  );
+  const source = {
+    kind: "block" as const,
+    noteId: note.id,
+    version: '"1"',
+    blockId: "pilot",
+    headingPath: [],
+  };
+  const stale = { source, deleted: false, stale: true, excerpt: "Pilot costs 5" };
+  api.history = [
+    question(1),
+    { ...original, citations: [stale, { ...stale, source: { ...source, blockId: "cost" } }] },
+    { ...answer(3, "Deleted source"), citations: [{ ...stale, deleted: true, excerpt: null }] },
+    answer(4, "No changed source"),
+  ];
+  const endpoint = `/api/conversations/${conversation.id}/turns/${original.turnId}/regenerate`;
+  const keys: string[] = [];
+  api.intercept = async (route) => {
+    if (new URL(route.request().url()).pathname !== endpoint) return false;
+    expect(route.request().method()).toBe("POST");
+    expect(route.request().postData()).toBeNull();
+    keys.push(route.request().headers()["idempotency-key"]);
+    if (keys.length === 1) {
+      api.history.push(answer(5, "Using the current note"));
+      await route.abort("failed");
+    } else {
+      await route.fulfill({
+        status: 202,
+        json: { conversation, activeTurn: null, recovery: null },
+      });
+    }
+    return true;
+  };
+  const remoteImages: string[] = [];
+  await page.route("https://media.example.test/**", async (route) => {
+    remoteImages.push(route.request().url());
+    await route.abort();
+  });
+  await openChat(page);
+  const input = chat(page).getByLabel("Message", { exact: true });
+  await input.fill("Unsent draft");
+  const prompt = chat(page).getByRole("button", { name: "Regenerate using current note?" });
+  await expect(prompt).toHaveCount(1);
+  await expect(chat(page).getByRole("cell", { name: "Pilot" })).toBeVisible();
+  await expect(chat(page).locator("pre code")).toHaveText("select 5;\n");
+  expect(remoteImages).toEqual([]);
+  expect(keys).toEqual([]);
+  await prompt.press("Enter");
+  await expect(chat(page).getByRole("alert")).toContainText("Could not regenerate");
+  await prompt.press("Enter");
+  await expect(chat(page).getByText("Using the current note", { exact: true })).toHaveCount(1);
+  await expect(chat(page).getByText("Original answer", { exact: true })).toBeVisible();
+  await expect(input).toHaveValue("Unsent draft");
+  expect(keys).toHaveLength(2);
+  expect(keys[0]).toMatch(/^[a-f\d-]{36}$/i);
+  expect(keys[1]).toBe(keys[0]);
+  expect(api.sendKeys).toEqual([]);
 });

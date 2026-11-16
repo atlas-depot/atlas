@@ -119,30 +119,40 @@ export function createConversationRoutes(
         return c.json(unavailable(), 503);
       }
     });
-  routes.post("/:id/turns/:turnId/retry", async (c) => {
-    if (!store || !answers) return c.json(unavailable(), 503);
-    const id = conversationIdSchema.safeParse(c.req.param("id"));
-    const turnId = conversationIdSchema.safeParse(c.req.param("turnId"));
-    const key = conversationOperationKeySchema.safeParse(c.req.header("Idempotency-Key"));
-    if (!id.success || !turnId.success || !key.success || !(await hasEmptyBody(c.req.raw)))
-      return c.json(invalid(), 400);
-    const owner = c.get("user").userId;
-    try {
-      const result = await answers.retry(owner, id.data, turnId.data, key.data);
-      if (result.status === "not_found") return c.json(notFound(), 404);
-      if (result.status === "rate_limited") {
-        c.header("Retry-After", String(result.retryAfterSeconds));
-        return c.json(apiError("RATE_LIMITED", "Too many messages. Try again later."), 429);
+  for (const action of ["retry", "regenerate"] as const)
+    routes.post(`/:id/turns/:turnId/${action}`, async (c) => {
+      if (!store || !answers) return c.json(unavailable(), 503);
+      const id = conversationIdSchema.safeParse(c.req.param("id"));
+      const turnId = conversationIdSchema.safeParse(c.req.param("turnId"));
+      const key = conversationOperationKeySchema.safeParse(c.req.header("Idempotency-Key"));
+      if (!id.success || !turnId.success || !key.success || !(await hasEmptyBody(c.req.raw)))
+        return c.json(invalid(), 400);
+      const owner = c.get("user").userId;
+      try {
+        const result = await answers[action](owner, id.data, turnId.data, key.data);
+        if (result.status === "not_found") return c.json(notFound(), 404);
+        if (result.status === "rate_limited") {
+          c.header("Retry-After", String(result.retryAfterSeconds));
+          return c.json(apiError("RATE_LIMITED", "Too many messages. Try again later."), 429);
+        }
+        if (result.status !== "saved")
+          return c.json(
+            conflict(
+              action === "retry"
+                ? "This answer cannot be retried right now."
+                : "This answer cannot be regenerated right now.",
+            ),
+            409,
+          );
+        const current = await store.read(owner, id.data);
+        return current
+          ? c.json(conversationReadSchema.parse(current), 202)
+          : c.json(notFound(), 404);
+      } catch (error) {
+        reportStorageFailure(c, error);
+        return c.json(unavailable(), 503);
       }
-      if (result.status !== "saved")
-        return c.json(conflict("This answer cannot be retried right now."), 409);
-      const current = await store.read(owner, id.data);
-      return current ? c.json(conversationReadSchema.parse(current), 202) : c.json(notFound(), 404);
-    } catch (error) {
-      reportStorageFailure(c, error);
-      return c.json(unavailable(), 503);
-    }
-  });
+    });
   routes.post("/", async (c) => {
     if (!store) return c.json(unavailable(), 503);
     const key = conversationOperationKeySchema.safeParse(c.req.header("Idempotency-Key"));

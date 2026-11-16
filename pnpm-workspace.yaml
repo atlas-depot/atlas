@@ -11,3 +11,7 @@ overrides:
 peerDependencyRules:
   allowedVersions:
     vite: "*"
+
+# Vercel's Node tracer needs a trailing wildcard to follow eve/client's internal imports.
+patchedDependencies:
+  eve@0.91.0: patches/eve@0.91.0.patch

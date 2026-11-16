@@ -156,6 +156,10 @@
 .chat-thread-column > .chat-composer-form {
   margin: 0 var(--chat-gutter) max(1rem, env(safe-area-inset-bottom));
 }
+.chat-conversation-nav {
+  display: grid;
+  gap: 0.5rem;
+}
 .chat-conversation-list {
   display: grid;
   grid-template-columns: minmax(0, 1fr);

@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 /**
- * Copy the response ETag into If-Match for PUT/DELETE. Atlas requires one strong
+ * Copy the origin revision into If-Match for PUT/DELETE. Atlas requires one strong
  * tag (visible ASCII except inner quotes); weak tags, lists and * are rejected.
  * Missing: 428. Malformed/unsupported: 400. Stale: 412, leaving stored data intact.
  * Compare and write atomically after checking resource access.
@@ -10,6 +10,17 @@ export const ifMatchSchema = z
   .string()
   .max(512)
   .regex(/^"[\x21\x23-\x7e]+"$/);
+
+// Compression intermediaries can weaken the transport ETag. Carry the origin's
+// concurrency token separately so clients can still issue strong If-Match writes.
+const revisionHeader = "Atlas-Revision";
+export function revisionHeaders(tag: string) {
+  return { ETag: tag, [revisionHeader]: tag };
+}
+
+export function readRevision(headers: Headers) {
+  return ifMatchSchema.parse(headers.get(revisionHeader) ?? headers.get("ETag"));
+}
 
 /** Public errors never include provider details, credentials or submitted content. */
 export const apiErrorSchema = z.strictObject({

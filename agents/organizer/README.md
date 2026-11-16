@@ -89,7 +89,7 @@ input.
 Web citations use a distinct URL/title/retrieval-time source type and carry the provider-attributed
 snippet used for excerpt validation; note deletion redacts note excerpts only. A failed research
 call does not discard a note-supported answer, and the #71 successful `search_notes` requirement
-still applies. The chat workspace shows the exact query and explains that OpenRouter may rephrase it for web search.
+still applies. The chat workspace shows the exact query and explains that OpenRouter may rephrase it before searching with Exa. Chat uses Exa through OpenRouter to obtain source excerpts. Organize uses the default OpenRouter search engine.
 
 `answer-client.ts` sends inputs with an idempotency key and the reply schema,
 uses `turnPolicy: "steer"` only for an explicit steer, and reads results from bounded
