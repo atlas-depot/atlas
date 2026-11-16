@@ -1202,3 +1202,81 @@ test("a stale citation keeps its used revision and warns that the source changed
   await expect(transcript.getByText(/Revision 1/)).toBeVisible();
   await expect(transcript.getByText("Earlier revision sentence.", { exact: true })).toBeVisible();
 });
+
+test("a changed citation offers one explicit regeneration and retains the original answer", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 375, height: 812 });
+  const api = await setupChat(page);
+  const original = answer(
+    2,
+    [
+      "Original answer",
+      "",
+      "| Stage | Cost |",
+      "| --- | --- |",
+      "| Pilot | 5 |",
+      "",
+      "```sql",
+      "select 5;",
+      "```",
+      "![Cover](https://media.example.test/cover.png)",
+    ].join("\n"),
+  );
+  const source = {
+    kind: "block" as const,
+    noteId: note.id,
+    version: '"1"',
+    blockId: "pilot",
+    headingPath: [],
+  };
+  const stale = { source, deleted: false, stale: true, excerpt: "Pilot costs 5" };
+  api.history = [
+    question(1),
+    { ...original, citations: [stale, { ...stale, source: { ...source, blockId: "cost" } }] },
+    { ...answer(3, "Deleted source"), citations: [{ ...stale, deleted: true, excerpt: null }] },
+    answer(4, "No changed source"),
+  ];
+  const endpoint = `/api/conversations/${conversation.id}/turns/${original.turnId}/regenerate`;
+  const keys: string[] = [];
+  api.intercept = async (route) => {
+    if (new URL(route.request().url()).pathname !== endpoint) return false;
+    expect(route.request().method()).toBe("POST");
+    expect(route.request().postData()).toBeNull();
+    keys.push(route.request().headers()["idempotency-key"]);
+    if (keys.length === 1) {
+      api.history.push(answer(5, "Using the current note"));
+      await route.abort("failed");
+    } else {
+      await route.fulfill({
+        status: 202,
+        json: { conversation, activeTurn: null, recovery: null },
+      });
+    }
+    return true;
+  };
+  const remoteImages: string[] = [];
+  await page.route("https://media.example.test/**", async (route) => {
+    remoteImages.push(route.request().url());
+    await route.abort();
+  });
+  await openChat(page);
+  const input = chat(page).getByLabel("Message", { exact: true });
+  await input.fill("Unsent draft");
+  const prompt = chat(page).getByRole("button", { name: "Regenerate using current note?" });
+  await expect(prompt).toHaveCount(1);
+  await expect(chat(page).getByRole("cell", { name: "Pilot" })).toBeVisible();
+  await expect(chat(page).locator("pre code")).toHaveText("select 5;\n");
+  expect(remoteImages).toEqual([]);
+  expect(keys).toEqual([]);
+  await prompt.press("Enter");
+  await expect(chat(page).getByRole("alert")).toContainText("Could not regenerate");
+  await prompt.press("Enter");
+  await expect(chat(page).getByText("Using the current note", { exact: true })).toHaveCount(1);
+  await expect(chat(page).getByText("Original answer", { exact: true })).toBeVisible();
+  await expect(input).toHaveValue("Unsent draft");
+  expect(keys).toHaveLength(2);
+  expect(keys[0]).toMatch(/^[a-f\d-]{36}$/i);
+  expect(keys[1]).toBe(keys[0]);
+  expect(api.sendKeys).toEqual([]);
+});

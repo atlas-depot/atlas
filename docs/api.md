@@ -77,6 +77,7 @@ are removed in bounded batches as subsequent requests arrive.
 | `POST /api/conversations/:id/stop`, empty body | `200 { conversation, activeTurn, recovery }` with the queue paused |
 | `POST /api/conversations/:id/resume`, empty body | `200 { conversation, activeTurn, recovery }` |
 | `POST /api/conversations/:id/turns/:turnId/retry`, empty body plus UUID `Idempotency-Key` | `202 { conversation, activeTurn, recovery }` |
+| `POST /api/conversations/:id/turns/:turnId/regenerate`, empty body plus UUID `Idempotency-Key` | `202 { conversation, activeTurn, recovery }` |
 
 Pages default to 50 and allow at most 100 records. Use the returned cursor unchanged.
 Creation accepts no owner, ID or title. Identical owner/key replay returns the current
@@ -152,6 +153,11 @@ context could not be used: `history_unavailable`, `context_budget`, `summary_fai
 are saved and wait for `resume`, and `retry` returns `409` until then. A retry counts against
 the send limit and can return `429` with `Retry-After`. A read never blindly retries that
 question or unpauses the queue. Explicit retry uses the original accepted input identities and a new operation key.
+Regeneration is available on a completed turn when a cited note still belongs to the user and its revision changed.
+It uses the original input IDs and steers in a fresh attempt with current source checks. Both answers remain in history.
+It shares retry's queue, capacity and rate limits. Replaying the same regeneration key returns the current conversation
+without creating a second attempt. An ineligible turn or key reused for a different operation returns `409`.
+
 An unavailable transport is not proof of expiry and does not authorize a replacement runtime.
 
 Follow-ups use authorized recent messages and a bounded summary, not the full UI history or

@@ -168,6 +168,10 @@ export function AuthenticatedNotes({ store }: { store: NotesStore }) {
         verified();
         return conversationClient.send(...args);
       },
+      regenerate: async (...args) => {
+        verified();
+        return conversationClient.regenerate(...args);
+      },
       stop: async (...args) => {
         verified();
         return conversationClient.stop(...args);

@@ -47,6 +47,7 @@ import {
   formatConversationLabel,
   type ConversationClient,
 } from "./conversation-store";
+import { MarkdownPreview } from "./MarkdownPreview";
 import { ResearchRequests } from "./ResearchRequests";
 import { classifyFailure } from "./editor-state";
 import {
@@ -282,6 +283,7 @@ export function ChatWorkspace({
     key: string;
   } | null>(null);
   const pendingCreateKeyRef = useRef<string | null>(null);
+  const regenerationKeys = useRef(new Map<string, string>());
 
   const composerRef = useRef<HTMLTextAreaElement>(null);
   useNoteTextDrop(composerRef);
@@ -325,6 +327,7 @@ export function ChatWorkspace({
       invalidateActive();
       clearHistory();
       setConversations([]);
+      regenerationKeys.current.clear();
       setCachedNoteTitles({});
       setListNextCursor(null);
       listInitializedRef.current = false;
@@ -897,7 +900,7 @@ export function ChatWorkspace({
     void submitMessage("queue");
   }
 
-  async function handleStopOrResume(action: "stop" | "resume") {
+  async function actOnTurn(action: "stop" | "resume" | { regenerate: string }) {
     if (!enabledRef.current || !activeConversationId || acting || deletingId !== null) return;
     const targetId = activeConversationId;
     const watchId = openRequestIdRef.current;
@@ -906,8 +909,16 @@ export function ChatWorkspace({
     setActionFailure(null);
 
     try {
-      const updated =
-        action === "stop" ? await client.stop(targetId) : await client.resume(targetId);
+      let updated: ConversationRead;
+      if (typeof action === "object") {
+        const turn = action.regenerate;
+        const key = regenerationKeys.current.get(turn) ?? crypto.randomUUID();
+        regenerationKeys.current.set(turn, key);
+        updated = await client.regenerate(targetId, turn, key);
+        regenerationKeys.current.delete(turn);
+      } else {
+        updated = await client[action](targetId);
+      }
       if (!isCurrentOpenRequest(watchId, targetId)) {
         return;
       }
@@ -924,9 +935,11 @@ export function ChatWorkspace({
         return;
       }
       setActionFailure(
-        action === "stop"
-          ? "Could not stop the active answer. Try again."
-          : "Could not resume the paused queue. Try again.",
+        typeof action === "object"
+          ? "Could not regenerate this answer. Check the current source and try again."
+          : action === "stop"
+            ? "Could not stop the active answer. Try again."
+            : "Could not resume the paused queue. Try again.",
       );
     } finally {
       if (watchId === openRequestIdRef.current) {
@@ -1384,7 +1397,7 @@ export function ChatWorkspace({
                         type="button"
                         variant="outline"
                         disabled={controlsBusy}
-                        onClick={() => void handleStopOrResume("resume")}
+                        onClick={() => void actOnTurn("resume")}
                       >
                         Resume queue
                       </Button>
@@ -1460,7 +1473,7 @@ export function ChatWorkspace({
                             ) : null}
 
                             {message.text.trim().length > 0 ? (
-                              <p className="chat-message-text">{message.text}</p>
+                              <MarkdownPreview content={message.text} />
                             ) : presentationState.emptyFallback ? (
                               <p className="chat-message-empty">
                                 {presentationState.emptyFallback}
@@ -1474,6 +1487,26 @@ export function ChatWorkspace({
                                 )}
                               </ul>
                             ) : null}
+                            {message.status === "completed" &&
+                              message.citations.some(
+                                (citation) =>
+                                  citation.source.kind !== "web" &&
+                                  citation.stale &&
+                                  !citation.deleted,
+                              ) && (
+                                <Button
+                                  type="button"
+                                  variant="link"
+                                  disabled={
+                                    controlsBusy ||
+                                    !!activeRead.activeTurn ||
+                                    activeRead.conversation.queuePaused
+                                  }
+                                  onClick={() => void actOnTurn({ regenerate: message.turnId })}
+                                >
+                                  Regenerate using current note?
+                                </Button>
+                              )}
                           </li>
                         );
                       })}
@@ -1503,7 +1536,7 @@ export function ChatWorkspace({
                         className="chat-stop"
                         aria-label="Stop answer"
                         disabled={controlsBusy}
-                        onClick={() => void handleStopOrResume("stop")}
+                        onClick={() => void actOnTurn("stop")}
                       >
                         Stop
                       </Button>

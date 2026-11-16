@@ -46,6 +46,7 @@ export interface ConversationClient {
     input: { text: string; policy?: "queue" | "steer" },
     key: string,
   ): Promise<ConversationSend>;
+  regenerate(id: string, turnId: string, key: string): Promise<ConversationRead>;
   stop(id: string): Promise<ConversationRead>;
   resume(id: string): Promise<ConversationRead>;
 }
@@ -171,6 +172,16 @@ export function createConversationClient(
         body: JSON.stringify(payload),
       });
       return conversationSendSchema.parse(await response.json());
+    },
+
+    async regenerate(id, turnId, key) {
+      const conversation = conversationIdSchema.parse(id);
+      const turn = conversationIdSchema.parse(turnId);
+      const response = await sendRequest(`/${conversation}/turns/${turn}/regenerate`, {
+        method: "POST",
+        headers: { "Idempotency-Key": conversationOperationKeySchema.parse(key) },
+      });
+      return conversationReadSchema.parse(await response.json());
     },
 
     async stop(id) {
