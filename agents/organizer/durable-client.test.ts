@@ -76,17 +76,22 @@ function fixture({
   events = [consumed, ...finished],
   snapshotError,
   endError,
+  initialActiveReads = 0,
+  requestTimeoutMs,
   fetchImpl = async () => Response.json({ ok: true, ...reference }, { status: 202 }),
 }: {
   events?: SessionStreamEvent[];
   snapshotError?: Error;
   endError?: Error;
+  initialActiveReads?: number;
+  requestTimeoutMs?: number;
   fetchImpl?: typeof fetch;
 } = {}) {
   const calls = { ends: 0, reads: 0 };
   const adapter = createDurableEveOrganizer({
     baseUrl: "https://organizer.example.com",
     serviceToken,
+    requestTimeoutMs,
     fetchImpl,
     client: {
       sessions: {
@@ -96,6 +101,8 @@ function fixture({
             async snapshot() {
               calls.reads++;
               if (snapshotError) throw snapshotError;
+              if (calls.reads <= initialActiveReads)
+                return { events: [], session: { sessionId, streamIndex: 0 } };
               return { events, session: { sessionId, streamIndex: events.length } };
             },
             async end() {
@@ -343,6 +350,19 @@ await test("retirement verifies the end independently after losing its response"
   const ended = event({ type: "session.ended", data: { outcome: "completed" } });
   const { adapter } = fixture({ events: [ended], endError: new Error("lost response") });
   assert.deepEqual(await adapter.retire(reference), { status: "ended" });
+});
+
+await test("accepted retirement waits for the durable end without sending another command", async () => {
+  const ended = event({ type: "session.ended", data: { outcome: "completed" } });
+  const { adapter, calls } = fixture({ events: [ended], initialActiveReads: 1 });
+  assert.deepEqual(await adapter.retire(reference), { status: "ended" });
+  assert.deepEqual(calls, { ends: 1, reads: 2 });
+});
+
+await test("an accepted end cannot confirm retirement when its verification deadline expires", async () => {
+  const { adapter, calls } = fixture({ events: [], requestTimeoutMs: 10 });
+  await assert.rejects(adapter.retire(reference), /unconfirmed/);
+  assert.deepEqual(calls, { ends: 1, reads: 1 });
 });
 
 await test("an empty history or failed cleanup is not proof of retirement", async () => {
