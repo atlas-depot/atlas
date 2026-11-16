@@ -1,4 +1,4 @@
-import { apiErrorSchema, ifMatchSchema } from "../../shared/http";
+import { apiErrorSchema, ifMatchSchema, readRevision } from "../../shared/http";
 import {
   createNoteSchema,
   createNoteKeySchema,
@@ -68,7 +68,7 @@ export function createNotesClient(
   }
   async function snapshot(result: Response, expectedId?: string): Promise<NoteSnapshot> {
     const note = noteSchema.parse(await result.json());
-    const etag = ifMatchSchema.parse(result.headers.get("ETag"));
+    const etag = readRevision(result.headers);
     if (expectedId !== undefined && note.id !== expectedId)
       throw new Error("Unexpected note identity.");
     return { note, etag };

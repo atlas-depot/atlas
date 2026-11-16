@@ -1,7 +1,7 @@
 import { wakeNoteIndex, type NoteSaved } from "./note-index-routes.ts";
 import { readJson, readBody } from "./request-body.ts";
 import { Hono } from "hono";
-import { apiError, ifMatchSchema } from "../shared/http.ts";
+import { apiError, ifMatchSchema, revisionHeaders } from "../shared/http.ts";
 import {
   createNoteKeySchema,
   createNoteSchema,
@@ -73,7 +73,7 @@ export function createNoteRoutes(store?: NoteService, onSaved?: NoteSaved) {
         );
       }
       wakeNoteIndex(onSaved, result.value.note.id);
-      return c.json(result.value.note, 201, { ETag: etag(result.value) });
+      return c.json(result.value.note, 201, revisionHeaders(etag(result.value)));
     } catch (error) {
       reportStorageFailure(c, error);
       return c.json(unavailable(), 503);
@@ -87,7 +87,7 @@ export function createNoteRoutes(store?: NoteService, onSaved?: NoteSaved) {
     try {
       const value = await store.read(c.get("user").userId, id.data);
       if (!value) return c.json(notFound(), 404);
-      return c.json(value.note, 200, { ETag: etag(value) });
+      return c.json(value.note, 200, revisionHeaders(etag(value)));
     } catch (error) {
       reportStorageFailure(c, error);
       return c.json(unavailable(), 503);
@@ -123,7 +123,7 @@ export function createNoteRoutes(store?: NoteService, onSaved?: NoteSaved) {
       if (result.status === "conflict") return c.json(stale(), 412);
       if (result.status === "saved") {
         wakeNoteIndex(onSaved, result.value.note.id);
-        return c.json(result.value.note, 200, { ETag: etag(result.value) });
+        return c.json(result.value.note, 200, revisionHeaders(etag(result.value)));
       }
       return c.body(null, 204);
     } catch (error) {

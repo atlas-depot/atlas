@@ -17,7 +17,7 @@ The Hono API serves JSON under `/api`. The Zod schemas in `shared/` are the sour
 - Cookie-authenticated unsafe requests need an exact `Origin` match with `APP_ORIGIN`. A missing or mismatched origin returns `403`. Bearer requests are exempt.
 - Errors use `{ error: { code, message } }`. Messages never include provider details, credentials or submitted content.
 - IDs are UUIDs. An invalid ID or JSON body returns `400`. Absent and inaccessible resources return the same `404`. Storage and organizer failures return a sanitized `503`.
-- ETags are strong and opaque. Copy the exact response `ETag` into `If-Match`. A missing `If-Match` is `428`, a malformed one is `400` and a stale one is `412`. Weak tags, lists and `*` are rejected.
+- Versioned note and draft responses carry an opaque strong origin tag in `Atlas-Revision` and `ETag`. Compression can weaken the transport `ETag`. Copy `Atlas-Revision` into `If-Match`; older servers provide a strong `ETag` instead. A missing `If-Match` is `428`, a malformed one is `400` and a stale one is `412`. Weak tags, lists and `*` are rejected.
 - Every response carries Hono's default `secureHeaders` security headers and `Cache-Control: no-store`.
 - JSON bodies are limited to 1 MiB and five seconds of upload time. Organize run requests and `DELETE` requests take no body and reject a non-empty one with `400`.
 

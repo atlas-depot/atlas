@@ -1,5 +1,5 @@
 import { expect, it } from "vite-plus/test";
-import { ifMatchSchema } from "./http.ts";
+import { ifMatchSchema, readRevision } from "./http.ts";
 
 it("accepts a single opaque strong tag", () => {
   expect(ifMatchSchema.parse('"note-version-3"')).toBe('"note-version-3"');
@@ -16,3 +16,8 @@ it.each([undefined, "*", 'W/"v3"', "v3", '"v3", "v4"', '"v3\r\nx: y"'])(
     expect(ifMatchSchema.safeParse(value).success).toBe(false);
   },
 );
+
+it("rejects a malformed origin revision even when the transport ETag is strong", () => {
+  const headers = new Headers({ "Atlas-Revision": 'W/"bad"', ETag: '"v3"' });
+  expect(() => readRevision(headers)).toThrow();
+});

@@ -1,4 +1,4 @@
-import { apiErrorSchema, ifMatchSchema } from "../../shared/http";
+import { apiErrorSchema, ifMatchSchema, readRevision } from "../../shared/http";
 import { noteDraftSchema, organizeWorkSchema, type NoteDraft } from "../../shared/drafts";
 import { organizeRunResponseSchema, organizeStartResponseSchema } from "../../shared/organize";
 import { noteContentSchema, noteIdSchema, noteSchema, type UpdateNote } from "../../shared/notes";
@@ -25,8 +25,7 @@ export function createOrganizeClient(request: typeof fetch = globalThis.fetch) {
   }
   async function draft(result: Response): Promise<NoteDraft> {
     const value = noteDraftSchema.parse(await result.json());
-    if (ifMatchSchema.parse(result.headers.get("ETag")) !== value.etag)
-      throw new Error("Unexpected draft revision.");
+    if (readRevision(result.headers) !== value.etag) throw new Error("Unexpected draft revision.");
     return value;
   }
   const id = (value: string) => noteIdSchema.parse(value);
@@ -81,7 +80,7 @@ export function createOrganizeClient(request: typeof fetch = globalThis.fetch) {
       });
       return {
         note: noteSchema.parse(await result.json()),
-        etag: ifMatchSchema.parse(result.headers.get("ETag")),
+        etag: readRevision(result.headers),
       };
     },
   };

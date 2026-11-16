@@ -102,6 +102,7 @@ describe("notes HTTP contract with a stubbed persistence boundary", () => {
     const response = await app(store).request(`/notes/${id}`);
     expect(response.status).toBe(200);
     expect(response.headers.get("ETag")).toBe(tag);
+    expect(response.headers.get("Atlas-Revision")).toBe(tag);
     expect(await response.json()).toEqual(note);
     expect(store.read).toHaveBeenCalledExactlyOnceWith(owner, id);
   });
