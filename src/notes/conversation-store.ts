@@ -192,8 +192,10 @@ export function createConversationClient(
 }
 
 export function formatConversationLabel(conversation: Conversation): string {
-  const datePart = conversation.createdAt.slice(0, 16).replace("T", " ");
-  return `${datePart} UTC`;
+  // Include seconds so conversations created in the same minute have distinct names,
+  // delete confirmations and accessible labels.
+  const timestamp = conversation.createdAt.slice(0, 19).replace("T", " ");
+  return `${timestamp} UTC`;
 }
 
 export type AssistantAnswerPresentation = {
