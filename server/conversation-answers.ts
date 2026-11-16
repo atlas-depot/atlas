@@ -351,6 +351,24 @@ export function createConversationAnswers({
     return pending;
   }
 
+  /** Repeat the original inputs and steers in a fresh session while preserving both messages. */
+  async function repeat(
+    owner: string,
+    conversationId: string,
+    operationId: string,
+    target: { retryOfId: string } | { regenerateOfId: string },
+  ) {
+    const turnId = "retryOfId" in target ? target.retryOfId : target.regenerateOfId;
+    const inputIds = await turns.attemptInputs(owner, conversationId, turnId);
+    if (!inputIds?.length) return { status: "not_found" as const };
+    const started = await turns.startAttempt(owner, conversationId, operationId, {
+      inputIds,
+      ...target,
+    });
+    if (started.status === "saved") await advanceQuietly(owner, conversationId);
+    return started;
+  }
+
   return {
     /** Accepts one input and starts or steers work. A replay never spends admission twice. */
     async send(
@@ -397,17 +415,10 @@ export function createConversationAnswers({
       return resumed;
     },
 
-    /** A new attempt over the same inputs. The incomplete answer stays in history. */
-    async retry(owner: string, conversationId: string, turnId: string, operationId: string) {
-      const inputIds = await turns.attemptInputs(owner, conversationId, turnId);
-      if (!inputIds?.length) return { status: "not_found" as const };
-      const started = await turns.startAttempt(owner, conversationId, operationId, {
-        inputIds,
-        retryOfId: turnId,
-      });
-      if (started.status === "saved") await advanceQuietly(owner, conversationId);
-      return started;
-    },
+    retry: (owner: string, conversationId: string, turnId: string, operationId: string) =>
+      repeat(owner, conversationId, operationId, { retryOfId: turnId }),
+    regenerate: (owner: string, conversationId: string, turnId: string, operationId: string) =>
+      repeat(owner, conversationId, operationId, { regenerateOfId: turnId }),
 
     /** Maintenance: continue attempts no reader is watching, then retire finished sessions. */
     async sweep(limit: number) {

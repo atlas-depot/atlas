@@ -127,7 +127,7 @@ export async function publishConversationAnswer(
   // Only running attempts need a replayable prompt snapshot. Lineage stays on the turn,
   // and the replaceable summary checkpoint is independent of this transient content.
   await tx.delete(conversationContexts).where(eq(conversationContexts.turnId, turn.id));
-  return (await readConversationMessage(tx, parent.id, message!.id))!;
+  return (await readConversationMessage(tx, parent.ownerId, parent.id, message!.id))!;
 }
 
 export function finalizeConversationTurn(db: ReturnType<typeof openDatabase>["db"]) {
@@ -180,7 +180,7 @@ export function finalizeConversationTurn(db: ReturnType<typeof openDatabase>["db
         return message?.payloadHash === conversationPayloadHash(input)
           ? {
               status: "saved" as const,
-              value: (await readConversationMessage(tx, parent.id, message.id))!,
+              value: (await readConversationMessage(tx, parent.ownerId, parent.id, message.id))!,
             }
           : { status: "conflict" as const };
       }

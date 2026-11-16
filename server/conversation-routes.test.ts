@@ -145,6 +145,9 @@ describe("conversation answer HTTP boundary", () => {
         .mockResolvedValue({ status: "approved" }),
       stop: vi.fn<ConversationAnswerService["stop"]>().mockResolvedValue({ status: "not_found" }),
       resume: vi.fn<ConversationAnswerService["resume"]>().mockResolvedValue({ status: "resumed" }),
+      regenerate: vi
+        .fn<ConversationAnswerService["regenerate"]>()
+        .mockResolvedValue({ status: "conflict" }),
       retry: vi.fn<ConversationAnswerService["retry"]>().mockResolvedValue({ status: "paused" }),
       sweep: vi.fn<ConversationAnswerService["sweep"]>(),
     };
@@ -172,6 +175,7 @@ describe("conversation answer HTTP boundary", () => {
       "research-requests",
       `research-requests/${id}/approve`,
       `turns/${id}/retry`,
+      `turns/${id}/regenerate`,
     ])
       expect(
         (await denied.app.request(`/api/conversations/${id}/${path}`, send({ text: "x" }))).status,
@@ -253,15 +257,21 @@ describe("conversation answer HTTP boundary", () => {
       ]);
       expect(answers[action]).toHaveBeenCalledExactlyOnceWith("verified-owner", id);
     }
-    answers.retry.mockResolvedValueOnce({ status: "saved", value: {} as never });
     const turnId = "6f1c2a8e-3b4d-4c5e-8f90-1a2b3c4d5e6f";
-    const retried = await post(`turns/${turnId}/retry`, { "Idempotency-Key": key });
-    expect([retried.status, await retried.json()]).toEqual([
-      202,
-      { conversation, activeTurn: null, recovery: null },
-    ]);
-    expect(answers.retry).toHaveBeenCalledExactlyOnceWith("verified-owner", id, turnId, key);
-    expect((await post(`turns/${turnId}/retry`)).status).toBe(400);
+    for (const action of ["retry", "regenerate"] as const) {
+      const path = `turns/${turnId}/${action}`;
+      answers[action].mockResolvedValueOnce({ status: "saved", value: {} as never });
+      const response = await post(path, { "Idempotency-Key": key });
+      expect([response.status, await response.json()]).toEqual([
+        202,
+        { conversation, activeTurn: null, recovery: null },
+      ]);
+      expect(answers[action]).toHaveBeenCalledExactlyOnceWith("verified-owner", id, turnId, key);
+      expect((await post(path)).status).toBe(400);
+      expect(
+        (await app.request(`/api/conversations/${id}/${path}`, send({ inputIds: [id] }))).status,
+      ).toBe(400);
+    }
   });
 
   it("continues existing work on a read instead of starting more", async () => {
