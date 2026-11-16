@@ -125,7 +125,8 @@ export function ResearchRequests({
           </h3>
           <ExactQuery text={request.proposedQuery} />
           <p className="chat-permission-disclosure">
-            Atlas sends this text to OpenRouter. Its model may rephrase it for web search.
+            Atlas sends this text to OpenRouter. Its model may rephrase it before searching with
+            Exa.
           </p>
           <div className="chat-permission-actions">
             {request.status === "pending" ? (

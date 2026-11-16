@@ -876,7 +876,7 @@ for (const [width, decision] of [
     await expect(deny).toBeEnabled();
     await expect(
       chat(page).getByText(
-        "Atlas sends this text to OpenRouter. Its model may rephrase it for web search.",
+        "Atlas sends this text to OpenRouter. Its model may rephrase it before searching with Exa.",
         { exact: true },
       ),
     ).toBeVisible();

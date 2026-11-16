@@ -11,7 +11,11 @@ type ResearchGate = Pick<
   ReturnType<typeof createConversationResearchStore>,
   "prepare" | "claimGeneralized" | "waitForDecision" | "claimApproved" | "finish" | "recordResult"
 >;
-type Research = (question: string, signal: AbortSignal) => Promise<ResearchResult>;
+type Research = (
+  question: string,
+  signal: AbortSignal,
+  evidence: "excerpts",
+) => Promise<ResearchResult>;
 
 function notPerformed(reason: "denied" | "expired" | "cancelled" | "stale"): ResearchToolResult {
   return { status: "not_performed", reason };
@@ -88,7 +92,7 @@ export function createChatResearch({
     }
 
     try {
-      const result = await research(question, signal);
+      const result = await research(question, signal, "excerpts");
       if (signal.aborted) throw new DOMException("Research cancelled.", "AbortError");
       const retrievedAt = now().toISOString();
       const mappedSources = result.sources

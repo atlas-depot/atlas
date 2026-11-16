@@ -145,7 +145,7 @@ aborts an in-flight provider call. Denial remains available after approval until
 and the listing keeps approved requests visible for that reason. Every research attempt, including
 denied, expired and autonomous ones, counts toward the per-turn limit. The helper receives only the zero-overlap query or the exact
 approved query, never the full note or transcript. Pending query text is cleared on denial, expiry,
-cancellation, staleness or when a provider call starts. The conversation shows the exact text and explains that OpenRouter may rephrase it for web search. An ordinary edit to a source note preserves approval. Removing a source or losing access prevents a claim. A failed research call leaves a visible notice on an otherwise supported answer, and web citations require recorded provider evidence. Without an answer runtime, the approval routes return `503`.
+cancellation, staleness or when a provider call starts. The conversation shows the exact text and explains that OpenRouter may rephrase it before searching with Exa. Chat uses Exa through OpenRouter to obtain source excerpts. Organize uses the default OpenRouter search engine. An ordinary edit to a source note preserves approval. Removing a source or losing access prevents a claim. A failed research call leaves a visible notice on an otherwise supported answer, and web citations require recorded provider evidence. Without an answer runtime, the approval routes return `503`.
 
 `recovery` is normally `null`. `{ turnId, reason }` identifies an incomplete attempt whose
 context could not be used: `history_unavailable`, `context_budget`, `summary_failed`,
