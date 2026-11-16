@@ -534,6 +534,19 @@ test("saved conversations reopen across reload, redact deleted note excerpts, en
     }),
   ).toBeVisible();
 
+  // A follow-up after reload uses the persisted conversation and returns another grounded answer.
+  const followUpInput = reopenedChat.getByRole("textbox", { name: "Message", exact: true });
+  await followUpInput.fill("How does pgvector confirm durability?");
+  await reopenedChat.getByRole("button", { name: "Send message", exact: true }).click();
+  await expect(
+    reopenedChat
+      .getByRole("list", { name: "Conversation messages" })
+      .getByText("How does pgvector confirm durability?", { exact: true }),
+  ).toBeVisible();
+  await expect(reopenedChat.getByText(/Grounded answer from your notes/)).toHaveCount(2, {
+    timeout: 20_000,
+  });
+
   // Delete the cited source note and verify reopening preserves the answer but removes the stored excerpt.
   const deleteNoteResponse = await page.request.delete(`/api/notes/${createdNote.id}`, {
     headers: { Origin: origin, "If-Match": noteEtag },
@@ -552,14 +565,16 @@ test("saved conversations reopen across reload, redact deleted note excerpts, en
     .first()
     .click();
   await expect(
-    afterNoteDeleteChat.getByText(
-      "Grounded answer from your notes: PostgreSQL pgvector durability relies on synchronous WAL flushing.",
-    ),
+    afterNoteDeleteChat
+      .getByText(
+        "Grounded answer from your notes: PostgreSQL pgvector durability relies on synchronous WAL flushing.",
+      )
+      .first(),
   ).toBeVisible();
-  await expect(afterNoteDeleteChat.getByText("Deleted source")).toBeVisible();
+  await expect(afterNoteDeleteChat.getByText("Deleted source")).toHaveCount(2);
   await expect(
     afterNoteDeleteChat.getByText("Source note was deleted; stored excerpt was removed."),
-  ).toBeVisible();
+  ).toHaveCount(2);
   await expect(afterNoteDeleteChat.locator(".note-search-excerpt")).toHaveCount(0);
   expect(await page.evaluate("document.documentElement.scrollWidth <= window.innerWidth")).toBe(
     true,
@@ -608,6 +623,101 @@ test("saved conversations reopen across reload, redact deleted note excerpts, en
   expect((await aliceList.json()).conversations).toEqual(
     expect.arrayContaining([expect.objectContaining({ id: conversationId })]),
   );
+});
+
+test("compaction keeps delivered answers in UI history and continues from the compacted context", async ({
+  page,
+}) => {
+  // The synthetic runtime returns a long cited answer for [long-answer], forcing the next turn
+  // through compaction. Its follow-up marker can only appear when the compacted summary is used.
+  const noteResponse = await page.request.post("/api/notes", {
+    headers: { Origin: origin, "Idempotency-Key": randomUUID() },
+    data: {
+      title: "Compaction source",
+      content: "Cedar compaction source with durable details.",
+      createdAt: "2026-11-15T09:00:00.000Z",
+    },
+  });
+  expect(noteResponse.status()).toBe(201);
+  const note = noteSchema.parse(await noteResponse.json());
+  await expect
+    .poll(async () => {
+      const statusResponse = await page.request.get(`/api/notes/${note.id}/index`);
+      return statusResponse.status() === 200 ? (await statusResponse.json()).status : "pending";
+    })
+    .toBe("ready");
+  const createdConversation = await page.request.post("/api/conversations", {
+    headers: { Origin: origin, "Idempotency-Key": randomUUID() },
+    data: {},
+  });
+  expect(createdConversation.status()).toBe(201);
+  const { id } = (await createdConversation.json()) as { id: string };
+  const sent = await page.request.post(`/api/conversations/${id}/messages`, {
+    headers: { Origin: origin, "Idempotency-Key": randomUUID() },
+    data: {
+      text: "[long-answer] Tell me about the Cedar compaction source.",
+      policy: "queue",
+    },
+  });
+  expect(sent.status()).toBe(202);
+  await expect
+    .poll(
+      async () => {
+        await page.request.get(`/api/conversations/${id}`);
+        const history = await page.request.get(`/api/conversations/${id}/messages?limit=50`);
+        const body = conversationHistorySchema.parse(await history.json());
+        return body.messages.some(
+          (message) => message.role === "assistant" && message.status === "completed",
+        )
+          ? "ready"
+          : "pending";
+      },
+      { timeout: 30_000 },
+    )
+    .toBe("ready");
+
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await page.goto("/");
+  const chat = page.getByRole("region", { name: "Chat workspace" });
+  const launcher = page.getByRole("button", { name: "Open chat", exact: true });
+  if (await launcher.isVisible()) await launcher.click();
+  await chat.getByRole("button", { name: "Conversation history", exact: true }).click();
+  await chat
+    .getByRole("navigation", { name: "Saved conversations" })
+    .getByRole("button")
+    .first()
+    .click();
+  await expect(chat.getByText(/Long answer detail\./)).toBeVisible();
+  const input = chat.getByRole("textbox", { name: "Message", exact: true });
+  await input.fill("What did we discuss?");
+  await chat.getByRole("button", { name: "Send message", exact: true }).click();
+  await expect(chat.getByText("Compacted context used.", { exact: true })).toBeVisible({
+    timeout: 30_000,
+  });
+  await expect(chat.getByText(/Long answer detail\./)).toBeVisible();
+
+  // Deleting the source after compaction keeps the delivered answer and removes only its excerpt.
+  const noteRead = await page.request.get(`/api/notes/${note.id}`);
+  const removed = await page.request.delete(`/api/notes/${note.id}`, {
+    headers: { Origin: origin, "If-Match": noteRead.headers().etag! },
+  });
+  expect(removed.status()).toBe(204);
+  await page.reload();
+  const reopened = page.getByRole("region", { name: "Chat workspace" });
+  const relauncher = page.getByRole("button", { name: "Open chat", exact: true });
+  if (await relauncher.isVisible()) await relauncher.click();
+  await reopened.getByRole("button", { name: "Conversation history", exact: true }).click();
+  await reopened
+    .getByRole("navigation", { name: "Saved conversations" })
+    .getByRole("button")
+    .first()
+    .click();
+  await expect(reopened.getByText(/Long answer detail\./)).toBeVisible();
+  await expect(reopened.getByText("Compacted context used.", { exact: true })).toBeVisible();
+  await expect(reopened.getByText("Deleted source")).toBeVisible();
+  await expect(
+    reopened.getByText("Source note was deleted; stored excerpt was removed."),
+  ).toBeVisible();
 });
 
 test("long indexed passages produce a bounded exact citation without splitting Unicode", async ({

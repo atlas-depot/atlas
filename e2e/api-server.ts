@@ -130,7 +130,12 @@ export default async function setup() {
     const indexStore = createNoteIndexStore(database.db);
     const searchStore = createNoteSearchStore(database.db);
     const admitSearch = createSearchAdmission(database.db);
-    const sessionSubmissions = new Map<string, { turnId: string; message: string }>();
+    // Deterministic acceptance markers replace live model output. The long answer forces
+    // compaction before the next turn; the summary marker then proves compacted context was used.
+    const sessionSubmissions = new Map<
+      string,
+      { turnId: string; message: string; longAnswerPublished?: boolean }
+    >();
     const syntheticCompactor: ContextCompactor = {
       async allocate(operationId) {
         return `summary_${operationId}`;
@@ -165,6 +170,7 @@ export default async function setup() {
         sessionSubmissions.set(sessionId, {
           turnId: current?.turnId ?? operationId,
           message: current ? `${current.message}\n${message}` : message,
+          longAnswerPublished: current?.longAnswerPublished,
         });
         return {
           status: "delivered",
@@ -181,6 +187,17 @@ export default async function setup() {
             result: {
               status: "no-support",
               text: "No matching passage was found in your indexed notes.",
+              citations: [],
+            },
+          };
+        }
+        if (submitted.message.includes("Synthetic compacted conversation context.")) {
+          return {
+            status: "result",
+            evidence: [],
+            result: {
+              status: "no-support",
+              text: "Compacted context used.",
               citations: [],
             },
           };
@@ -234,6 +251,18 @@ export default async function setup() {
         let excerpt = top.text.slice(0, 1_000);
         // Keep an exact source substring without splitting a UTF-16 surrogate pair.
         if (/\p{Surrogate}/u.test(excerpt)) excerpt = excerpt.slice(0, -1);
+        if (submitted.message.includes("[long-answer]") && !submitted.longAnswerPublished) {
+          submitted.longAnswerPublished = true;
+          return {
+            status: "result",
+            evidence: [{ id: pid, text: top.text, source: top.source }],
+            result: {
+              status: "completed",
+              text: "Long answer detail. ".repeat(1_200),
+              citations: [{ passageId: pid, excerpt }],
+            },
+          };
+        }
         return {
           status: "result",
           evidence: [{ id: pid, text: top.text, source: top.source }],
