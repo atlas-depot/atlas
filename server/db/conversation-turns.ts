@@ -30,6 +30,8 @@ import {
   unionDependencies,
   type SourceDependency,
 } from "../conversation-context.ts";
+import { noteTag } from "./notes.ts";
+import { notes } from "./schema.ts";
 import { readConversationMessage } from "./conversation-messages.ts";
 import {
   conversationPayloadHash,
@@ -41,6 +43,7 @@ import {
 import {
   conversations,
   conversationMessages,
+  conversationCitations,
   conversationTurns,
   conversationTurnInputs,
   conversationContexts,
@@ -60,10 +63,13 @@ const MAX_TURN_INPUTS = 100;
  * and grouping/framing in the 24 KB prompt. An oversized first input gets explicit recovery.
  */
 export const MAX_TURN_INPUT_BYTES = 10_000;
-const attemptSchema = z.strictObject({
-  inputIds: conversationInputIdsSchema,
-  retryOfId: conversationIdSchema.optional(),
-});
+const attemptSchema = z
+  .strictObject({
+    inputIds: conversationInputIdsSchema,
+    retryOfId: conversationIdSchema.optional(),
+    regenerateOfId: conversationIdSchema.optional(),
+  })
+  .refine((value) => !(value.retryOfId && value.regenerateOfId));
 
 async function turnInputs(tx: ConversationTransaction, turnId: string) {
   return tx
@@ -71,6 +77,26 @@ async function turnInputs(tx: ConversationTransaction, turnId: string) {
     .from(conversationTurnInputs)
     .where(eq(conversationTurnInputs.turnId, turnId))
     .orderBy(asc(conversationTurnInputs.ordinal));
+}
+
+/** Only an accessible, edited note behind an actual citation enables regeneration. */
+async function hasChangedNoteCitation(tx: ConversationTransaction, owner: string, turnId: string) {
+  const citations = await tx
+    .select({ source: conversationCitations.source, noteId: notes.id, revision: notes.revision })
+    .from(conversationMessages)
+    .innerJoin(conversationCitations, eq(conversationCitations.messageId, conversationMessages.id))
+    .innerJoin(notes, eq(notes.id, conversationCitations.noteId))
+    .where(
+      and(
+        eq(conversationMessages.turnId, turnId),
+        eq(conversationCitations.deleted, false),
+        eq(notes.ownerId, owner),
+      ),
+    );
+  return citations.some(
+    ({ source, noteId, revision }) =>
+      source.kind !== "web" && source.version !== noteTag(noteId, revision),
+  );
 }
 
 /** The first input always opens an attempt on its own, even above the grouping bound. */
@@ -249,7 +275,7 @@ export function createConversationTurns(db: Database) {
           return existing.role === "user" && existing.payloadHash === payloadHash
             ? {
                 status: "saved" as const,
-                value: (await readConversationMessage(tx, parent.id, existing.id))!,
+                value: (await readConversationMessage(tx, parent.ownerId, parent.id, existing.id))!,
               }
             : { status: "conflict" as const };
         const [running] =
@@ -308,7 +334,7 @@ export function createConversationTurns(db: Database) {
         }
         return {
           status: "saved" as const,
-          value: (await readConversationMessage(tx, parent.id, message!.id))!,
+          value: (await readConversationMessage(tx, parent.ownerId, parent.id, message!.id))!,
         };
       });
     },
@@ -558,7 +584,13 @@ export function createConversationTurns(db: Database) {
     ) {
       const input = attemptSchema.parse(value);
       const operation = conversationIdSchema.parse(operationId);
-      const payloadHash = conversationPayloadHash([input.inputIds, input.retryOfId ?? null]);
+      const originalId = input.regenerateOfId ?? input.retryOfId;
+      // Existing retries keep their persisted hash; regeneration is a separate operation.
+      const payloadHash = conversationPayloadHash(
+        input.regenerateOfId
+          ? ["regenerate", input.inputIds, originalId]
+          : [input.inputIds, originalId ?? null],
+      );
       return db.transaction(async (tx) => {
         const parent = await lockOwnedConversation(tx, owner, conversationId);
         if (!parent) return { status: "not_found" as const };
@@ -608,17 +640,24 @@ export function createConversationTurns(db: Database) {
         )
           return { status: "conflict" as const };
         let openingCount = boundedOpeningCount(messages);
-        if (input.retryOfId) {
+        if (originalId) {
           const [original] = await tx
             .select()
             .from(conversationTurns)
             .where(
               and(
-                eq(conversationTurns.id, input.retryOfId),
+                eq(conversationTurns.id, originalId),
                 eq(conversationTurns.conversationId, parent.id),
               ),
             );
-          if (original?.status !== "incomplete") return { status: "conflict" as const };
+          if (
+            !original ||
+            (input.regenerateOfId
+              ? original.status !== "completed" ||
+                !(await hasChangedNoteCitation(tx, owner, original.id))
+              : original.status !== "incomplete")
+          )
+            return { status: "conflict" as const };
           const links = await turnInputs(tx, original.id);
           if (
             links.length !== messages.length ||
@@ -644,7 +683,7 @@ export function createConversationTurns(db: Database) {
         // A retry is a running answer like any other and counts against the owner's cap.
         if (await ownerAtCapacity(tx, owner)) return { status: "owner_busy" as const };
         // It can also start a summary, so it spends the same send budget as a new message.
-        if (input.retryOfId) {
+        if (originalId) {
           const admission = await admitConversationInput(tx, owner);
           if (!admission.allowed)
             return {
@@ -660,7 +699,7 @@ export function createConversationTurns(db: Database) {
             payloadHash,
             status: "running",
             runningText: "",
-            retryOfId: input.retryOfId,
+            retryOfId: originalId,
           })
           .returning();
         await tx.insert(conversationTurnInputs).values(
