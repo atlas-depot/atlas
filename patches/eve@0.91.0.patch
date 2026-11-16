@@ -1,0 +1,13 @@
+diff --git a/package.json b/package.json
+--- a/package.json
++++ b/package.json
+@@ -55,7 +55,8 @@
+     "#*.js": {
+       "eve-source": "./src/*.ts",
+       "default": "./dist/src/*.js"
+-    }
++    },
++    "#*": "./dist/src/*"
+   },
+   "exports": {
+     ".": {
