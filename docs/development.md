@@ -270,6 +270,15 @@ Coverage runs the full root suite and publishes its summary, with no percentage 
 
 Feature previews and `main` production remain the deployment direction. Git branches and passing CI do not configure Vercel linkage, routing or credentials. After an authorized deployment, verify the revision and affected live flow. Application rollback does not roll back the database. Follow [contributing](contributing.md) for PR evidence and merge authority.
 
+## Shared staging
+
+Use two protected Vercel projects in Frankfurt. Build both from the same Git revision.
+
+- **Private organizer**: set the root directory to `agents/organizer`, enable access to workspace files outside the root, and use the normal hosted `eve build`. Use the private service setup in [the organizer README](../agents/organizer/README.md#build-and-verification). Enable the minute maintenance schedule only on the dedicated staging project's production target for its staging database.
+- **Web and API**: set the root to the repository root and Node to 26. The root Vercel configuration serves the production Vite build and routes `/api/*` to Atlas's Hono application on the same origin. Leave `VITE_NOTES_DEMO` unset. Use the staging database URL and WorkOS browser credentials from [.env.example](../.env.example). Set `APP_ORIGIN` to the stable HTTPS staging origin, register its `/api/auth/callback` in WorkOS, and allow the origin as a logout return URL. Point `ORGANIZER_RUNTIME_URL` at the immutable protected organizer deployment, and set the matching `ORGANIZER_SERVICE_TOKEN` and `ORGANIZER_DEPLOYMENT_PROTECTION_SECRET` on the API.
+
+After the authorized migration, verify that a team member can open the protected web URL, sign in, and reload the same account's data. Check the deployment revision and the private organizer's successful scheduled execution. A health response alone checks only API liveness.
+
 ## Notes increment acceptance
 
 [#54](https://github.com/atlas-depot/atlas/issues/54) tracks acceptance of the connected notes and AI-draft flow. The acceptance matrix from 2026-11-05 is in the [evidence log](process/evidence-log.md#2026-11-05-notes-increment-acceptance-54).

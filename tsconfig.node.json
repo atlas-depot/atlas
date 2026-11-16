@@ -25,6 +25,7 @@
     "playwright.api.config.ts",
     "scripts/**/*.ts",
     "e2e/**/*.ts",
+    "api/**/*.ts",
     "server/**/*.ts",
     "shared/**/*.ts"
   ]
