@@ -142,16 +142,24 @@ export function createEveTransport({
     /** Submit end once, then independently verify durable history. A lost receipt is retryable. */
     async retire(sessionId: string, reason: string): Promise<{ status: "ended" | "expired" }> {
       const session = reader.sessions.attach(sessionIdSchema.parse(sessionId));
+      let accepted = false;
       try {
         await session.end({ reason, signal: timeout() });
+        accepted = true;
       } catch (error) {
         if (expired(error)) return { status: "expired" };
         // Inactive or a lost response alone does not establish completed cleanup.
       }
+      const signal = timeout();
       try {
-        const snapshot = await session.snapshot({ signal: timeout() });
-        if (snapshot.events.some((event) => event.type === "session.ended"))
-          return { status: "ended" };
+        // An accepted control can precede session.ended by seconds. Inspect the
+        // same session within one verification deadline without resending end.
+        for (const waitMs of accepted ? [0, 500, 1_000, 2_000] : [0]) {
+          if (waitMs) await delay(waitMs, undefined, { signal });
+          const snapshot = await session.snapshot({ signal });
+          if (snapshot.events.some((event) => event.type === "session.ended"))
+            return { status: "ended" };
+        }
       } catch (error) {
         if (expired(error)) return { status: "expired" };
       }

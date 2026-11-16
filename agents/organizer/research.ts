@@ -27,6 +27,19 @@ export const researchResultSchema = z.strictObject({
 
 export type ResearchResult = z.infer<typeof researchResultSchema>;
 
+// The SDK helper flattens server tool settings. OpenRouter expects these under
+// "parameters" to select a search engine that supplies attributed page excerpts.
+const excerptSearchOptions = {
+  openrouter: {
+    tools: [
+      {
+        type: "openrouter:web_search",
+        parameters: { engine: "exa", max_results: 3, max_uses: 1, max_characters: 2_000 },
+      },
+    ],
+  },
+};
+
 export function createResearch({
   model,
   webSearch,
@@ -34,7 +47,11 @@ export function createResearch({
   model: LanguageModel;
   webSearch: ReturnType<OpenRouterProvider["tools"]["webSearch"]>;
 }) {
-  return async function research(question: string, signal: AbortSignal): Promise<ResearchResult> {
+  return async function research(
+    question: string,
+    signal: AbortSignal,
+    evidence: "links" | "excerpts" = "links",
+  ): Promise<ResearchResult> {
     const throwIfCancelled = () => {
       if (signal.aborted) throw new DOMException("Research cancelled.", "AbortError");
     };
@@ -46,6 +63,7 @@ export function createResearch({
       result = await generateText({
         model,
         tools: { web_search: webSearch },
+        providerOptions: evidence === "excerpts" ? excerptSearchOptions : undefined,
         system:
           "Research only the supplied public question using web search. It is the only request context; " +
           "do not add, infer, or search for personal or company details that are not in that question. " +

@@ -370,7 +370,12 @@ await test("only the displayed query enters OpenRouter after approval, as one us
   assert.equal(bodies.length, 1);
   const [body] = bodies;
   assert.ok(body);
-  assert.deepEqual(body.tools, [{ type: "openrouter:web_search" }]);
+  assert.deepEqual(body.tools, [
+    {
+      type: "openrouter:web_search",
+      parameters: { engine: "exa", max_results: 3, max_uses: 1, max_characters: 2_000 },
+    },
+  ]);
   assert.ok(Array.isArray(body.messages));
   assert.deepEqual(
     body.messages.map(({ role }) => role),
@@ -438,6 +443,29 @@ await test("expired, cancelled, stale and changed approvals never call research"
     { status: "not_performed", reason: "stale" },
   );
   assert.deepEqual(calls, []);
+});
+
+await test("an approved link without provider excerpts records no chat evidence", async () => {
+  let recorded = false;
+  const { run, finishes } = setup(
+    () => ({ status: "approval_required", request, contextHash: "c".repeat(64) }),
+    {
+      async recordResult() {
+        recorded = true;
+        return { status: "recorded" };
+      },
+    },
+    undefined,
+    { ...result, sources: [{ id: url, url, title: "Official release" }] },
+  );
+  await assert.rejects(
+    run("session-1", { question: exactQuestion }, new AbortController().signal),
+    {
+      message: "Public research could not be completed.",
+    },
+  );
+  assert.equal(recorded, false);
+  assert.deepEqual(finishes, ["failed"]);
 });
 
 await test("a provider source without a title keeps the verified URL as its record", async () => {

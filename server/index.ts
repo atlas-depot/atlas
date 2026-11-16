@@ -18,18 +18,9 @@ import { createSearchEmbeddingClient } from "./search-embedding-client.ts";
 import { readServerEnv } from "./env.ts";
 import { createBearerAuthenticator } from "./workos.ts";
 
-async function main() {
-  let configuration: ReturnType<typeof readServerEnv>;
-  try {
-    configuration = readServerEnv(process.env);
-  } catch {
-    console.error(
-      "Atlas API could not start. Check API_PORT, authentication, database and organizer configuration.",
-    );
-    process.exitCode = 1;
-    return;
-  }
-  const { port, workos, browserAuth } = configuration;
+/** Compose the same Atlas services for the Node server and the hosted fetch handler. */
+export async function createServerRuntime(configuration: ReturnType<typeof readServerEnv>) {
+  const { workos, browserAuth } = configuration;
   const workosClient = workos
     ? new WorkOS({
         clientId: workos.clientId,
@@ -114,6 +105,22 @@ async function main() {
         ? createAuthRoutes(browser, { appOrigin: browserAuth.appOrigin })
         : undefined,
   });
+  return { app, closeDatabases };
+}
+
+async function main() {
+  let configuration: ReturnType<typeof readServerEnv>;
+  try {
+    configuration = readServerEnv(process.env);
+  } catch {
+    console.error(
+      "Atlas API could not start. Check API_PORT, authentication, database and organizer configuration.",
+    );
+    process.exitCode = 1;
+    return;
+  }
+  const { port } = configuration;
+  const { app, closeDatabases } = await createServerRuntime(configuration);
   const server = serve(
     { fetch: app.fetch, hostname: "127.0.0.1", port, overrideGlobalObjects: false },
     (address) => console.log(`Atlas API listening on http://127.0.0.1:${address.port}`),
@@ -161,9 +168,10 @@ async function main() {
   process.once("SIGTERM", shutdown);
 }
 
-void main().catch(() => {
-  console.error(
-    "Atlas API could not start. Check authentication, database and organizer configuration.",
-  );
-  process.exitCode = 1;
-});
+if (import.meta.main)
+  void main().catch(() => {
+    console.error(
+      "Atlas API could not start. Check authentication, database and organizer configuration.",
+    );
+    process.exitCode = 1;
+  });

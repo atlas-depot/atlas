@@ -125,6 +125,7 @@ async function fixture() {
     expect(response.status).toBe(200);
     const draft = noteDraftSchema.parse(await response.json());
     expect(response.headers.get("ETag")).toBe(draft.etag);
+    expect(response.headers.get("Atlas-Revision")).toBe(draft.etag);
     return draft;
   }
   return {
