@@ -990,7 +990,7 @@ export function NotesWorkspace({
                                 <Menu.Item
                                   onClick={() => {
                                     void navigator.clipboard?.writeText(
-                                      buildInternalNoteHref(saved.note.id),
+                                      buildInternalNoteHref(saved.note.id, window.location.origin),
                                     );
                                   }}
                                 >

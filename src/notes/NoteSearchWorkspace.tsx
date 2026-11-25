@@ -315,22 +315,27 @@ export function NoteSearchWorkspace({
                           >
                             <span className="note-meta-label">Source note:</span>
                             {originSource.status === "available" ? (
-                              <a
-                                href={buildInternalNoteHref(originSource.noteId)}
-                                className="note-source-link"
-                                aria-disabled={!enabled || !canOpenSource || undefined}
-                                tabIndex={!enabled || !canOpenSource ? -1 : undefined}
-                                onClick={(event) => {
-                                  event.preventDefault();
-                                  if (!enabled || !canOpenSource) return;
-                                  onOpenNote?.(originSource.noteId);
-                                }}
-                              >
-                                {originSource.title}
-                              </a>
+                              <>
+                                <a
+                                  href={buildInternalNoteHref(originSource.noteId)}
+                                  className="note-source-link"
+                                  aria-disabled={!enabled || !canOpenSource || undefined}
+                                  tabIndex={!enabled || !canOpenSource ? -1 : undefined}
+                                  onClick={(event) => {
+                                    event.preventDefault();
+                                    if (!enabled || !canOpenSource) return;
+                                    onOpenNote?.(originSource.noteId);
+                                  }}
+                                >
+                                  {originSource.title}
+                                </a>
+                                <span className="note-meta-revision">
+                                  (Revision {originSource.revision})
+                                </span>
+                              </>
                             ) : (
                               <span className="note-source-unavailable">
-                                Source note unavailable
+                                Source note unavailable (Revision {originSource.revision})
                               </span>
                             )}
                           </div>

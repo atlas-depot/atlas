@@ -283,7 +283,7 @@ function RichDocumentEditor({
         const linkedNoteId = parseInternalNoteHref(href, window.location.origin);
         if (!linkedNoteId) return;
         event.preventDefault();
-        if (event.metaKey || event.ctrlKey || disabled) {
+        if (event.detail === 0 || event.metaKey || event.ctrlKey || disabled) {
           onOpenNoteLink(linkedNoteId);
         }
       }}

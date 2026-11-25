@@ -50,8 +50,9 @@ export function formatNoteTimestamp(iso: string, locale?: string): string {
   }).format(date);
 }
 
-export function buildInternalNoteHref(noteId: string): string {
-  return `/notes/${noteIdSchema.parse(noteId).toLowerCase()}`;
+export function buildInternalNoteHref(noteId: string, origin?: string): string {
+  const path = `/notes/${noteIdSchema.parse(noteId).toLowerCase()}`;
+  return origin ? `${origin.replace(/\/+$/, "")}${path}` : path;
 }
 
 export function parseInternalNoteHref(href: string, currentOrigin?: string): string | null {
@@ -116,13 +117,19 @@ function collectBlockLinkHrefs(blocks: readonly AtlasBlock[], hrefs: string[]) {
   }
 }
 
-/** Extract link destinations from Markdown while ignoring fenced and inline code. */
+function normalizeReferenceLabel(label: string): string {
+  return label.trim().replace(/\s+/g, " ").toLowerCase();
+}
+
+/** Extract link destinations from Markdown in linear time, skipping code and unused references. */
 function extractMarkdownLinkHrefs(markdown: string): string[] {
   const hrefs: string[] = [];
   const lines = markdown.split(/\r?\n/);
   const proseLines: string[] = [];
+  const refDefinitions = new Map<string, string>();
   let fenceChar: "`" | "~" | null = null;
   let fenceLength = 0;
+  let inParagraph = false;
 
   for (const line of lines) {
     const fenceMatch = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(line);
@@ -133,15 +140,31 @@ function extractMarkdownLinkHrefs(markdown: string): string[] {
         if (char === "~" || !fenceMatch[2].includes("`")) {
           fenceChar = char;
           fenceLength = marker.length;
+          inParagraph = false;
           continue;
         }
       }
-      const refDef = /^ {0,3}\[[^\]\n]+\]:[ \t]*(?:<([^>\n]+)>|([^\s]+))/.exec(line);
-      if (refDef) {
-        const destination = refDef[1] ?? refDef[2];
-        if (destination) hrefs.push(destination);
+      if (line.trim() === "") {
+        inParagraph = false;
+        proseLines.push("");
         continue;
       }
+      // CommonMark indented code blocks start with 4 spaces or a tab outside an active paragraph.
+      if (!inParagraph && /^(?: {4}|\t)/.test(line)) {
+        continue;
+      }
+      if (!inParagraph) {
+        const refDef = /^ {0,3}\[([^\]\n]+)\]:[ \t]*(?:<([^>\n]+)>|([^\s]+))/.exec(line);
+        if (refDef) {
+          const normalized = normalizeReferenceLabel(refDef[1]);
+          const destination = refDef[2] ?? refDef[3];
+          if (normalized && destination && !refDefinitions.has(normalized)) {
+            refDefinitions.set(normalized, destination);
+          }
+          continue;
+        }
+      }
+      inParagraph = true;
       proseLines.push(line);
     } else if (
       fenceMatch &&
@@ -155,7 +178,11 @@ function extractMarkdownLinkHrefs(markdown: string): string[] {
   }
 
   const text = proseLines.join("\n");
+  const openBrackets: Array<{ index: number; isImage: boolean }> = [];
+  const failedTickLengths = new Set<number>();
+  let failedParenFrom = Number.POSITIVE_INFINITY;
   let index = 0;
+
   while (index < text.length) {
     const char = text[index];
     if (char === "\\") {
@@ -165,41 +192,58 @@ function extractMarkdownLinkHrefs(markdown: string): string[] {
     if (char === "`") {
       let tickCount = 1;
       while (text[index + tickCount] === "`") tickCount++;
-      const closing = text.indexOf("`".repeat(tickCount), index + tickCount);
-      index = closing === -1 ? index + tickCount : closing + tickCount;
+      if (!failedTickLengths.has(tickCount)) {
+        const closing = text.indexOf("`".repeat(tickCount), index + tickCount);
+        if (closing !== -1) {
+          index = closing + tickCount;
+          continue;
+        }
+        failedTickLengths.add(tickCount);
+      }
+      index += tickCount;
       continue;
     }
-    if (char === "[" && text[index - 1] !== "!") {
-      let depth = 1;
-      let cursor = index + 1;
-      while (cursor < text.length && depth > 0) {
-        const current = text[cursor];
-        if (current === "\\") {
-          cursor += 2;
-          continue;
-        }
-        if (current === "`") {
-          let tickCount = 1;
-          while (text[cursor + tickCount] === "`") tickCount++;
-          const closing = text.indexOf("`".repeat(tickCount), cursor + tickCount);
-          cursor = closing === -1 ? cursor + tickCount : closing + tickCount;
-          continue;
-        }
-        if (current === "[") depth++;
-        else if (current === "]") depth--;
-        cursor++;
+    if (char === "[") {
+      let backslashes = 0;
+      let back = index - 2;
+      while (back >= 0 && text[back] === "\\") {
+        backslashes++;
+        back--;
       }
-      if (depth === 0 && text[cursor] === "(") {
-        cursor++;
+      const isImage = text[index - 1] === "!" && backslashes % 2 === 0;
+      openBrackets.push({ index, isImage });
+      index++;
+      continue;
+    }
+    if (char === "]") {
+      const opener = openBrackets.pop();
+      if (!opener || opener.isImage) {
+        index++;
+        continue;
+      }
+
+      const afterClose = index + 1;
+      if (text[afterClose] === "(" && afterClose < failedParenFrom) {
+        let cursor = afterClose + 1;
         while (cursor < text.length && (text[cursor] === " " || text[cursor] === "\t")) {
           cursor++;
         }
+        let destination = "";
+        let closeParen = -1;
         if (text[cursor] === "<") {
-          const end = text.indexOf(">", cursor + 1);
-          if (end !== -1 && !text.slice(cursor + 1, end).includes("\n")) {
-            hrefs.push(text.slice(cursor + 1, end));
-            index = end + 1;
-            continue;
+          const endAngle = text.indexOf(">", cursor + 1);
+          if (endAngle !== -1 && !text.slice(cursor + 1, endAngle).includes("\n")) {
+            destination = text.slice(cursor + 1, endAngle);
+            let afterAngle = endAngle + 1;
+            while (
+              afterAngle < text.length &&
+              (text[afterAngle] === " " || text[afterAngle] === "\t")
+            ) {
+              afterAngle++;
+            }
+            if (text[afterAngle] === ")") {
+              closeParen = afterAngle;
+            }
           }
         } else {
           const start = cursor;
@@ -213,20 +257,67 @@ function extractMarkdownLinkHrefs(markdown: string): string[] {
             if (current === "(") {
               parenDepth++;
             } else if (current === ")") {
-              if (parenDepth === 0) break;
+              if (parenDepth === 0) {
+                closeParen = cursor;
+                break;
+              }
               parenDepth--;
             } else if (current === " " || current === "\t" || current === "\n") {
               break;
             }
             cursor++;
           }
-          if (cursor > start) {
-            hrefs.push(text.slice(start, cursor));
-            index = cursor;
+          destination = text.slice(start, cursor);
+          if (closeParen === -1 && destination.length > 0 && text[cursor] !== "\n") {
+            let tail = cursor;
+            while (tail < text.length && text[tail] !== ")" && text[tail] !== "\n") {
+              if (text[tail] === "\\") tail += 2;
+              else tail++;
+            }
+            if (text[tail] === ")") closeParen = tail;
+          }
+        }
+
+        if (closeParen !== -1 && destination.length > 0) {
+          hrefs.push(destination);
+          index = closeParen + 1;
+          continue;
+        }
+        if (closeParen === -1 && cursor >= text.length) {
+          failedParenFrom = Math.min(failedParenFrom, afterClose);
+        }
+      } else if (text[afterClose] === "[") {
+        let cursor = afterClose + 1;
+        while (
+          cursor < text.length &&
+          text[cursor] !== "]" &&
+          text[cursor] !== "[" &&
+          text[cursor] !== "\n"
+        ) {
+          if (text[cursor] === "\\") cursor += 2;
+          else cursor++;
+        }
+        if (text[cursor] === "]") {
+          const rawRef = text.slice(afterClose + 1, cursor);
+          const label = normalizeReferenceLabel(
+            rawRef.length > 0 ? rawRef : text.slice(opener.index + 1, index),
+          );
+          const destination = refDefinitions.get(label);
+          if (destination) {
+            hrefs.push(destination);
+            index = cursor + 1;
             continue;
           }
         }
+      } else {
+        const label = normalizeReferenceLabel(text.slice(opener.index + 1, index));
+        const destination = refDefinitions.get(label);
+        if (destination) {
+          hrefs.push(destination);
+        }
       }
+      index++;
+      continue;
     }
     index++;
   }

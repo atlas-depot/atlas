@@ -56,7 +56,12 @@ describe("note metadata helpers", () => {
   });
 
   it("parses only relative or same-origin /notes/:uuid links", () => {
-    expect(buildInternalNoteHref(meetingId.toUpperCase())).toBe(`/notes/${meetingId}`);
+    const hexId = "a1b2c3d4-1111-4111-8111-abcdef123456";
+    expect(buildInternalNoteHref(hexId.toUpperCase())).toBe(`/notes/${hexId}`);
+    expect(buildInternalNoteHref(hexId.toUpperCase(), "https://atlas.example/")).toBe(
+      `https://atlas.example/notes/${hexId}`,
+    );
+    expect(parseInternalNoteHref(`/notes/${hexId.toUpperCase()}`)).toBe(hexId);
     expect(parseInternalNoteHref(`/notes/${meetingId}`)).toBe(meetingId);
     expect(
       parseInternalNoteHref(`https://atlas.example/notes/${meetingId}`, "https://atlas.example"),
@@ -69,7 +74,7 @@ describe("note metadata helpers", () => {
     expect(parseInternalNoteHref(`//evil.example/notes/${meetingId}`)).toBeNull();
   });
 
-  it("extracts linked note IDs from BlockNote documents and ignores code in Markdown", () => {
+  it("extracts linked note IDs from BlockNote documents and ignores code and unused references in Markdown", () => {
     const doc: BlockNoteDocument = {
       format: "blocknote",
       schemaVersion: 1,
@@ -99,12 +104,37 @@ describe("note metadata helpers", () => {
 
     const markdown = [
       `Review [Meeting agenda](/notes/${meetingId}) and [missing](/notes/${foreignId}).`,
+      "",
       "```md",
-      `[Inside code](/notes/${planningId})`,
+      `[Inside fenced code](/notes/${planningId})`,
       "```",
+      "",
+      `    [Inside indented code](/notes/${planId})`,
+      "",
       `Inline code \`[ignored](/notes/${planId})\` stays ignored.`,
     ].join("\n");
     expect(extractLinkedNoteIds(markdown)).toEqual([meetingId, foreignId]);
+
+    // Unused reference definitions produce no source; used reference links resolve normally.
+    const unusedRefOnly = `[unused]: /notes/${meetingId}\n`;
+    expect(extractLinkedNoteIds(unusedRefOnly)).toEqual([]);
+
+    const usedRefs = [
+      "See [Meeting agenda][agenda], [Planning][], and [Checklist].",
+      "",
+      `[agenda]: /notes/${meetingId}`,
+      `[planning]: /notes/${planningId}`,
+      `[checklist]: /notes/${checklistId}`,
+      `[unused]: /notes/${foreignId}`,
+    ].join("\n");
+    expect(extractLinkedNoteIds(usedRefs)).toEqual([meetingId, planningId, checklistId]);
+  });
+
+  it("handles pathological unmatched brackets in linear time", () => {
+    const pathological = "[".repeat(100_000);
+    const startedAt = performance.now();
+    expect(extractLinkedNoteIds(pathological)).toEqual([]);
+    expect(performance.now() - startedAt).toBeLessThan(1_000);
   });
 
   it("resolves owned and unavailable sources without exposing inaccessible target metadata", () => {

@@ -2772,25 +2772,27 @@ test.describe("authorship, source links, and modification dates (#110)", () => {
       "Meeting agenda",
     );
 
-    // Create "Evaluation checklist" with an explicit link to "Meeting agenda".
+    // Create "Evaluation checklist" with an explicit link to "Meeting agenda" through the editor UI.
     await page.getByRole("button", { name: "New note", exact: true }).click();
     await page.getByRole("textbox", { name: "Title", exact: true }).fill("Evaluation checklist");
     const editor = page.getByRole("textbox", { name: "Note content", exact: true });
     await editor.click();
-    await page.keyboard.type(`Check items from Meeting agenda`);
-    // Insert an explicit editor link to /notes/<meetingId> using Markdown source note for deterministic round-trip,
-    // or verify via BlockNote link creation; here we save a legacy Markdown note with explicit link via the second creation too.
+    await page.keyboard.type("Check items from Meeting agenda");
+    for (let step = 0; step < "Meeting agenda".length; step++) {
+      await page.keyboard.press("Shift+ArrowLeft");
+    }
+    await page.getByRole("button", { name: "Create link" }).click();
+    const meetingLinkUrl = new URL(`/notes/${meetingId}`, page.url()).href;
+    await page.locator('input[name="url"]').fill(meetingLinkUrl);
+    await page.keyboard.press("Enter");
+    await expect(editor.locator(`a[href="${meetingLinkUrl}"]`)).toHaveText("Meeting agenda");
     await page.getByRole("button", { name: "Save", exact: true }).click();
     await expect(page.getByRole("status")).toHaveText("Saved");
 
-    // Add explicit BlockNote link to "Meeting agenda" inside the saved note and save again.
     const checklistId = createdIds[0];
     const savedChecklist = notesById.get(checklistId)!;
     const originalCreatedAt = savedChecklist.createdAt;
-    notesById.set(checklistId, {
-      ...savedChecklist,
-      content: `Based on [Meeting agenda](/notes/${meetingId}).\n\n- Verify rubric\n`,
-    });
+    expect(JSON.stringify(savedChecklist.content)).toContain(meetingLinkUrl);
 
     // Create unlinked "Open questions".
     await page.getByRole("button", { name: "New note", exact: true }).click();
@@ -2819,17 +2821,20 @@ test.describe("authorship, source links, and modification dates (#110)", () => {
     await expect(sourceLink).toBeVisible();
 
     // Edit "Evaluation checklist" and save: updatedAt advances while createdAt is preserved.
-    await page
-      .getByRole("textbox", { name: /^(Markdown source|Note content)$/ })
-      .fill(
-        `Based on [Meeting agenda](/notes/${meetingId}).\n\n- Verify rubric\n- Confirm dates\n`,
-      );
+    const checklistEditor = page.getByRole("textbox", { name: "Note content", exact: true });
+    await checklistEditor.click();
+    await page.keyboard.press("End");
+    await page.keyboard.type(" and confirm rubric");
     await page.getByRole("button", { name: "Save", exact: true }).click();
     await expect(page.getByRole("status")).toHaveText("Saved");
     await expect(createdTime).toHaveAttribute("datetime", originalCreatedAt);
     await expect(updatedTime).toHaveAttribute("datetime", "2026-11-25T16:45:00.000Z");
 
-    // Follow the source link via keyboard to open "Meeting agenda".
+    // Reopen once more to confirm persisted timestamps and follow the source link via keyboard.
+    await page.getByRole("button", { name: "Open questions", exact: true }).click();
+    await page.getByRole("button", { name: "Evaluation checklist", exact: true }).click();
+    await expect(createdTime).toHaveAttribute("datetime", originalCreatedAt);
+    await expect(updatedTime).toHaveAttribute("datetime", "2026-11-25T16:45:00.000Z");
     await sourceLink.focus();
     await page.keyboard.press("Enter");
     await expect(page.getByRole("textbox", { name: "Title", exact: true })).toHaveValue(
@@ -2922,6 +2927,7 @@ test.describe("authorship, source links, and modification dates (#110)", () => {
     await expect(planCard).toContainText("Measure top-5 recall against frozen queries");
     const originLink = planCard.getByRole("link", { name: "Planning notes", exact: true });
     await expect(originLink).toBeVisible();
+    await expect(planCard).toContainText("(Revision 2)");
 
     await expect(planningCard).toContainText("User-authored");
     await expect(planningCard.locator('time[datetime="2026-11-22T10:15:00.000Z"]')).toBeVisible();

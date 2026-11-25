@@ -27,6 +27,15 @@ export default function MarkdownRenderer({
                   {...rest}
                   href={href}
                   onClick={(event) => {
+                    if (
+                      event.metaKey ||
+                      event.ctrlKey ||
+                      event.shiftKey ||
+                      event.altKey ||
+                      event.button !== 0
+                    ) {
+                      return;
+                    }
                     event.preventDefault();
                     onOpenNoteLink(linkedNoteId);
                   }}
