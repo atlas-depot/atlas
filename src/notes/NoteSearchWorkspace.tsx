@@ -15,6 +15,13 @@ import { classifyFailure } from "./editor-state";
 import { NotesRequestError } from "./notes-store";
 import type { NoteSearchClient } from "./note-search-store";
 import {
+  buildInternalNoteHref,
+  formatNoteAuthorship,
+  formatNoteTimestamp,
+  getNoteAuthorship,
+  resolveOriginSource,
+} from "./note-metadata";
+import {
   createSearchSourceTarget,
   describeSearchOutcome,
   formatHeadingPath,
@@ -47,6 +54,7 @@ export function NoteSearchWorkspace({
   canOpenSource,
   activeSourceTarget,
   onOpenSource,
+  onOpenNote,
   onUnauthenticated,
 }: {
   client: NoteSearchClient;
@@ -55,6 +63,7 @@ export function NoteSearchWorkspace({
   canOpenSource: boolean;
   activeSourceTarget: SourceTarget | null;
   onOpenSource: (target: SourceTarget) => void;
+  onOpenNote?: (noteId: string) => void;
   onUnauthenticated: () => void;
 }) {
   const [query, setQuery] = useState("");
@@ -63,6 +72,7 @@ export function NoteSearchWorkspace({
   const [outcome, setOutcome] = useState<SearchOutcome | null>(null);
   const [failure, setFailure] = useState<string | null>(null);
   const [resultTitles, setResultTitles] = useState<Record<string, string>>({});
+  const [resultSummaries, setResultSummaries] = useState<Record<string, NoteSummary>>({});
   const requestIdRef = useRef(0);
   const inFlightIdRef = useRef(0);
   const enabledRef = useRef(enabled);
@@ -90,6 +100,7 @@ export function NoteSearchWorkspace({
     const titles = Object.fromEntries(
       notes.map((note) => [note.id, note.title.trim() || "Untitled note"]),
     );
+    const summaries = Object.fromEntries(notes.map((note) => [note.id, note]));
     const requestId = ++requestIdRef.current;
     inFlightIdRef.current = requestId;
     setSubmittedQuery(trimmed);
@@ -103,6 +114,7 @@ export function NoteSearchWorkspace({
       }
       setOutcome(describeSearchOutcome(trimmed, response));
       setResultTitles(titles);
+      setResultSummaries(summaries);
       setFailure(null);
     } catch (error) {
       if (requestId !== requestIdRef.current) {
@@ -235,6 +247,9 @@ export function NoteSearchWorkspace({
                 const locationLabel = formatSourceLocation(source);
                 const revisionLabel = formatSourceRevision(source.version);
                 const noteTitle = resolveNoteTitle(source.noteId);
+                const summary =
+                  notes.find((item) => item.id === source.noteId) ?? resultSummaries[source.noteId];
+                const originSource = resolveOriginSource(summary?.origin, notes);
                 const isActive =
                   activeSourceTarget?.source.noteId === source.noteId &&
                   activeSourceTarget?.source.version === source.version &&
@@ -257,6 +272,22 @@ export function NoteSearchWorkspace({
                             {headingPath ? `${headingPath} - ` : ""}
                             {locationLabel} - {revisionLabel}
                           </span>
+                          {summary ? (
+                            <span className="note-search-meta">
+                              <span
+                                className="note-authorship-badge"
+                                data-authorship={getNoteAuthorship(summary)}
+                              >
+                                {formatNoteAuthorship(summary)}
+                              </span>
+                              <span className="note-meta-timestamp">
+                                Last edited{" "}
+                                <time dateTime={summary.updatedAt}>
+                                  {formatNoteTimestamp(summary.updatedAt)}
+                                </time>
+                              </span>
+                            </span>
+                          ) : null}
                         </CardDescription>
                         <CardAction>
                           <Button
@@ -275,8 +306,35 @@ export function NoteSearchWorkspace({
                           </Button>
                         </CardAction>
                       </CardHeader>
-                      <CardContent>
+                      <CardContent className="space-y-2">
                         <blockquote className="note-search-excerpt">{candidate.text}</blockquote>
+                        {originSource ? (
+                          <div
+                            className="note-search-origin"
+                            data-source-state={originSource.status}
+                          >
+                            <span className="note-meta-label">Source note:</span>
+                            {originSource.status === "available" ? (
+                              <a
+                                href={buildInternalNoteHref(originSource.noteId)}
+                                className="note-source-link"
+                                aria-disabled={!enabled || !canOpenSource || undefined}
+                                tabIndex={!enabled || !canOpenSource ? -1 : undefined}
+                                onClick={(event) => {
+                                  event.preventDefault();
+                                  if (!enabled || !canOpenSource) return;
+                                  onOpenNote?.(originSource.noteId);
+                                }}
+                              >
+                                {originSource.title}
+                              </a>
+                            ) : (
+                              <span className="note-source-unavailable">
+                                Source note unavailable
+                              </span>
+                            )}
+                          </div>
+                        ) : null}
                       </CardContent>
                     </Card>
                   </li>

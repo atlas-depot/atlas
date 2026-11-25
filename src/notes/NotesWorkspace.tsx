@@ -49,6 +49,13 @@ import {
   type RequestFailure,
 } from "./editor-state";
 import {
+  buildInternalNoteHref,
+  formatNoteAuthorship,
+  formatNoteTimestamp,
+  getNoteAuthorship,
+  resolveNoteSources,
+} from "./note-metadata";
+import {
   resolveDeletedSource,
   resolveSourceInNote,
   resolveUnavailableSource,
@@ -58,7 +65,7 @@ import {
 type Draft = CreateNote;
 type Selection =
   | { kind: "new" }
-  | { kind: "read"; id: string; sourceTarget?: SourceTarget }
+  | { kind: "read"; id: string; sourceTarget?: SourceTarget; linkedSource?: boolean }
   | { kind: "replace"; snapshot: NoteSnapshot };
 type ReadFailure = {
   id: string;
@@ -125,6 +132,7 @@ export function NotesWorkspace({
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [activeSourceTarget, setActiveSourceTarget] = useState<SourceTarget | null>(null);
   const [unavailableSourceTarget, setUnavailableSourceTarget] = useState<SourceTarget | null>(null);
+  const [unavailableLinkNotice, setUnavailableLinkNotice] = useState<string | null>(null);
   const [searchResetToken, setSearchResetToken] = useState(0);
   const desktop = useSyncExternalStore(subscribeDesktop, isDesktop);
   const [chatVisibility, setChatOpen] = useState<boolean | null>(null);
@@ -162,6 +170,7 @@ export function NotesWorkspace({
   const deleteRefreshRef = useRef<HTMLButtonElement>(null);
   const deleteCancelRef = useRef<HTMLButtonElement>(null);
   const noteActionsRef = useRef<HTMLButtonElement>(null);
+  const unavailableLinkRef = useRef<HTMLElement>(null);
   const dirty = useMemo(
     () => !editorValid || hasUnsavedChanges(draft, saved?.note ?? null),
     [draft, saved, editorValid],
@@ -217,6 +226,7 @@ export function NotesWorkspace({
     setComparison(null);
     setActiveSourceTarget(null);
     setUnavailableSourceTarget(null);
+    setUnavailableLinkNotice(null);
     setSearchResetToken((value) => value + 1);
   }, []);
 
@@ -231,6 +241,7 @@ export function NotesWorkspace({
       setSaveState("idle");
       setReadFailure(null);
       setComparison(null);
+      setUnavailableLinkNotice(null);
       if (creation) setPendingCreation(null);
       if (deletion) {
         setDeleteFailure(null);
@@ -333,12 +344,24 @@ export function NotesWorkspace({
     return () => cancelAnimationFrame(frame);
   }, [deleteFailure, deleteNotice]);
 
-  async function openNote(id: string, compare = false, sourceTarget?: SourceTarget) {
+  useEffect(() => {
+    if (!unavailableLinkNotice) return;
+    const frame = requestAnimationFrame(() => unavailableLinkRef.current?.focus());
+    return () => cancelAnimationFrame(frame);
+  }, [unavailableLinkNotice]);
+
+  async function openNote(
+    id: string,
+    compare = false,
+    sourceTarget?: SourceTarget,
+    linkedSource = false,
+  ) {
     if (!requestsEnabled || busyRef.current) return;
     busyRef.current = true;
     setOpeningId(id);
     setReadFailure(null);
     setDeleteNotice(null);
+    setUnavailableLinkNotice(null);
     if (sourceTarget) {
       setActiveSourceTarget(null);
       setUnavailableSourceTarget(null);
@@ -354,15 +377,23 @@ export function NotesWorkspace({
       }
     } catch (error) {
       const kind = classifyFailure(error);
-      setReadFailure({ id, compare, kind, sourceTarget });
       if (kind === "unauthenticated") clearPrivateCache();
       if (kind === "missing") {
         setNotes((current) => current.filter((note) => note.id !== id));
+        if (linkedSource) {
+          setUnavailableLinkNotice(
+            "This source note is unavailable. It may have been deleted or belongs to another account.",
+          );
+          return;
+        }
+        setReadFailure({ id, compare, kind, sourceTarget });
         if (sourceTarget) {
           setActiveSourceTarget(null);
           setUnavailableSourceTarget(sourceTarget);
         }
+        return;
       }
+      setReadFailure({ id, compare, kind, sourceTarget });
     } finally {
       busyRef.current = false;
       setOpeningId(null);
@@ -471,10 +502,11 @@ export function NotesWorkspace({
     if (!requestsEnabled) return;
     setPending(null);
     if (selection.kind === "read") {
-      void openNote(selection.id, false, selection.sourceTarget);
+      void openNote(selection.id, false, selection.sourceTarget, selection.linkedSource ?? false);
       return;
     }
     setUnavailableSourceTarget(null);
+    setUnavailableLinkNotice(null);
     if (selection.kind === "replace") {
       applySnapshot(selection.snapshot);
     } else {
@@ -500,6 +532,28 @@ export function NotesWorkspace({
       return;
     if (dirty || pendingCreation !== null) setPending(selection);
     else select(selection);
+  }
+
+  function requestOpenLinkedNote(targetId: string) {
+    if (!requestsEnabled || busyRef.current || blocked) return;
+    const normalizedId = targetId.toLowerCase();
+    const owned = notes.find((note) => note.id.toLowerCase() === normalizedId);
+    if (owned) {
+      if (owned.id === saved?.note.id) {
+        setUnavailableLinkNotice(null);
+        requestAnimationFrame(() => titleRef.current?.focus());
+        return;
+      }
+      requestSelection({ kind: "read", id: owned.id, linkedSource: true });
+      return;
+    }
+    if (dirty || pendingCreation !== null) {
+      setUnavailableLinkNotice(
+        "This source note is unavailable. It may have been deleted or belongs to another account.",
+      );
+      return;
+    }
+    void openNote(normalizedId, false, undefined, true);
   }
 
   function requestOpenSource(target: SourceTarget) {
@@ -628,6 +682,12 @@ export function NotesWorkspace({
     const found = notes.find((item) => item.id === targetId);
     return found ? found.title || "Untitled note" : (resolvedSource?.target.noteTitle ?? null);
   }, [notes, resolvedSource]);
+
+  const noteSources = useMemo(() => {
+    if (!saved) return [];
+    const origin = typeof window === "undefined" ? undefined : window.location.origin;
+    return resolveNoteSources(saved.note, notes, origin);
+  }, [saved, notes]);
 
   function dismissSource() {
     setActiveSourceTarget(null);
@@ -811,6 +871,7 @@ export function NotesWorkspace({
                 canOpenSource={!busy}
                 activeSourceTarget={unavailableSourceTarget ?? activeSourceTarget}
                 onOpenSource={requestOpenSource}
+                onOpenNote={requestOpenLinkedNote}
                 onUnauthenticated={handleSearchUnauthenticated}
               />
             )}
@@ -826,7 +887,7 @@ export function NotesWorkspace({
                 <ul>
                   {notes.map((note) => (
                     // A grid item stretches, so the button keeps its full column width.
-                    <li key={note.id} className="grid">
+                    <li key={note.id} className="note-list-item grid">
                       <Button
                         variant={saved?.note.id === note.id ? "secondary" : "ghost"}
                         aria-current={saved?.note.id === note.id ? "true" : undefined}
@@ -836,6 +897,13 @@ export function NotesWorkspace({
                       >
                         {note.title || "Untitled note"}
                       </Button>
+                      <div className="note-list-meta">
+                        <span data-authorship={getNoteAuthorship(note)}>
+                          {formatNoteAuthorship(note)}
+                        </span>
+                        <span aria-hidden="true">·</span>
+                        <time dateTime={note.updatedAt}>{formatNoteTimestamp(note.updatedAt)}</time>
+                      </div>
                     </li>
                   ))}
                 </ul>
@@ -852,6 +920,24 @@ export function NotesWorkspace({
                   fallbackTitle={fallbackSourceTitle}
                   onDismiss={dismissSource}
                 />
+              )}
+              {unavailableLinkNotice && (
+                <section
+                  ref={unavailableLinkRef}
+                  tabIndex={-1}
+                  aria-label="Unavailable source"
+                  aria-live="polite"
+                  className="unavailable-source-notice"
+                >
+                  <p role="note">{unavailableLinkNotice}</p>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => setUnavailableLinkNotice(null)}
+                  >
+                    Dismiss
+                  </Button>
+                </section>
               )}
               {draft && (
                 <div className="note-detail" data-editor-mode={editorMode}>
@@ -901,12 +987,108 @@ export function NotesWorkspace({
                                 >
                                   Delete note
                                 </Menu.Item>
+                                <Menu.Item
+                                  onClick={() => {
+                                    void navigator.clipboard?.writeText(
+                                      buildInternalNoteHref(saved.note.id),
+                                    );
+                                  }}
+                                >
+                                  Copy note link
+                                </Menu.Item>
                               </Menu.Popup>
                             </Menu.Positioner>
                           </Menu.Portal>
                         </Menu.Root>
                       )}
                     </div>
+                    {saved && (
+                      <section aria-label="Note details" className="note-metadata-bar">
+                        <span
+                          className="note-authorship-badge"
+                          data-authorship={getNoteAuthorship(saved.note)}
+                        >
+                          {formatNoteAuthorship(saved.note)}
+                        </span>
+                        <span className="note-meta-item">
+                          <span className="note-meta-label">Created</span>{" "}
+                          <time dateTime={saved.note.createdAt}>
+                            {formatNoteTimestamp(saved.note.createdAt)}
+                          </time>
+                        </span>
+                        <span className="note-meta-item">
+                          <span className="note-meta-label">Last edited</span>{" "}
+                          <time dateTime={saved.note.updatedAt}>
+                            {formatNoteTimestamp(saved.note.updatedAt)}
+                          </time>
+                        </span>
+                        {noteSources.length > 0 && (
+                          <div className="note-meta-sources">
+                            <span className="note-meta-label">
+                              {noteSources.length === 1 ? "Source" : "Sources"}
+                            </span>
+                            <ul className="note-meta-source-list">
+                              {noteSources.map((source) => (
+                                <li
+                                  key={`${source.kind}:${source.noteId}`}
+                                  data-source-kind={source.kind}
+                                  data-source-state={source.status}
+                                >
+                                  {source.status === "available" ? (
+                                    <>
+                                      <a
+                                        href={buildInternalNoteHref(source.noteId)}
+                                        className="note-source-link"
+                                        aria-disabled={busy || blocked || undefined}
+                                        tabIndex={busy || blocked ? -1 : undefined}
+                                        onClick={(event) => {
+                                          event.preventDefault();
+                                          requestOpenLinkedNote(source.noteId);
+                                        }}
+                                      >
+                                        {source.title}
+                                      </a>
+                                      {source.kind === "origin" ? (
+                                        <span className="note-meta-revision">
+                                          {" "}
+                                          (Revision {source.revision})
+                                        </span>
+                                      ) : null}
+                                    </>
+                                  ) : (
+                                    <span className="note-source-unavailable">
+                                      Source note unavailable
+                                      {source.kind === "origin"
+                                        ? ` (Revision ${source.revision})`
+                                        : ""}
+                                    </span>
+                                  )}
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+                        )}
+                        {saved.note.origin && saved.note.origin.sources.length > 0 && (
+                          <div className="note-meta-sources">
+                            <span className="note-meta-label">Web sources</span>
+                            <ul className="note-meta-source-list">
+                              {saved.note.origin.sources.map((source) => (
+                                <li key={source.id}>
+                                  <a
+                                    href={source.url}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                    className="note-source-link"
+                                  >
+                                    {source.title.trim() || source.url}
+                                  </a>
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+                        )}
+                      </section>
+                    )}
                     <Suspense fallback={<p>Opening editor...</p>}>
                       <BlockNoteEditor
                         key={editorKey}
@@ -927,6 +1109,7 @@ export function NotesWorkspace({
                         }
                         onModeChange={setEditorMode}
                         onValidityChange={setEditorValid}
+                        onOpenNoteLink={requestOpenLinkedNote}
                       />
                     </Suspense>
                     {!valid && (
@@ -946,7 +1129,10 @@ export function NotesWorkspace({
                       </CardHeader>
                       <CardContent>
                         {draft.content ? (
-                          <MarkdownPreview content={draft.content} />
+                          <MarkdownPreview
+                            content={draft.content}
+                            onOpenNoteLink={requestOpenLinkedNote}
+                          />
                         ) : (
                           <p>Write Markdown to see a preview.</p>
                         )}

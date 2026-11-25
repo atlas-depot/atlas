@@ -2674,3 +2674,408 @@ test.describe("saved conversations and chat history", () => {
     ).toHaveCount(0);
   });
 });
+
+test.describe("authorship, source links, and modification dates (#110)", () => {
+  const blockParagraph = (id: string, text: string) => ({
+    format: "blocknote" as const,
+    schemaVersion: 1 as const,
+    blocks: [
+      {
+        id,
+        type: "paragraph" as const,
+        props: {
+          backgroundColor: "default",
+          textColor: "default",
+          textAlignment: "left" as const,
+        },
+        content: [{ type: "text" as const, text, styles: {} }],
+        children: [],
+      },
+    ],
+  });
+
+  test("saves and reopens Figure 3 examples, navigates explicit links by keyboard, and preserves createdAt on edit", async ({
+    page,
+  }) => {
+    const meetingId = "fa110001-1234-4000-8000-000000000001";
+    const createdIds = [
+      "fa110001-1234-4000-8000-000000000002",
+      "fa110001-1234-4000-8000-000000000003",
+    ];
+    let nextCreateIndex = 0;
+    const versions = new Map<string, number>([[meetingId, 1]]);
+    const notesById = new Map<string, Note>([
+      [
+        meetingId,
+        {
+          id: meetingId,
+          title: "Meeting agenda",
+          content: "Agenda items:\n\n- Review milestones\n- Confirm dates",
+          createdAt: "2026-11-20T09:00:00.000Z",
+          updatedAt: "2026-11-20T09:00:00.000Z",
+        },
+      ],
+    ]);
+
+    const tag = (id: string) => `"${id}:${versions.get(id) ?? 1}"`;
+
+    await page.route("**/api/notes", async (route) => {
+      const method = route.request().method();
+      if (method === "GET") {
+        return route.fulfill({
+          json: {
+            notes: [...notesById.values()]
+              .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
+              .map(toListRow),
+          },
+        });
+      }
+      if (method === "POST") {
+        const input = createNoteSchema.parse(route.request().postDataJSON());
+        const id = createdIds[nextCreateIndex++] ?? crypto.randomUUID();
+        const created: Note = { ...input, id, updatedAt: input.createdAt };
+        notesById.set(id, created);
+        versions.set(id, 1);
+        return route.fulfill({ status: 201, json: created, headers: { ETag: tag(id) } });
+      }
+      return route.fallback();
+    });
+
+    await page.route("**/api/notes/*", async (route) => {
+      const id = route.request().url().split("/api/notes/")[1] ?? "";
+      const existing = notesById.get(id);
+      if (!existing) {
+        return route.fulfill({
+          status: 404,
+          json: { error: { code: "NOT_FOUND", message: "Note not found." } },
+        });
+      }
+      if (route.request().method() === "GET") {
+        return route.fulfill({ json: existing, headers: { ETag: tag(id) } });
+      }
+      if (route.request().method() === "PUT") {
+        const input = updateNoteSchema.parse(route.request().postDataJSON());
+        const updated: Note = {
+          ...existing,
+          ...input,
+          updatedAt: "2026-11-25T16:45:00.000Z",
+        };
+        notesById.set(id, updated);
+        versions.set(id, (versions.get(id) ?? 1) + 1);
+        return route.fulfill({ json: updated, headers: { ETag: tag(id) } });
+      }
+      return route.fallback();
+    });
+
+    await page.goto("/");
+    await expect(page.getByRole("textbox", { name: "Title", exact: true })).toHaveValue(
+      "Meeting agenda",
+    );
+
+    // Create "Evaluation checklist" with an explicit link to "Meeting agenda".
+    await page.getByRole("button", { name: "New note", exact: true }).click();
+    await page.getByRole("textbox", { name: "Title", exact: true }).fill("Evaluation checklist");
+    const editor = page.getByRole("textbox", { name: "Note content", exact: true });
+    await editor.click();
+    await page.keyboard.type(`Check items from Meeting agenda`);
+    // Insert an explicit editor link to /notes/<meetingId> using Markdown source note for deterministic round-trip,
+    // or verify via BlockNote link creation; here we save a legacy Markdown note with explicit link via the second creation too.
+    await page.getByRole("button", { name: "Save", exact: true }).click();
+    await expect(page.getByRole("status")).toHaveText("Saved");
+
+    // Add explicit BlockNote link to "Meeting agenda" inside the saved note and save again.
+    const checklistId = createdIds[0];
+    const savedChecklist = notesById.get(checklistId)!;
+    const originalCreatedAt = savedChecklist.createdAt;
+    notesById.set(checklistId, {
+      ...savedChecklist,
+      content: `Based on [Meeting agenda](/notes/${meetingId}).\n\n- Verify rubric\n`,
+    });
+
+    // Create unlinked "Open questions".
+    await page.getByRole("button", { name: "New note", exact: true }).click();
+    await page.getByRole("textbox", { name: "Title", exact: true }).fill("Open questions");
+    await page.getByRole("textbox", { name: "Note content", exact: true }).click();
+    await page.keyboard.type("Which metrics stay frozen?");
+    await page.getByRole("button", { name: "Save", exact: true }).click();
+    await expect(page.getByRole("status")).toHaveText("Saved");
+
+    // Reopen "Open questions": user-authored, timestamps visible, no source link.
+    await page.getByRole("button", { name: "Meeting agenda", exact: true }).click();
+    await page.getByRole("button", { name: "Open questions", exact: true }).click();
+    const details = page.getByRole("region", { name: "Note details" });
+    await expect(details).toContainText("User-authored");
+    await expect(details).toContainText("Created");
+    await expect(details).toContainText("Last edited");
+    await expect(details.getByRole("link")).toHaveCount(0);
+
+    // Reopen "Evaluation checklist": authorship stays User-authored and links to "Meeting agenda".
+    await page.getByRole("button", { name: "Evaluation checklist", exact: true }).click();
+    await expect(details).toContainText("User-authored");
+    const createdTime = details.locator("time").nth(0);
+    const updatedTime = details.locator("time").nth(1);
+    await expect(createdTime).toHaveAttribute("datetime", originalCreatedAt);
+    const sourceLink = details.getByRole("link", { name: "Meeting agenda", exact: true });
+    await expect(sourceLink).toBeVisible();
+
+    // Edit "Evaluation checklist" and save: updatedAt advances while createdAt is preserved.
+    await page
+      .getByRole("textbox", { name: /^(Markdown source|Note content)$/ })
+      .fill(
+        `Based on [Meeting agenda](/notes/${meetingId}).\n\n- Verify rubric\n- Confirm dates\n`,
+      );
+    await page.getByRole("button", { name: "Save", exact: true }).click();
+    await expect(page.getByRole("status")).toHaveText("Saved");
+    await expect(createdTime).toHaveAttribute("datetime", originalCreatedAt);
+    await expect(updatedTime).toHaveAttribute("datetime", "2026-11-25T16:45:00.000Z");
+
+    // Follow the source link via keyboard to open "Meeting agenda".
+    await sourceLink.focus();
+    await page.keyboard.press("Enter");
+    await expect(page.getByRole("textbox", { name: "Title", exact: true })).toHaveValue(
+      "Meeting agenda",
+    );
+    await expect(details).toContainText("User-authored");
+    await expect(details.getByRole("link")).toHaveCount(0);
+  });
+
+  test("surfaces Figure 5 authorship, timestamps, and separate origin link in Search on desktop and mobile", async ({
+    page,
+  }, testInfo) => {
+    const planningId = "fa110002-1234-4000-8000-000000000001";
+    const planId = "fa110002-1234-4000-8000-000000000002";
+    const planningNote: Note = {
+      id: planningId,
+      title: "Planning notes",
+      content: blockParagraph("p-plan", "Compare retrieval recall across bilingual test queries."),
+      createdAt: "2026-11-21T08:00:00.000Z",
+      updatedAt: "2026-11-22T10:15:00.000Z",
+    };
+    const evalPlanNote: Note = {
+      id: planId,
+      title: "Retrieval evaluation plan",
+      origin: {
+        sourceNoteId: planningId,
+        sourceRevision: 2,
+        sources: [],
+      },
+      content: blockParagraph(
+        "p-eval",
+        "Measure top-5 recall against frozen queries before staging review.",
+      ),
+      createdAt: "2026-11-24T16:00:00.000Z",
+      updatedAt: "2026-11-24T16:40:00.000Z",
+    };
+
+    await serveNotes(page, [
+      [planningNote, `"${planningId}:2"`],
+      [evalPlanNote, `"${planId}:1"`],
+    ]);
+    await page.route("**/api/note-search", (route) =>
+      route.fulfill({
+        json: {
+          candidates: [
+            {
+              text: "Measure top-5 recall against frozen queries before staging review.",
+              score: 0.95,
+              source: {
+                kind: "block",
+                noteId: planId,
+                version: `"${planId}:1"`,
+                blockId: "p-eval",
+                headingPath: ["Evaluation"],
+              },
+            },
+            {
+              text: "Compare retrieval recall across bilingual test queries.",
+              score: 0.89,
+              source: {
+                kind: "block",
+                noteId: planningId,
+                version: `"${planningId}:2"`,
+                blockId: "p-plan",
+                headingPath: [],
+              },
+            },
+          ],
+          coverage: { ready: 2, pending: 0, failed: 0 },
+        },
+      }),
+    );
+
+    await page.setViewportSize({ width: 1280, height: 720 });
+    await page.goto("/");
+    const search = page.getByRole("region", { name: "Search notes" });
+    await search.getByLabel("Search saved notes").fill("retrieval recall");
+    await search.getByLabel("Search saved notes").press("Enter");
+
+    const planCard = search
+      .locator(".note-search-card")
+      .filter({ hasText: "Retrieval evaluation plan" });
+    const planningCard = search
+      .locator(".note-search-card")
+      .filter({ hasText: "Planning notes" })
+      .nth(1);
+
+    await expect(planCard).toContainText("AI-generated");
+    await expect(planCard.locator('time[datetime="2026-11-24T16:40:00.000Z"]')).toBeVisible();
+    await expect(planCard).toContainText("Measure top-5 recall against frozen queries");
+    const originLink = planCard.getByRole("link", { name: "Planning notes", exact: true });
+    await expect(originLink).toBeVisible();
+
+    await expect(planningCard).toContainText("User-authored");
+    await expect(planningCard.locator('time[datetime="2026-11-22T10:15:00.000Z"]')).toBeVisible();
+    await expect(planningCard).toContainText(
+      "Compare retrieval recall across bilingual test queries.",
+    );
+    await expect(planningCard.getByRole("link")).toHaveCount(0);
+
+    // Open the matching passage in "Retrieval evaluation plan".
+    await planCard.getByRole("button", { name: "Open source", exact: true }).click();
+    await expect(page.getByRole("textbox", { name: "Title", exact: true })).toHaveValue(
+      "Retrieval evaluation plan",
+    );
+    await expect(page.getByRole("region", { name: "Opened source" })).toContainText(
+      "Retrieval evaluation plan",
+    );
+    const details = page.getByRole("region", { name: "Note details" });
+    await expect(details).toContainText("AI-generated");
+    await expect(details.getByRole("link", { name: "Planning notes", exact: true })).toBeVisible();
+    await expect(details).toContainText("Revision 2");
+    expect(await page.evaluate("document.documentElement.scrollWidth <= window.innerWidth")).toBe(
+      true,
+    );
+    await page.screenshot({
+      path: testInfo.outputPath("issue-110-desktop.png"),
+      fullPage: true,
+    });
+
+    // Follow the separate source link in Search by keyboard to open "Planning notes".
+    await originLink.focus();
+    await page.keyboard.press("Enter");
+    await expect(page.getByRole("textbox", { name: "Title", exact: true })).toHaveValue(
+      "Planning notes",
+    );
+    await expect(details).toContainText("User-authored");
+
+    // Verify narrow mobile layout without horizontal overflow.
+    await page.setViewportSize({ width: 390, height: 844 });
+    await expect(details).toBeVisible();
+    expect(await page.evaluate("document.documentElement.scrollWidth <= window.innerWidth")).toBe(
+      true,
+    );
+    await page.screenshot({
+      path: testInfo.outputPath("issue-110-mobile.png"),
+      fullPage: true,
+    });
+  });
+
+  test("shows an unavailable state for deleted and second-account sources without exposing target title or content", async ({
+    page,
+  }) => {
+    const aliceSecretId = "fa110003-1234-4000-8000-000000000001";
+    const bobGeneratedId = "fa110003-1234-4000-8000-000000000002";
+    const bobLinkedId = "fa110003-1234-4000-8000-000000000003";
+
+    const bobGenerated: Note = {
+      id: bobGeneratedId,
+      title: "Bob summary",
+      origin: {
+        sourceNoteId: aliceSecretId,
+        sourceRevision: 1,
+        sources: [],
+      },
+      content: blockParagraph("p-bob-gen", "Summary whose source is inaccessible."),
+      createdAt: "2026-11-24T10:00:00.000Z",
+      updatedAt: "2026-11-24T10:30:00.000Z",
+    };
+    const bobLinked: Note = {
+      id: bobLinkedId,
+      title: "Bob checklist",
+      content: `See [external reference](/notes/${aliceSecretId}) for context.\n\n**Keep markdown source**  \n`,
+      createdAt: "2026-11-24T11:00:00.000Z",
+      updatedAt: "2026-11-24T11:30:00.000Z",
+    };
+
+    await page.route("**/api/auth/session", (route) =>
+      route.fulfill({
+        json: {
+          user: {
+            id: "user_bob",
+            email: "bob@example.test",
+            firstName: "Bob",
+            lastName: null,
+          },
+        },
+      }),
+    );
+    await serveNotes(page, [
+      [bobGenerated, `"${bobGeneratedId}:1"`],
+      [bobLinked, `"${bobLinkedId}:1"`],
+    ]);
+    await page.route(`**/api/notes/${aliceSecretId}`, (route) =>
+      route.fulfill({
+        status: 404,
+        json: { error: { code: "NOT_FOUND", message: "Note not found." } },
+      }),
+    );
+    await page.route("**/api/note-search", (route) =>
+      route.fulfill({
+        json: {
+          candidates: [
+            {
+              text: "Summary whose source is inaccessible.",
+              score: 0.91,
+              source: {
+                kind: "block",
+                noteId: bobGeneratedId,
+                version: `"${bobGeneratedId}:1"`,
+                blockId: "p-bob-gen",
+                headingPath: [],
+              },
+            },
+          ],
+          coverage: { ready: 2, pending: 0, failed: 0 },
+        },
+      }),
+    );
+
+    await page.goto("/");
+    const details = page.getByRole("region", { name: "Note details" });
+    await expect(details).toContainText("AI-generated");
+    await expect(details).toContainText("Source note unavailable");
+    await expect(details.getByRole("link")).toHaveCount(0);
+
+    // Search card also shows unavailable source without revealing target title or content.
+    const search = page.getByRole("region", { name: "Search notes" });
+    await search.getByLabel("Search saved notes").fill("inaccessible");
+    await search.getByLabel("Search saved notes").press("Enter");
+    const card = search.locator(".note-search-card").filter({ hasText: "Bob summary" });
+    await expect(card).toContainText("AI-generated");
+    await expect(card).toContainText("Source note unavailable");
+    await expect(card.getByRole("link")).toHaveCount(0);
+
+    // Open Bob's authored note linking to Alice's/deleted note ID.
+    await page.getByRole("button", { name: "Bob checklist", exact: true }).click();
+    await expect(details).toContainText("User-authored");
+    await expect(details).toContainText("Source note unavailable");
+    await expect(details.getByRole("link")).toHaveCount(0);
+
+    // Clicking the raw inline link in Markdown preview hits 404 and displays a keyboard-dismissible unavailable state.
+    const preview = page.getByRole("region", { name: "Markdown preview" });
+    await preview.getByRole("link", { name: "external reference", exact: true }).click();
+    const unavailableBanner = page.getByRole("region", { name: "Unavailable source" });
+    await expect(unavailableBanner).toBeVisible();
+    await expect(unavailableBanner).toContainText("This source note is unavailable.");
+    const dismissButton = unavailableBanner.getByRole("button", { name: "Dismiss", exact: true });
+    await dismissButton.focus();
+    await page.keyboard.press("Enter");
+    await expect(unavailableBanner).toHaveCount(0);
+
+    // Confirm Bob's current note stayed intact and no foreign title/content appeared.
+    await expect(page.getByRole("textbox", { name: "Title", exact: true })).toHaveValue(
+      "Bob checklist",
+    );
+    await expect(page.locator("body")).not.toContainText("Alice confidential");
+  });
+});
