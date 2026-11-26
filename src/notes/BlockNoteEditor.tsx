@@ -1,4 +1,4 @@
-import { useEffect, useId, useMemo, useRef, useState } from "react";
+import { useDeferredValue, useEffect, useId, useMemo, useRef, useState } from "react";
 import { ArrowUUpLeftIcon } from "@phosphor-icons/react/dist/csr/ArrowUUpLeft";
 import { ArrowUUpRightIcon } from "@phosphor-icons/react/dist/csr/ArrowUUpRight";
 import { Button } from "@/components/ui/button";
@@ -66,7 +66,12 @@ function MarkdownNoteEditor(props: EditorProps & { source: string }) {
   const contentId = useId();
   const warningId = useId();
   const [source, setSource] = useState(props.source);
-  const tableWarnings = useMemo(() => findMarkdownTableDelimiterWarnings(source), [source]);
+  // Keep typing responsive on large notes; the warning can settle one render later.
+  const deferredSource = useDeferredValue(source);
+  const tableWarnings = useMemo(
+    () => findMarkdownTableDelimiterWarnings(deferredSource),
+    [deferredSource],
+  );
   const sourceRef = useRef<HTMLTextAreaElement>(null);
   const [converted] = useState(() => {
     try {

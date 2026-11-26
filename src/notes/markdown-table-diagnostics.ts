@@ -50,7 +50,12 @@ function numberWord(value: number) {
 }
 
 function ordinalWord(value: number) {
-  return ordinalWords[value] ?? `${value}th`;
+  const named = ordinalWords[value];
+  if (named) return named;
+  const lastTwo = value % 100;
+  if (lastTwo >= 11 && lastTwo <= 13) return `${value}th`;
+  const suffix = ["th", "st", "nd", "rd"][value % 10] ?? "th";
+  return `${value}${suffix}`;
 }
 
 function listWords(values: string[]) {

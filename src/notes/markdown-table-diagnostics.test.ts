@@ -98,6 +98,21 @@ describe("Markdown table delimiter diagnostics", () => {
     ]);
   });
 
+  const ordinalCases: Array<[number, string]> = [
+    [13, "13th"],
+    [21, "21st"],
+    [22, "22nd"],
+    [23, "23rd"],
+    [24, "24th"],
+  ];
+
+  it.each(ordinalCases)("uses the correct ordinal suffix for column %i", (columns, ordinal) => {
+    const header = `| ${Array.from({ length: columns }, (_, index) => `H${index + 1}`).join(" | ")} |`;
+    const delimiter = `| ${Array.from({ length: columns - 1 }, () => "---").join(" | ")} |`;
+    const [warning] = findMarkdownTableDelimiterWarnings(`${header}\n${delimiter}`);
+    expect(warning?.summary).toContain(`The ${ordinal} one is missing.`);
+  });
+
   it("handles CRLF and multiple malformed tables", () => {
     const source = ["| A | B |", "| --- |", "", "| C | D | E |", "| --- |"].join("\r\n");
     expect(findMarkdownTableDelimiterWarnings(source)).toHaveLength(2);
