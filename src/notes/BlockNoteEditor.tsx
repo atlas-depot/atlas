@@ -3,6 +3,7 @@ import { ArrowUUpLeftIcon } from "@phosphor-icons/react/dist/csr/ArrowUUpLeft";
 import { ArrowUUpRightIcon } from "@phosphor-icons/react/dist/csr/ArrowUUpRight";
 import { Button } from "@/components/ui/button";
 import { canImportGeneratedMarkdown } from "./generated-markdown";
+import { findMarkdownTableDelimiterWarnings } from "./markdown-table-diagnostics";
 import { findMarkdownSourceBlock } from "./markdown-source-location";
 import { noteSchema as schema } from "./editor-schema";
 import { noteSyntaxHighlighting } from "./code-theme";
@@ -63,7 +64,9 @@ export function BlockNoteEditor(props: EditorProps) {
 
 function MarkdownNoteEditor(props: EditorProps & { source: string }) {
   const contentId = useId();
+  const warningId = useId();
   const [source, setSource] = useState(props.source);
+  const tableWarnings = useMemo(() => findMarkdownTableDelimiterWarnings(source), [source]);
   const sourceRef = useRef<HTMLTextAreaElement>(null);
   const [converted] = useState(() => {
     try {
@@ -169,6 +172,29 @@ function MarkdownNoteEditor(props: EditorProps & { source: string }) {
       <p className="text-sm text-muted-foreground">
         Source mode preserves this Markdown without conversion.
       </p>
+      {tableWarnings.length > 0 && (
+        <div
+          id={warningId}
+          role="note"
+          data-test="markdown-table-warning"
+          className="space-y-1 rounded-md border-y border-r border-l-4 border-amber-300 border-l-amber-500 bg-amber-50 px-3 py-2 text-sm text-amber-950 dark:border-amber-700 dark:border-l-amber-400 dark:bg-amber-950/40 dark:text-amber-100"
+        >
+          {tableWarnings.map((warning, index) => (
+            <div
+              key={`${warning.headerCells}-${warning.delimiterCells}-${index}`}
+              className="space-y-1"
+            >
+              <p>{warning.summary}</p>
+              <p>
+                {warning.suggestionLabel}{" "}
+                <code className="rounded border border-amber-300 bg-amber-100 px-1 py-0.5 font-mono text-[0.95em] text-amber-950 dark:border-amber-700 dark:bg-amber-900/60 dark:text-amber-50">
+                  {warning.suggestedRow}
+                </code>
+              </p>
+            </div>
+          ))}
+        </div>
+      )}
       <Textarea
         ref={sourceRef}
         id={contentId}
@@ -177,6 +203,7 @@ function MarkdownNoteEditor(props: EditorProps & { source: string }) {
         rows={6}
         className="note-source max-h-[60vh]"
         data-cited-range={citedRangeAttr}
+        aria-describedby={tableWarnings.length > 0 ? warningId : undefined}
         readOnly={props.disabled}
         onChange={(event) => {
           setSource(event.target.value);
