@@ -50,8 +50,18 @@ describe("note metadata helpers", () => {
   });
 
   it("formats timestamps in the requested locale and falls back on invalid values", () => {
-    const formatted = formatNoteTimestamp("2026-11-25T14:30:00.000Z", "en-US");
-    expect(formatted).toContain("2026");
+    const iso = "2026-11-25T14:30:00.000Z";
+    const expectedUs = new Intl.DateTimeFormat("en-US", {
+      dateStyle: "medium",
+      timeStyle: "short",
+    }).format(new Date(iso));
+    const expectedDe = new Intl.DateTimeFormat("de-DE", {
+      dateStyle: "medium",
+      timeStyle: "short",
+    }).format(new Date(iso));
+    expect(formatNoteTimestamp(iso, "en-US")).toBe(expectedUs);
+    expect(formatNoteTimestamp(iso, "de-DE")).toBe(expectedDe);
+    expect(formatNoteTimestamp(iso, "en-US")).not.toBe(formatNoteTimestamp(iso, "de-DE"));
     expect(formatNoteTimestamp("not-a-date", "en-US")).toBe("not-a-date");
   });
 
@@ -128,12 +138,23 @@ describe("note metadata helpers", () => {
       `[unused]: /notes/${foreignId}`,
     ].join("\n");
     expect(extractLinkedNoteIds(usedRefs)).toEqual([meetingId, planningId, checklistId]);
+
+    const autolinks = [
+      `Angle autolink <https://atlas.example/notes/${meetingId}> and bare https://atlas.example/notes/${planningId}.`,
+      `External autolink <https://evil.example/notes/${foreignId}> stays ignored.`,
+    ].join("\n");
+    expect(extractLinkedNoteIds(autolinks, { currentOrigin: "https://atlas.example" })).toEqual([
+      meetingId,
+      planningId,
+    ]);
   });
 
-  it("handles pathological unmatched brackets in linear time", () => {
-    const pathological = "[".repeat(100_000);
+  it("handles pathological unmatched brackets and malformed links in linear time", () => {
+    const unmatchedBrackets = "[".repeat(100_000);
+    const malformedLinks = "[](a ".repeat(20_000);
     const startedAt = performance.now();
-    expect(extractLinkedNoteIds(pathological)).toEqual([]);
+    expect(extractLinkedNoteIds(unmatchedBrackets)).toEqual([]);
+    expect(extractLinkedNoteIds(malformedLinks)).toEqual([]);
     expect(performance.now() - startedAt).toBeLessThan(1_000);
   });
 

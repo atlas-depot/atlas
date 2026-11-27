@@ -2983,6 +2983,13 @@ test.describe("authorship, source links, and modification dates (#110)", () => {
     const bobGeneratedId = "fa110003-1234-4000-8000-000000000002";
     const bobLinkedId = "fa110003-1234-4000-8000-000000000003";
 
+    const aliceSecret: Note = {
+      id: aliceSecretId,
+      title: "Alice confidential plan",
+      content: blockParagraph("p-alice-secret", "Top secret alpha content."),
+      createdAt: "2026-11-23T09:00:00.000Z",
+      updatedAt: "2026-11-23T09:30:00.000Z",
+    };
     const bobGenerated: Note = {
       id: bobGeneratedId,
       title: "Bob summary",
@@ -3003,28 +3010,39 @@ test.describe("authorship, source links, and modification dates (#110)", () => {
       updatedAt: "2026-11-24T11:30:00.000Z",
     };
 
+    const notesByOwner: Record<string, Note[]> = {
+      user_alice: [aliceSecret],
+      user_bob: [bobGenerated, bobLinked],
+    };
+    let activeUser = {
+      id: "user_alice",
+      email: "alice@example.test",
+      firstName: "Alice",
+      lastName: null as string | null,
+    };
+    let bobDeniedReads = 0;
+
     await page.route("**/api/auth/session", (route) =>
-      route.fulfill({
-        json: {
-          user: {
-            id: "user_bob",
-            email: "bob@example.test",
-            firstName: "Bob",
-            lastName: null,
-          },
-        },
-      }),
+      route.fulfill({ json: { user: activeUser } }),
     );
-    await serveNotes(page, [
-      [bobGenerated, `"${bobGeneratedId}:1"`],
-      [bobLinked, `"${bobLinkedId}:1"`],
-    ]);
-    await page.route(`**/api/notes/${aliceSecretId}`, (route) =>
-      route.fulfill({
-        status: 404,
-        json: { error: { code: "NOT_FOUND", message: "Note not found." } },
-      }),
-    );
+    await page.route("**/api/notes", (route) => {
+      if (route.request().method() !== "GET") return route.fallback();
+      const owned = notesByOwner[activeUser.id] ?? [];
+      return route.fulfill({ json: { notes: owned.map(toListRow) } });
+    });
+    await page.route("**/api/notes/*", (route) => {
+      if (route.request().method() !== "GET") return route.fallback();
+      const id = route.request().url().split("/api/notes/")[1] ?? "";
+      const owned = (notesByOwner[activeUser.id] ?? []).find((note) => note.id === id);
+      if (!owned) {
+        if (activeUser.id === "user_bob" && id === aliceSecretId) bobDeniedReads++;
+        return route.fulfill({
+          status: 404,
+          json: { error: { code: "NOT_FOUND", message: "Note not found." } },
+        });
+      }
+      return route.fulfill({ json: owned, headers: { ETag: `"${owned.id}:1"` } });
+    });
     await page.route("**/api/note-search", (route) =>
       route.fulfill({
         json: {
@@ -3046,30 +3064,46 @@ test.describe("authorship, source links, and modification dates (#110)", () => {
       }),
     );
 
+    // First verify Alice's protected note exists and is readable by Alice.
     await page.goto("/");
+    await expect(page.getByRole("textbox", { name: "Title", exact: true })).toHaveValue(
+      "Alice confidential plan",
+    );
+    await expect(page.getByText("Top secret alpha content.")).toBeVisible();
+
+    // Switch to Bob (second account) and verify Alice's note is never exposed.
+    activeUser = {
+      id: "user_bob",
+      email: "bob@example.test",
+      firstName: "Bob",
+      lastName: null,
+    };
+    await page.reload();
     const details = page.getByRole("region", { name: "Note details" });
     await expect(details).toContainText("AI-generated");
-    await expect(details).toContainText("Source note unavailable");
+    await expect(details).toContainText("Source note unavailable (Revision 1)");
     await expect(details.getByRole("link")).toHaveCount(0);
 
-    // Search card also shows unavailable source without revealing target title or content.
+    // Search card also shows unavailable source without revealing Alice's title or content.
     const search = page.getByRole("region", { name: "Search notes" });
     await search.getByLabel("Search saved notes").fill("inaccessible");
     await search.getByLabel("Search saved notes").press("Enter");
     const card = search.locator(".note-search-card").filter({ hasText: "Bob summary" });
     await expect(card).toContainText("AI-generated");
-    await expect(card).toContainText("Source note unavailable");
+    await expect(card).toContainText("Source note unavailable (Revision 1)");
     await expect(card.getByRole("link")).toHaveCount(0);
 
-    // Open Bob's authored note linking to Alice's/deleted note ID.
+    // Open Bob's authored note linking to Alice's note ID.
     await page.getByRole("button", { name: "Bob checklist", exact: true }).click();
     await expect(details).toContainText("User-authored");
     await expect(details).toContainText("Source note unavailable");
     await expect(details.getByRole("link")).toHaveCount(0);
 
-    // Clicking the raw inline link in Markdown preview hits 404 and displays a keyboard-dismissible unavailable state.
+    // Clicking the raw inline link in Markdown preview exercises the 404 auth boundary
+    // and displays a keyboard-dismissible unavailable state without leaking Alice's note.
     const preview = page.getByRole("region", { name: "Markdown preview" });
     await preview.getByRole("link", { name: "external reference", exact: true }).click();
+    await expect.poll(() => bobDeniedReads).toBe(1);
     const unavailableBanner = page.getByRole("region", { name: "Unavailable source" });
     await expect(unavailableBanner).toBeVisible();
     await expect(unavailableBanner).toContainText("This source note is unavailable.");
@@ -3078,10 +3112,11 @@ test.describe("authorship, source links, and modification dates (#110)", () => {
     await page.keyboard.press("Enter");
     await expect(unavailableBanner).toHaveCount(0);
 
-    // Confirm Bob's current note stayed intact and no foreign title/content appeared.
+    // Confirm Bob's current note stayed intact and no foreign title or content appeared.
     await expect(page.getByRole("textbox", { name: "Title", exact: true })).toHaveValue(
       "Bob checklist",
     );
-    await expect(page.locator("body")).not.toContainText("Alice confidential");
+    await expect(page.locator("body")).not.toContainText("Alice confidential plan");
+    await expect(page.locator("body")).not.toContainText("Top secret alpha");
   });
 });

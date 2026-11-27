@@ -282,6 +282,9 @@ function RichDocumentEditor({
         if (!href) return;
         const linkedNoteId = parseInternalNoteHref(href, window.location.origin);
         if (!linkedNoteId) return;
+        if (event.detail !== 0 && (event.button !== 0 || event.shiftKey || event.altKey)) {
+          return;
+        }
         event.preventDefault();
         if (event.detail === 0 || event.metaKey || event.ctrlKey || disabled) {
           onOpenNoteLink(linkedNoteId);

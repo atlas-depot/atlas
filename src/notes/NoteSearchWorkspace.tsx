@@ -322,9 +322,19 @@ export function NoteSearchWorkspace({
                                   aria-disabled={!enabled || !canOpenSource || undefined}
                                   tabIndex={!enabled || !canOpenSource ? -1 : undefined}
                                   onClick={(event) => {
+                                    if (
+                                      !onOpenNote ||
+                                      event.metaKey ||
+                                      event.ctrlKey ||
+                                      event.shiftKey ||
+                                      event.altKey ||
+                                      event.button !== 0
+                                    ) {
+                                      return;
+                                    }
                                     event.preventDefault();
                                     if (!enabled || !canOpenSource) return;
-                                    onOpenNote?.(originSource.noteId);
+                                    onOpenNote(originSource.noteId);
                                   }}
                                 >
                                   {originSource.title}

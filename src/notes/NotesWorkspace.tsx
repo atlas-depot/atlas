@@ -133,6 +133,7 @@ export function NotesWorkspace({
   const [activeSourceTarget, setActiveSourceTarget] = useState<SourceTarget | null>(null);
   const [unavailableSourceTarget, setUnavailableSourceTarget] = useState<SourceTarget | null>(null);
   const [unavailableLinkNotice, setUnavailableLinkNotice] = useState<string | null>(null);
+  const [copyLinkNotice, setCopyLinkNotice] = useState<string | null>(null);
   const [searchResetToken, setSearchResetToken] = useState(0);
   const desktop = useSyncExternalStore(subscribeDesktop, isDesktop);
   const [chatVisibility, setChatOpen] = useState<boolean | null>(null);
@@ -227,6 +228,7 @@ export function NotesWorkspace({
     setActiveSourceTarget(null);
     setUnavailableSourceTarget(null);
     setUnavailableLinkNotice(null);
+    setCopyLinkNotice(null);
     setSearchResetToken((value) => value + 1);
   }, []);
 
@@ -242,6 +244,7 @@ export function NotesWorkspace({
       setReadFailure(null);
       setComparison(null);
       setUnavailableLinkNotice(null);
+      setCopyLinkNotice(null);
       if (creation) setPendingCreation(null);
       if (deletion) {
         setDeleteFailure(null);
@@ -695,6 +698,20 @@ export function NotesWorkspace({
     setReadFailure((current) => (current?.sourceTarget ? null : current));
   }
 
+  async function copyNoteLink(noteId: string) {
+    const href = buildInternalNoteHref(noteId, window.location.origin);
+    if (!navigator.clipboard?.writeText) {
+      setCopyLinkNotice("Could not copy note link. Clipboard access is unavailable.");
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(href);
+      setCopyLinkNotice("Note link copied.");
+    } catch {
+      setCopyLinkNotice("Could not copy note link. Check clipboard permissions and try again.");
+    }
+  }
+
   return (
     <main
       className="notes-workspace workspace-shell"
@@ -987,13 +1004,7 @@ export function NotesWorkspace({
                                 >
                                   Delete note
                                 </Menu.Item>
-                                <Menu.Item
-                                  onClick={() => {
-                                    void navigator.clipboard?.writeText(
-                                      buildInternalNoteHref(saved.note.id, window.location.origin),
-                                    );
-                                  }}
-                                >
+                                <Menu.Item onClick={() => void copyNoteLink(saved.note.id)}>
                                   Copy note link
                                 </Menu.Item>
                               </Menu.Popup>
@@ -1042,6 +1053,15 @@ export function NotesWorkspace({
                                         aria-disabled={busy || blocked || undefined}
                                         tabIndex={busy || blocked ? -1 : undefined}
                                         onClick={(event) => {
+                                          if (
+                                            event.metaKey ||
+                                            event.ctrlKey ||
+                                            event.shiftKey ||
+                                            event.altKey ||
+                                            event.button !== 0
+                                          ) {
+                                            return;
+                                          }
                                           event.preventDefault();
                                           requestOpenLinkedNote(source.noteId);
                                         }}
@@ -1086,6 +1106,11 @@ export function NotesWorkspace({
                               ))}
                             </ul>
                           </div>
+                        )}
+                        {copyLinkNotice && (
+                          <span role="note" aria-live="polite" className="note-meta-item">
+                            {copyLinkNotice}
+                          </span>
                         )}
                       </section>
                     )}

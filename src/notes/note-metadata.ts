@@ -180,7 +180,8 @@ function extractMarkdownLinkHrefs(markdown: string): string[] {
   const text = proseLines.join("\n");
   const openBrackets: Array<{ index: number; isImage: boolean }> = [];
   const failedTickLengths = new Set<number>();
-  let failedParenFrom = Number.POSITIVE_INFINITY;
+  let failedParenUntil = -1;
+  let failedAngleUntil = -1;
   let index = 0;
 
   while (index < text.length) {
@@ -203,6 +204,49 @@ function extractMarkdownLinkHrefs(markdown: string): string[] {
       index += tickCount;
       continue;
     }
+    if (char === "<" && index >= failedAngleUntil) {
+      const rest = text.slice(index + 1, index + 9).toLowerCase();
+      if (rest.startsWith("http://") || rest.startsWith("https://")) {
+        let end = index + 1;
+        while (
+          end < text.length &&
+          text[end] !== ">" &&
+          text[end] !== "<" &&
+          text[end] !== " " &&
+          text[end] !== "\t" &&
+          text[end] !== "\n"
+        ) {
+          end++;
+        }
+        if (text[end] === ">") {
+          hrefs.push(text.slice(index + 1, end));
+          index = end + 1;
+          continue;
+        }
+        if (end >= text.length) {
+          failedAngleUntil = text.length;
+        }
+      }
+    }
+    if (
+      (char === "h" || char === "H") &&
+      (index === 0 || /[\s([{"']/.test(text[index - 1])) &&
+      /^https?:\/\//i.test(text.slice(index, index + 8))
+    ) {
+      let end = index;
+      while (end < text.length && !/[\s<>"']/.test(text[end])) {
+        end++;
+      }
+      let candidate = text.slice(index, end);
+      while (candidate.length > 0 && /[.,;:!?)]$/.test(candidate)) {
+        candidate = candidate.slice(0, -1);
+      }
+      if (candidate.length > 8) {
+        hrefs.push(candidate);
+      }
+      index = end;
+      continue;
+    }
     if (char === "[") {
       let backslashes = 0;
       let back = index - 2;
@@ -223,13 +267,14 @@ function extractMarkdownLinkHrefs(markdown: string): string[] {
       }
 
       const afterClose = index + 1;
-      if (text[afterClose] === "(" && afterClose < failedParenFrom) {
+      if (text[afterClose] === "(" && afterClose >= failedParenUntil) {
         let cursor = afterClose + 1;
         while (cursor < text.length && (text[cursor] === " " || text[cursor] === "\t")) {
           cursor++;
         }
         let destination = "";
         let closeParen = -1;
+        let scanEnd = cursor;
         if (text[cursor] === "<") {
           const endAngle = text.indexOf(">", cursor + 1);
           if (endAngle !== -1 && !text.slice(cursor + 1, endAngle).includes("\n")) {
@@ -244,6 +289,10 @@ function extractMarkdownLinkHrefs(markdown: string): string[] {
             if (text[afterAngle] === ")") {
               closeParen = afterAngle;
             }
+            scanEnd = afterAngle;
+          } else if (endAngle === -1) {
+            failedAngleUntil = Math.max(failedAngleUntil, text.length);
+            scanEnd = text.length;
           }
         } else {
           const start = cursor;
@@ -267,6 +316,7 @@ function extractMarkdownLinkHrefs(markdown: string): string[] {
             }
             cursor++;
           }
+          scanEnd = cursor;
           destination = text.slice(start, cursor);
           if (closeParen === -1 && destination.length > 0 && text[cursor] !== "\n") {
             let tail = cursor;
@@ -274,6 +324,7 @@ function extractMarkdownLinkHrefs(markdown: string): string[] {
               if (text[tail] === "\\") tail += 2;
               else tail++;
             }
+            scanEnd = tail;
             if (text[tail] === ")") closeParen = tail;
           }
         }
@@ -283,8 +334,8 @@ function extractMarkdownLinkHrefs(markdown: string): string[] {
           index = closeParen + 1;
           continue;
         }
-        if (closeParen === -1 && cursor >= text.length) {
-          failedParenFrom = Math.min(failedParenFrom, afterClose);
+        if (closeParen === -1 && (scanEnd >= text.length || text[scanEnd] === "\n")) {
+          failedParenUntil = Math.max(failedParenUntil, scanEnd);
         }
       } else if (text[afterClose] === "[") {
         let cursor = afterClose + 1;
