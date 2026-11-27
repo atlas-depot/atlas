@@ -234,7 +234,6 @@ export function NotesWorkspace({
   const noteActionsRef = useRef<HTMLButtonElement>(null);
   const unavailableLinkRef = useRef<HTMLElement>(null);
   const pendingSummaryReads = useRef(new Map<string, Promise<NoteSummary | null>>());
-  const attemptedSourceReads = useRef(new Set<string>());
   const dirty = useMemo(
     () => !editorValid || hasUnsavedChanges(draft, saved?.note ?? null),
     [draft, saved, editorValid],
@@ -670,7 +669,11 @@ export function NotesWorkspace({
           const kind = classifyFailure(error);
           if (kind === "unauthenticated") handleSearchUnauthenticated();
           if (kind === "missing") {
-            setNotes((current) => current.filter((note) => note.id !== noteId));
+            setNotes((current) =>
+              current.some((note) => note.id === noteId)
+                ? current.filter((note) => note.id !== noteId)
+                : current,
+            );
           }
           return null;
         } finally {
@@ -799,19 +802,16 @@ export function NotesWorkspace({
     return found ? found.title || "Untitled note" : (resolvedSource?.target.noteTitle ?? null);
   }, [notes, resolvedSource]);
 
-  const noteSources = useMemo(() => {
-    if (!saved) return [];
+  const sourceResolution = useMemo(() => {
+    if (!saved) return { sources: [], links: "complete" as const };
     const origin = typeof window === "undefined" ? undefined : window.location.origin;
     return resolveNoteSources(saved.note, notes, origin);
   }, [saved, notes]);
+  const noteSources = sourceResolution.sources;
 
   useEffect(() => {
     for (const source of noteSources) {
-      if (source.status !== "unavailable" || attemptedSourceReads.current.has(source.noteId)) {
-        continue;
-      }
-      attemptedSourceReads.current.add(source.noteId);
-      void loadNoteSummary(source.noteId);
+      if (source.status === "unavailable") void loadNoteSummary(source.noteId);
     }
   }, [loadNoteSummary, noteSources]);
 
@@ -1191,6 +1191,11 @@ export function NotesWorkspace({
                               ))}
                             </ul>
                           </div>
+                        )}
+                        {sourceResolution.links === "unavailable" && (
+                          <p className="note-meta-item" role="note">
+                            Source links are unavailable for this note.
+                          </p>
                         )}
                         {saved.note.origin && saved.note.origin.sources.length > 0 && (
                           <div className="note-meta-sources">

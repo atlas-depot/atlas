@@ -94,6 +94,19 @@ export function NoteSearchWorkspace({
     };
   }, []);
 
+  useEffect(() => {
+    if (!loadNoteSummary) return;
+    const missingOriginIds = new Set<string>();
+    for (const candidate of outcome?.candidates ?? []) {
+      const summary = notes.find((note) => note.id === candidate.source.noteId);
+      const originId = summary?.origin?.sourceNoteId;
+      if (originId && !notes.some((note) => note.id === originId)) {
+        missingOriginIds.add(originId);
+      }
+    }
+    for (const noteId of missingOriginIds) void loadNoteSummary(noteId);
+  }, [loadNoteSummary, notes, outcome]);
+
   async function runSearch(rawQuery: string) {
     const trimmed = rawQuery.trim();
     if (!enabledRef.current || trimmed.length === 0) return;

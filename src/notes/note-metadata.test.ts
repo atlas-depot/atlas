@@ -219,15 +219,18 @@ describe("note metadata helpers", () => {
       origin: { sourceNoteId: planningId, sourceRevision: 2, sources: [] },
       content: "Generated body",
     };
-    expect(resolveNoteSources(generated, ownedNotes)).toEqual([
-      {
-        kind: "origin",
-        status: "available",
-        noteId: planningId,
-        title: "Planning notes",
-        revision: 2,
-      },
-    ]);
+    expect(resolveNoteSources(generated, ownedNotes)).toEqual({
+      sources: [
+        {
+          kind: "origin",
+          status: "available",
+          noteId: planningId,
+          title: "Planning notes",
+          revision: 2,
+        },
+      ],
+      links: "complete",
+    });
 
     expect(
       resolveOriginSource({ sourceNoteId: foreignId, sourceRevision: 1, sources: [] }, ownedNotes),
@@ -241,18 +244,39 @@ describe("note metadata helpers", () => {
       id: checklistId,
       content: `Source: [Meeting agenda](/notes/${meetingId}) and [Secret](/notes/${foreignId})`,
     };
-    expect(resolveNoteSources(authoredLinked, ownedNotes)).toEqual([
-      {
-        kind: "link",
-        status: "available",
-        noteId: meetingId,
-        title: "Meeting agenda",
-      },
-      {
-        kind: "link",
-        status: "unavailable",
-        noteId: foreignId,
-      },
-    ]);
+    expect(resolveNoteSources(authoredLinked, ownedNotes)).toEqual({
+      sources: [
+        {
+          kind: "link",
+          status: "available",
+          noteId: meetingId,
+          title: "Meeting agenda",
+        },
+        {
+          kind: "link",
+          status: "unavailable",
+          noteId: foreignId,
+        },
+      ],
+      links: "complete",
+    });
+
+    const largeLinked: Pick<Note, "id" | "origin" | "content"> = {
+      id: planId,
+      content: `${"a".repeat(20_001)} [Meeting agenda](/notes/${meetingId})`,
+    };
+    expect(resolveNoteSources(largeLinked, ownedNotes)).toEqual({
+      sources: [],
+      links: "unavailable",
+    });
+
+    const overflowing: Pick<Note, "id" | "origin" | "content"> = {
+      id: planId,
+      content: ">".repeat(10_000) + `[Meeting agenda](/notes/${meetingId})`,
+    };
+    expect(resolveNoteSources(overflowing, ownedNotes)).toEqual({
+      sources: [],
+      links: "unavailable",
+    });
   });
 });

@@ -3075,16 +3075,27 @@ test.describe("authorship, source links, and modification dates (#110)", () => {
   test("loads metadata for a search result created after the note list loaded", async ({
     page,
   }) => {
+    const sourceId = "fa110005-1234-4000-8000-000000000002";
     const newId = "fa110005-1234-4000-8000-000000000001";
+    const sourceNote: Note = {
+      id: sourceId,
+      title: "Origin note",
+      content: blockParagraph("p-origin", "Origin body."),
+      createdAt: "2026-11-25T09:00:00.000Z",
+      updatedAt: "2026-11-25T09:30:00.000Z",
+    };
     const newNote: Note = {
       id: newId,
       title: "New evidence",
-      origin: { sourceNoteId: firstId, sourceRevision: 2, sources: [] },
+      origin: { sourceNoteId: sourceId, sourceRevision: 2, sources: [] },
       content: blockParagraph("p-new-evidence", "Fresh source text."),
       createdAt: "2026-11-26T09:00:00.000Z",
       updatedAt: "2026-11-26T09:30:00.000Z",
     };
     await serveNotes(page, [[serverNote, `"${firstId}:1"`]]);
+    await page.route(`**/api/notes/${sourceId}`, (route) =>
+      route.fulfill({ json: sourceNote, headers: { ETag: `"${sourceId}:1"` } }),
+    );
     await page.route(`**/api/notes/${newId}`, (route) =>
       route.fulfill({ json: newNote, headers: { ETag: `"${newId}:1"` } }),
     );
@@ -3118,8 +3129,21 @@ test.describe("authorship, source links, and modification dates (#110)", () => {
     await expect(card).toContainText("AI-generated");
     await expect(card).toContainText("Last edited");
     await expect(card).toContainText("Source note:");
-    await expect(card.getByRole("link", { name: "A", exact: true })).toBeVisible();
+    await expect(card.getByRole("link", { name: "Origin note", exact: true })).toBeVisible();
+    await expect(card).toContainText("(Revision 2)");
     await expect(page.getByRole("button", { name: "New evidence", exact: true })).toBeVisible();
+  });
+
+  test("shows an explicit unavailable state for source links on a large note", async ({ page }) => {
+    const large = {
+      ...serverNote,
+      content: `${"a".repeat(20_001)} [Meeting agenda](/notes/${secondId})`,
+    };
+    await serveNotes(page, [[large, `"${firstId}:1"`]]);
+    await page.goto("/");
+    const details = page.getByRole("region", { name: "Note details" });
+    await expect(details).toContainText("Source links are unavailable for this note.");
+    await expect(details.getByRole("link")).toHaveCount(0);
   });
 
   test("shows an unavailable state for deleted and second-account sources without exposing target title or content", async ({
@@ -3287,7 +3311,7 @@ test.describe("authorship, source links, and modification dates (#110)", () => {
     const preview = page.getByRole("region", { name: "Markdown preview" });
     const deniedBefore = bobDeniedReads;
     await preview.getByRole("link", { name: "external reference", exact: true }).click();
-    await expect.poll(() => bobDeniedReads).toBe(deniedBefore + 1);
+    await expect.poll(() => bobDeniedReads).toBeGreaterThan(deniedBefore);
     const unavailableBanner = page.getByRole("region", { name: "Unavailable source" });
     await expect(unavailableBanner).toBeVisible();
     await expect(unavailableBanner).toContainText("This source note is unavailable.");

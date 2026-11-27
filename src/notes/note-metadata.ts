@@ -35,6 +35,13 @@ export type ResolvedNoteSource =
       noteId: string;
     };
 
+export type NoteLinkStatus = "complete" | "unavailable";
+
+export type NoteSourceResolution = {
+  sources: ResolvedNoteSource[];
+  links: NoteLinkStatus;
+};
+
 const INTERNAL_NOTE_PATH = /^\/notes\/([^/?#]+)$/;
 
 export function getNoteAuthorship(note: Pick<NoteSummary, "origin">): NoteAuthorship {
@@ -183,21 +190,23 @@ function collectLinkHrefs(
   }
 }
 
+type MarkdownLinkExtraction = { hrefs: string[]; status: NoteLinkStatus };
+
 /**
  * Extract destinations from links the Markdown preview can render.
  * Code, raw HTML, images, unused definitions and unused footnote bodies are ignored.
  */
-function extractMarkdownLinkHrefs(markdown: string): string[] {
+function extractMarkdownLinkHrefs(markdown: string): MarkdownLinkExtraction {
   // Every internal note link contains a UUID; skip notes without one.
-  if (!NOTE_ID_PATTERN.test(markdown)) return [];
-  if (markdown.length > MAX_SOURCE_PARSE_LENGTH) return [];
+  if (!NOTE_ID_PATTERN.test(markdown)) return { hrefs: [], status: "complete" };
+  if (markdown.length > MAX_SOURCE_PARSE_LENGTH) return { hrefs: [], status: "unavailable" };
 
   let tree: Nodes;
   try {
     tree = markdownParser.parse(markdown);
   } catch {
-    // The preview can still render; source metadata is best effort.
-    return [];
+    // The preview can still render; source metadata is unavailable instead of silently empty.
+    return { hrefs: [], status: "unavailable" };
   }
   const usedFootnotes = new Set<string>();
   collectFootnoteReferences(tree, usedFootnotes);
@@ -207,16 +216,19 @@ function extractMarkdownLinkHrefs(markdown: string): string[] {
 
   const hrefs: string[] = [];
   collectLinkHrefs(tree, usedFootnotes, definitions, hrefs);
-  return hrefs;
+  return { hrefs, status: "complete" };
 }
 
-export function extractLinkedNoteIds(
+export function extractLinkedNoteIdsWithStatus(
   content: NoteContent,
   options?: { currentOrigin?: string; excludeNoteIds?: Iterable<string> },
-): string[] {
+): { noteIds: string[]; status: NoteLinkStatus } {
   const rawHrefs: string[] = [];
+  let status: NoteLinkStatus = "complete";
   if (typeof content === "string") {
-    rawHrefs.push(...extractMarkdownLinkHrefs(content));
+    const extraction = extractMarkdownLinkHrefs(content);
+    rawHrefs.push(...extraction.hrefs);
+    status = extraction.status;
   } else {
     collectBlockLinkHrefs(content.blocks, rawHrefs);
   }
@@ -232,7 +244,14 @@ export function extractLinkedNoteIds(
     result.push(parsed);
   }
 
-  return result;
+  return { noteIds: result, status };
+}
+
+export function extractLinkedNoteIds(
+  content: NoteContent,
+  options?: { currentOrigin?: string; excludeNoteIds?: Iterable<string> },
+): string[] {
+  return extractLinkedNoteIdsWithStatus(content, options).noteIds;
 }
 
 export function resolveOriginSource(
@@ -261,7 +280,7 @@ export function resolveNoteSources(
   note: Pick<Note, "id" | "origin" | "content">,
   ownedNotes: readonly NoteSummary[],
   currentOrigin?: string,
-): ResolvedNoteSource[] {
+): NoteSourceResolution {
   const sources: ResolvedNoteSource[] = [];
   const excluded = new Set<string>([note.id.toLowerCase()]);
 
@@ -271,12 +290,12 @@ export function resolveNoteSources(
     excluded.add(originSource.noteId.toLowerCase());
   }
 
-  const linkedIds = extractLinkedNoteIds(note.content, {
+  const linked = extractLinkedNoteIdsWithStatus(note.content, {
     currentOrigin,
     excludeNoteIds: excluded,
   });
 
-  for (const linkedId of linkedIds) {
+  for (const linkedId of linked.noteIds) {
     const owned = ownedNotes.find((item) => item.id.toLowerCase() === linkedId);
     if (owned) {
       sources.push({
@@ -294,5 +313,5 @@ export function resolveNoteSources(
     }
   }
 
-  return sources;
+  return { sources, links: linked.status };
 }
