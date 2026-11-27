@@ -175,7 +175,7 @@
 .note-source-link {
   display: inline-flex;
   align-items: center;
-  min-height: 2rem;
+  min-height: 44px;
   color: var(--foreground);
   text-decoration: underline;
   text-underline-offset: 3px;

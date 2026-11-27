@@ -45,13 +45,24 @@ export function formatNoteAuthorship(note: Pick<NoteSummary, "origin">): string 
   return note.origin ? "AI-generated" : "User-authored";
 }
 
+const timestampFormatters = new Map<string, Intl.DateTimeFormat>();
+
+function timestampFormatter(locale?: string): Intl.DateTimeFormat {
+  const key = locale ?? "";
+  const cached = timestampFormatters.get(key);
+  if (cached) return cached;
+  const formatter = new Intl.DateTimeFormat(locale, {
+    dateStyle: "medium",
+    timeStyle: "short",
+  });
+  timestampFormatters.set(key, formatter);
+  return formatter;
+}
+
 export function formatNoteTimestamp(iso: string, locale?: string): string {
   const date = new Date(iso);
   if (Number.isNaN(date.getTime())) return iso;
-  return new Intl.DateTimeFormat(locale, {
-    dateStyle: "medium",
-    timeStyle: "short",
-  }).format(date);
+  return timestampFormatter(locale).format(date);
 }
 
 export function buildInternalNoteHref(noteId: string, origin?: string): string {

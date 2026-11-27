@@ -269,6 +269,35 @@ test.describe("saving and conflicts", () => {
     expect(updates).toBe(2);
   });
 
+  test("keeps the address bar and reload on the selected note", async ({ page }) => {
+    const second = { ...serverNote, id: secondId, title: "B" };
+    await serveNotes(page, [
+      [serverNote, `"${firstId}:1"`],
+      [second, `"${secondId}:1"`],
+    ]);
+    await page.goto(`/notes/${firstId}`);
+    const title = page.getByRole("textbox", { name: "Title", exact: true });
+    await expect(title).toHaveValue("A");
+    await page.getByRole("button", { name: "B", exact: true }).click();
+    await expect(title).toHaveValue("B");
+    await expect(page).toHaveURL(new RegExp(`/notes/${secondId}$`));
+    await page.reload();
+    await expect(title).toHaveValue("B");
+  });
+
+  test("copies a working note link", async ({ page }) => {
+    await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
+    await serveNotes(page, [[serverNote, `"${firstId}:1"`]]);
+    await page.goto(`/notes/${firstId}`);
+    const expected = new URL(`/notes/${firstId}`, page.url()).href;
+    await page.getByRole("button", { name: "Note actions", exact: true }).click();
+    await page.getByRole("menuitem", { name: "Copy note link", exact: true }).click();
+    await expect(page.getByText("Note link copied.", { exact: true })).toBeVisible();
+    await expect.poll(() => page.evaluate<string>("navigator.clipboard.readText()")).toBe(expected);
+    await page.goto(expected);
+    await expect(page.getByRole("textbox", { name: "Title", exact: true })).toHaveValue("A");
+  });
+
   test("adopting a conflict version synchronizes its changed title in the sidebar", async ({
     page,
   }) => {
@@ -3210,8 +3239,9 @@ test.describe("authorship, source links, and modification dates (#110)", () => {
     // Clicking the raw inline link in Markdown preview exercises the 404 auth boundary
     // and displays a keyboard-dismissible unavailable state without leaking Alice's note.
     const preview = page.getByRole("region", { name: "Markdown preview" });
+    const deniedBefore = bobDeniedReads;
     await preview.getByRole("link", { name: "external reference", exact: true }).click();
-    await expect.poll(() => bobDeniedReads).toBe(1);
+    await expect.poll(() => bobDeniedReads).toBe(deniedBefore + 1);
     const unavailableBanner = page.getByRole("region", { name: "Unavailable source" });
     await expect(unavailableBanner).toBeVisible();
     await expect(unavailableBanner).toContainText("This source note is unavailable.");
