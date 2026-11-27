@@ -29,24 +29,39 @@ const ORIGIN = `http://127.0.0.1:${PORT}`;
 const DIST_INDEX = fileURLToPath(new URL("../../dist/index.html", import.meta.url));
 
 type Sample = { ms: number; user: string; note: string; iteration: number };
-type Failure = { op: string; user: string; note?: string; message: string; status?: number };
+type FailureOp =
+  | "open"
+  | "save"
+  | "verify"
+  | "initial-cold"
+  | "initial-warm"
+  | "ownership"
+  | "worker";
+type Failure = { op: FailureOp; user: string; note?: string; message: string; status?: number };
 
 function percentile(sorted: number[], fraction: number) {
   return sorted.length === 0 ? null : sorted[Math.max(0, Math.ceil(sorted.length * fraction) - 1)];
 }
 
-function stats(values: number[], targetMs: number) {
+function describeError(error: unknown) {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function stats(values: number[], targetMs: number, errors: number, expectedSamples: number) {
   const sorted = [...values].sort((a, b) => a - b);
+  const p95 = percentile(sorted, 0.95);
   return {
     samples: sorted.length,
-    errors: 0,
+    expectedSamples,
+    errors,
     min: sorted[0] ?? null,
     p50: percentile(sorted, 0.5),
-    p95: percentile(sorted, 0.95),
+    p95,
     max: sorted.at(-1) ?? null,
     overTarget: sorted.filter((value) => value > targetMs).length,
     targetMs,
-    passed: sorted.length > 0 && percentile(sorted, 0.95)! <= targetMs,
+    // A scenario only passes when the measurement is complete and no sample is over target.
+    passed: errors === 0 && sorted.length === expectedSamples && p95 !== null && p95 <= targetMs,
   };
 }
 
@@ -71,6 +86,8 @@ test("measures note open, save and initial workspace latency", async ({ browser 
   test.setTimeout(30 * 60_000);
   if (!existsSync(DIST_INDEX))
     throw new Error("Build the production bundle first: VITE_NOTES_DEMO=false pnpm build.");
+  if (USER_COUNT < 2)
+    throw new Error("PERF_USERS must be at least 2 so the cross-account check has another user.");
 
   const databaseUrl = new URL(readTestDatabaseUrl(process.env));
   const databaseName = `atlas_perf_${randomUUID().replaceAll("-", "")}`;
@@ -224,45 +241,57 @@ test("measures note open, save and initial workspace latency", async ({ browser 
         for (let iteration = 0; iteration < ITERATIONS + WARMUP; iteration++) {
           const noteIndex = (iteration * 13 + userIndex * 7) % NOTES_PER_USER;
           const note = userNoteList[noteIndex]!;
+          const nextTitle = noteTitle(user, note.index, iteration + 1);
+          const nextContent = noteContent(user, note.index, iteration + 1);
           try {
-            const button = page.getByRole("button", { name: note.title, exact: true });
             const openStart = performance.now();
-            await button.click();
+            await page.getByRole("button", { name: note.title, exact: true }).click();
             await expect(titleInput(page)).toHaveValue(note.title, { timeout: 20_000 });
             await expectEditorContent(editor(page), new RegExp(`OWNER=${user} NOTE=`));
-            const openMs = performance.now() - openStart;
             checks.ownerMarkers += 1;
+            if (iteration >= WARMUP)
+              openSamples.push({
+                ms: performance.now() - openStart,
+                user,
+                note: note.title,
+                iteration,
+              });
+          } catch (error) {
+            failures.push({ op: "open", user, note: note.title, message: describeError(error) });
+            continue;
+          }
 
-            const nextTitle = noteTitle(user, note.index, iteration + 1);
-            const nextContent = noteContent(user, note.index, iteration + 1);
+          try {
             await titleInput(page).fill(nextTitle);
             await editor(page).fill(nextContent);
             await expect(status(page)).toHaveText("Unsaved changes", { timeout: 10_000 });
             const saveStart = performance.now();
             await page.keyboard.press("ControlOrMeta+s");
             await expect(status(page)).toHaveText("Saved", { timeout: 20_000 });
-            const saveMs = performance.now() - saveStart;
+            if (iteration >= WARMUP)
+              saveSamples.push({
+                ms: performance.now() - saveStart,
+                user,
+                note: nextTitle,
+                iteration,
+              });
+            note.title = nextTitle;
+            note.content = nextContent;
+            lastSaved = { title: nextTitle, content: nextContent };
+          } catch (error) {
+            failures.push({ op: "save", user, note: nextTitle, message: describeError(error) });
+            continue;
+          }
 
+          try {
             const read = await context.request.get(`${ORIGIN}/api/notes/${note.id}`);
-            checks.reopened += 1;
             if (read.status() !== 200) throw new Error(`saved note read ${read.status()}`);
             const saved = (await read.json()) as { title: string; content: string };
             if (saved.title !== nextTitle || !saved.content.includes(nextContent.slice(0, 80)))
               throw new Error("saved note content mismatch");
-            note.title = nextTitle;
-            note.content = nextContent;
-            lastSaved = { title: nextTitle, content: nextContent };
-            if (iteration >= WARMUP) {
-              openSamples.push({ ms: openMs, user, note: note.title, iteration });
-              saveSamples.push({ ms: saveMs, user, note: note.title, iteration });
-            }
+            checks.reopened += 1;
           } catch (error) {
-            failures.push({
-              op: "open/save",
-              user,
-              note: note.title,
-              message: error instanceof Error ? error.message : String(error),
-            });
+            failures.push({ op: "verify", user, note: nextTitle, message: describeError(error) });
           }
         }
         if (lastSaved) {
@@ -290,7 +319,7 @@ test("measures note open, save and initial workspace latency", async ({ browser 
         failures.push({
           op: "worker",
           user: "unknown",
-          message: result.reason instanceof Error ? result.reason.message : String(result.reason),
+          message: describeError(result.reason),
         });
     loadWindowMs = performance.now() - loadWindowStarted;
     await Promise.all(pages.map(({ context }) => context.close()));
@@ -328,7 +357,7 @@ test("measures note open, save and initial workspace latency", async ({ browser 
         failures.push({
           op: "initial-cold",
           user: viewUser,
-          message: error instanceof Error ? error.message : String(error),
+          message: describeError(error),
         });
       } finally {
         await context.close();
@@ -340,17 +369,27 @@ test("measures note open, save and initial workspace latency", async ({ browser 
       await warmContext.addCookies([
         { name: "atlas_session", value: viewUser, url: ORIGIN, httpOnly: true, sameSite: "Lax" },
       ]);
-      const warmPage = await warmContext.newPage();
-      await applyNetwork(warmContext, warmPage);
-      await measureInitialView(warmPage);
-      for (let sample = 0; sample < WARM_SAMPLES; sample++) {
+      let warmPage: Page | null = null;
+      try {
+        warmPage = await warmContext.newPage();
+        await applyNetwork(warmContext, warmPage);
+        await measureInitialView(warmPage);
+      } catch (error) {
+        failures.push({
+          op: "initial-warm",
+          user: viewUser,
+          message: `primer failed: ${describeError(error)}`,
+        });
+        warmPage = null;
+      }
+      for (let sample = 0; warmPage && sample < WARM_SAMPLES; sample++) {
         try {
           initialWarm.push(await measureInitialView(warmPage));
         } catch (error) {
           failures.push({
             op: "initial-warm",
             user: viewUser,
-            message: error instanceof Error ? error.message : String(error),
+            message: describeError(error),
           });
         }
       }
@@ -361,6 +400,9 @@ test("measures note open, save and initial workspace latency", async ({ browser 
 
     const openTimes = openSamples.map((sample) => sample.ms);
     const saveTimes = saveSamples.map((sample) => sample.ms);
+    const failureCount = (op: FailureOp) => failures.filter((failure) => failure.op === op).length;
+    const expectedOpenSamples = USER_COUNT * ITERATIONS;
+    const expectedSaveSamples = USER_COUNT * ITERATIONS;
     const result = {
       meta: {
         revision,
@@ -396,28 +438,14 @@ test("measures note open, save and initial workspace latency", async ({ browser 
       },
       checks,
       failures,
-      open: {
-        ...stats(openTimes, 2_000),
-        errors: failures.filter((f) => f.op === "open/save").length,
-      },
-      save: {
-        ...stats(saveTimes, 2_000),
-        errors: failures.filter((f) => f.op === "open/save").length,
-      },
-      initialCold: {
-        ...stats(initialCold, 3_000),
-        errors: failures.filter((f) => f.op === "initial-cold").length,
-      },
-      initialWarm: {
-        ...stats(initialWarm, 3_000),
-        errors: failures.filter((f) => f.op === "initial-warm").length,
-      },
+      open: stats(openTimes, 2_000, failureCount("open"), expectedOpenSamples),
+      save: stats(saveTimes, 2_000, failureCount("save"), expectedSaveSamples),
+      initialCold: stats(initialCold, 3_000, failureCount("initial-cold"), COLD_SAMPLES),
+      initialWarm: stats(initialWarm, 3_000, failureCount("initial-warm"), WARM_SAMPLES),
       raw: { openSamples, saveSamples, initialCold, initialWarm },
     };
-    writeFileSync(
-      process.env.PERF_RESULT ?? testInfo.outputPath("perf-results.json"),
-      JSON.stringify(result, null, 2),
-    );
+    const resultPath = process.env.PERF_RESULT ?? testInfo.outputPath("perf-results.json");
+    writeFileSync(resultPath, JSON.stringify(result, null, 2));
     console.log(
       JSON.stringify(
         {
@@ -433,6 +461,20 @@ test("measures note open, save and initial workspace latency", async ({ browser 
         2,
       ),
     );
+
+    // Results are written before these assertions so a failed run keeps its evidence.
+    // Latency above a target is reported through `passed` and does not fail the run;
+    // operation errors and missing samples do.
+    expect.soft(failures.length, `recorded failures (${resultPath})`).toBe(0);
+    expect.soft(openSamples.length, "open samples").toBe(expectedOpenSamples);
+    expect.soft(saveSamples.length, "save samples").toBe(expectedSaveSamples);
+    expect.soft(initialCold.length, "cold initial-view samples").toBe(COLD_SAMPLES);
+    expect.soft(initialWarm.length, "warm initial-view samples").toBe(WARM_SAMPLES);
+    expect.soft(checks.ownerMarkers, "owner-marked opens").toBe(USER_COUNT * (ITERATIONS + WARMUP));
+    expect
+      .soft(checks.reopened, "save read-backs and UI reopens")
+      .toBe(USER_COUNT * (ITERATIONS + WARMUP) + USER_COUNT);
+    expect.soft(checks.foreignDenied, "cross-account denials").toBe(USER_COUNT);
   } finally {
     if (server?.listening)
       await new Promise<void>((resolve) => {
