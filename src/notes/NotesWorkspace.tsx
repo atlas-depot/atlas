@@ -668,7 +668,7 @@ export function NotesWorkspace({
           return summary;
         } catch (error) {
           const kind = classifyFailure(error);
-          if (kind === "unauthenticated") clearPrivateCache();
+          if (kind === "unauthenticated") handleSearchUnauthenticated();
           if (kind === "missing") {
             setNotes((current) => current.filter((note) => note.id !== noteId));
           }
@@ -681,7 +681,7 @@ export function NotesWorkspace({
       pendingSummaryReads.current.set(noteId, request);
       return request;
     },
-    [clearPrivateCache, requestsEnabled, store],
+    [handleSearchUnauthenticated, requestsEnabled, store],
   );
 
   async function refreshNotes() {

@@ -1250,6 +1250,52 @@ test.describe("search and source opening", () => {
     await expect(query).toHaveValue("saved evidence");
   });
 
+  test("a background search metadata 401 pauses writes and preserves the draft", async ({
+    page,
+  }) => {
+    const missingId = "fa100001-1234-4000-8000-000000000004";
+    await serveNotes(page, [[serverNote, `"${firstId}:1"`]]);
+    await page.route(`**/api/notes/${missingId}`, (route) =>
+      route.fulfill({
+        status: 401,
+        json: { error: { code: "UNAUTHENTICATED", message: "No session" } },
+      }),
+    );
+    await page.route("**/api/note-search", (route) =>
+      route.fulfill({
+        json: {
+          candidates: [
+            {
+              text: "Original text",
+              score: 0.9,
+              source: {
+                kind: "markdown",
+                noteId: missingId,
+                version: `"${missingId}:1"`,
+                startOffset: 0,
+                endOffset: 13,
+                headingPath: [],
+              },
+            },
+          ],
+          coverage: { ready: 2, pending: 0, failed: 0 },
+        },
+      }),
+    );
+
+    await page.goto("/");
+    const source = page.getByRole("textbox", { name: /^(Markdown source|Note content)$/ });
+    await expectEditorContent(source, "Original text");
+    const search = page.getByRole("region", { name: "Search notes" });
+    await search.getByLabel("Search saved notes").fill("original");
+    await search.getByLabel("Search saved notes").press("Enter");
+
+    await expect(page.getByRole("alert")).toContainText("Your session has ended.");
+    await expect(page.getByRole("link", { name: "Sign in again" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Save", exact: true })).toBeDisabled();
+    await expectEditorContent(source, "Original text");
+  });
+
   test("retains a missing source title and clears stale source errors on dismiss or another failure", async ({
     page,
   }) => {
