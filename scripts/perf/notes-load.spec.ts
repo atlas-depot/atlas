@@ -222,7 +222,10 @@ test("measures note open, save and initial workspace latency", async ({ browser 
       await next();
       c.header("Cache-Control", "public, max-age=31536000, immutable");
     });
-    app.use("*", serveStatic({ root: fileURLToPath(new URL("../../dist/", import.meta.url)) }));
+    const staticRoot = fileURLToPath(new URL("../../dist/", import.meta.url));
+    app.use("*", serveStatic({ root: staticRoot }));
+    // Mirror the production /notes/:id rewrite so a reload reaches the SPA shell.
+    app.get("/notes/*", serveStatic({ root: staticRoot, path: "index.html" }));
     await new Promise<void>((resolve, reject) => {
       server = serve(
         { fetch: app.fetch, hostname: "127.0.0.1", port: PORT, overrideGlobalObjects: false },
