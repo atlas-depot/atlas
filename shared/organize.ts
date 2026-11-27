@@ -7,9 +7,14 @@ const sourceUrlSchema = z.url({ protocol: /^https?$/ }).refine((value) => {
   return url.username === "" && url.password === "";
 });
 
-/** Source records come from the research adapter, never from model-written links. */
-export const generatedDraftSchema = z.strictObject({
+/** New organizer turns return only these editable fields. */
+export const draftProposalSchema = z.strictObject({
+  title: noteTextSchema.max(256).refine((value) => value.trim().length > 0),
   markdown: noteTextSchema.max(100_000).refine((value) => value.trim().length > 0),
+});
+
+/** Older runs have no proposed title. Source records always come from the research adapter. */
+export const generatedDraftSchema = draftProposalSchema.partial({ title: true }).extend({
   sources: z
     .array(
       z.strictObject({

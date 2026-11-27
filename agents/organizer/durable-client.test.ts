@@ -78,6 +78,7 @@ function fixture({
   endError,
   initialActiveReads = 0,
   requestTimeoutMs,
+  maxModelCalls,
   fetchImpl = async () => Response.json({ ok: true, ...reference }, { status: 202 }),
 }: {
   events?: SessionStreamEvent[];
@@ -85,6 +86,7 @@ function fixture({
   endError?: Error;
   initialActiveReads?: number;
   requestTimeoutMs?: number;
+  maxModelCalls?: number;
   fetchImpl?: typeof fetch;
 } = {}) {
   const calls = { ends: 0, reads: 0 };
@@ -92,6 +94,7 @@ function fixture({
     baseUrl: "https://organizer.example.com",
     serviceToken,
     requestTimeoutMs,
+    maxModelCalls,
     fetchImpl,
     client: {
       sessions: {
@@ -144,10 +147,13 @@ await test("submission retries carry the same operation identity, without browse
   const body = requests[0]?.body;
   assert.equal(typeof body, "string");
   if (typeof body !== "string") throw new Error("Expected JSON request body");
-  assert.deepEqual(JSON.parse(body), {
+  const { outputSchema, ...delivery } = JSON.parse(body);
+  assert.deepEqual(delivery, {
     idempotencyKey: "atlas-run-1",
     message: JSON.stringify(input.note),
   });
+  assert.deepEqual(outputSchema.required, ["title", "markdown"]);
+  assert.equal(outputSchema.additionalProperties, false);
   assert.equal(requests[0]?.credentials, "omit");
   assert.equal(requests[0]?.redirect, "error");
   assert.equal(new Headers(requests[0]?.headers).get("cookie"), null);
@@ -268,6 +274,38 @@ await test("sources come only from completed research for the accepted turn", as
   const result = await without.adapter.inspect(reference);
   assert.equal(result.status, "draft");
   if (result.status === "draft") assert.deepEqual(result.draft.sources, []);
+});
+
+function proposalEvents(proposal: { title: string; markdown: string; sources?: string[] }) {
+  return finished.map((value) => {
+    if (value.type === "model.settled")
+      return event({ ...value, data: { ...value.data, finishReason: "tool-calls" } });
+    if (value.type === "content.completed")
+      return event({ ...value, data: { ...value.data, kind: "result", value: proposal } });
+    return value;
+  });
+}
+
+await test("a completed structured proposal preserves the requested title, body and recorded sources", async () => {
+  const proposal = { title: "Review checklist", markdown: "Check the source links." };
+  const events = [consumed, ...research, ...proposalEvents(proposal)];
+  assert.deepEqual(await fixture({ events, maxModelCalls: 1 }).adapter.inspect(reference), {
+    status: "draft",
+    draft: { ...proposal, sources: [draftSource] },
+    completedAt,
+    usage: { complete: false },
+  });
+});
+
+await test("invalid structured titles and model-authored source metadata cannot become drafts", async () => {
+  for (const fields of [{ title: " " }, { title: "a".repeat(257) }, { title: "OK", sources: [] }]) {
+    const events = [consumed, ...proposalEvents({ ...fields, markdown: "Body" })];
+    assert.deepEqual(await fixture({ events }).adapter.inspect(reference), {
+      status: "failed",
+      reason: "invalid_draft",
+      usage: { complete: false },
+    });
+  }
 });
 
 await test("unfinished research is progress, never a completed draft", async () => {
