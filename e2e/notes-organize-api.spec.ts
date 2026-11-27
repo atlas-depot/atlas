@@ -76,7 +76,7 @@ test("reload reconnects to the same persisted generation", async ({ page }) => {
   const resumed = await work(page);
   expect(resumed.runs).toEqual([]);
   expect(resumed.drafts).toHaveLength(1);
-  expect(resumed.drafts[0].source.noteId).toBe(source.id);
+  expect(resumed.drafts[0].source?.noteId).toBe(source.id);
   expect(await notes(page)).toEqual([summaryOf(source)]);
 });
 

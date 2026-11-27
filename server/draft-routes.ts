@@ -19,7 +19,12 @@ export function createDraftRoutes(service?: OrganizeService, onSaved?: NoteSaved
   routes.get("/organize-work", async (c) => {
     if (!service?.work) return c.json(unavailable(), 503);
     try {
-      return c.json(await service.work(c.get("user").userId));
+      const work = await service.work(c.get("user").userId);
+      if (c.req.query("include") === "requests") return c.json(work);
+      return c.json({
+        runs: work.runs.filter((run) => run.noteId !== null),
+        drafts: work.drafts.filter((draft) => draft.source !== null),
+      });
     } catch (error) {
       reportStorageFailure(c, error);
       return c.json(unavailable(), 503);
@@ -45,7 +50,11 @@ export function createDraftRoutes(service?: OrganizeService, onSaved?: NoteSaved
     if (!id.success) return c.json(invalid(), 400);
     if (!service?.drafts) return c.json(unavailable(), 503);
     try {
-      const draft = await service.drafts.read(c.get("user").userId, id.data);
+      const draft = await service.drafts.read(
+        c.get("user").userId,
+        id.data,
+        c.req.query("include") === "original",
+      );
       return draft ? c.json(draft, 200, revisionHeaders(draft.etag)) : c.json(missing(), 404);
     } catch (error) {
       reportStorageFailure(c, error);

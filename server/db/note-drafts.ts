@@ -1,9 +1,9 @@
 import { createHash, randomUUID } from "node:crypto";
-import { and, eq, gt, lte, sql } from "drizzle-orm";
+import { and, eq, getTableColumns, gt, lte, sql } from "drizzle-orm";
 import { canonicalJson } from "../../shared/document.ts";
 import { noteDraftSchema, type NoteDraft } from "../../shared/drafts.ts";
 import { noteContentSchema, noteIdSchema } from "../../shared/notes.ts";
-import { generatedDraftSchema } from "../../shared/organize.ts";
+import { generatedDraftSchema, noteOriginSchema } from "../../shared/organize.ts";
 import type { openDatabase } from "./connection.ts";
 import { storedNote, type StoredNote } from "./notes.ts";
 import { requestNoteIndex } from "./note-index-intents.ts";
@@ -12,32 +12,45 @@ import { draftSaveRequests, noteDrafts, notes, organizeRuns } from "./schema.ts"
 type Database = ReturnType<typeof openDatabase>["db"];
 type Queries = Pick<Database, "select" | "insert" | "update" | "delete">;
 type Row = typeof noteDrafts.$inferSelect;
+const { original, generation, ...draftListColumns } = getTableColumns(noteDrafts);
+type DraftRow = Omit<Row, "original" | "generation"> &
+  Partial<Pick<Row, "original" | "generation">>;
 export const DRAFT_RETENTION_MS = 24 * 60 * 60 * 1_000;
 export const draftTag = (row: Pick<Row, "id" | "revision">) =>
   JSON.stringify(`draft:${row.id}:${row.revision}`);
 const scope = (owner: string, id: string) =>
   and(eq(noteDrafts.ownerId, owner), eq(noteDrafts.id, noteIdSchema.parse(id)));
 
-async function present(db: Queries, row: Row): Promise<NoteDraft> {
+async function present(db: Queries, row: DraftRow, includeOriginal = false): Promise<NoteDraft> {
+  if (row.sourceNoteId === null) return presentWithSource(row, null, includeOriginal);
   const [source] = await db
     .select({ revision: notes.revision })
     .from(notes)
     .where(and(eq(notes.ownerId, row.ownerId), eq(notes.id, row.sourceNoteId)));
-  return presentWithSource(row, source?.revision ?? null);
+  return presentWithSource(row, source?.revision ?? null, includeOriginal);
 }
 
-function presentWithSource(row: Row, sourceRevision: number | null): NoteDraft {
+function presentWithSource(
+  row: DraftRow,
+  sourceRevision: number | null,
+  includeOriginal = false,
+): NoteDraft {
   return noteDraftSchema.parse({
     id: row.id,
+    ...(includeOriginal && row.generation ? { generation: row.generation } : {}),
+    ...(includeOriginal && row.original ? { original: row.original } : {}),
     title: row.title,
     content: row.content,
     etag: draftTag(row),
-    source: {
-      noteId: row.sourceNoteId,
-      revision: row.sourceRevision,
-      stale: sourceRevision !== null && sourceRevision !== row.sourceRevision,
-      deleted: sourceRevision === null,
-    },
+    source:
+      row.sourceNoteId === null
+        ? null
+        : {
+            noteId: row.sourceNoteId,
+            revision: row.sourceRevision,
+            stale: sourceRevision !== null && sourceRevision !== row.sourceRevision,
+            deleted: sourceRevision === null,
+          },
     sources: row.sources,
     expiresAt: new Date(row.expiresAt).toISOString(),
     updatedAt: new Date(row.updatedAt).toISOString(),
@@ -50,16 +63,16 @@ export function createNoteDraftStore(db: Database) {
   };
   return {
     purgeExpired,
-    async read(owner: string, id: string): Promise<NoteDraft | undefined> {
+    async read(owner: string, id: string, includeOriginal = false): Promise<NoteDraft | undefined> {
       const [row] = await db
-        .select()
+        .select(includeOriginal ? { ...draftListColumns, original, generation } : draftListColumns)
         .from(noteDrafts)
         .where(and(scope(owner, id), gt(noteDrafts.expiresAt, sql`clock_timestamp()`)));
-      return row ? present(db, row) : undefined;
+      return row ? present(db, row, includeOriginal) : undefined;
     },
     async list(owner: string): Promise<NoteDraft[]> {
       const rows = await db
-        .select({ draft: noteDrafts, sourceRevision: notes.revision })
+        .select({ draft: draftListColumns, sourceRevision: notes.revision })
         .from(noteDrafts)
         .leftJoin(
           notes,
@@ -92,23 +105,30 @@ export function createNoteDraftStore(db: Database) {
         if (!run.active || run.cleanupTarget || run.state.status !== "draft")
           return { status: "not_ready" };
         if (run.expiresAt && Date.parse(run.expiresAt) <= now) return { status: "not_found" };
-        const [source] = await tx
-          .select()
-          .from(notes)
-          .where(and(eq(notes.ownerId, owner), eq(notes.id, run.noteId)))
-          .for("share");
-        if (!source) return { status: "not_found" };
         const result = generatedDraftSchema.parse(run.state.draft);
         const at = new Date(now).toISOString();
-        await tx
-          .delete(noteDrafts)
-          .where(
-            and(
-              eq(noteDrafts.ownerId, owner),
-              eq(noteDrafts.sourceNoteId, run.noteId),
-              lte(noteDrafts.expiresAt, at),
-            ),
-          );
+        let title = result.title;
+        if (run.noteId !== null) {
+          const [source] = await tx
+            .select({ title: notes.title })
+            .from(notes)
+            .where(and(eq(notes.ownerId, owner), eq(notes.id, run.noteId)))
+            .for("share");
+          if (!source) return { status: "not_found" };
+          title ??= source.title;
+          await tx
+            .delete(noteDrafts)
+            .where(
+              and(
+                eq(noteDrafts.ownerId, owner),
+                eq(noteDrafts.sourceNoteId, run.noteId),
+                lte(noteDrafts.expiresAt, at),
+              ),
+            );
+        } else if (run.original?.kind !== "request") {
+          throw new Error("Request draft is missing its original input.");
+        }
+        if (title === undefined) throw new Error("Request draft is missing its proposed title.");
         const [draft] = await tx
           .insert(noteDrafts)
           .values({
@@ -116,7 +136,9 @@ export function createNoteDraftStore(db: Database) {
             ownerId: owner,
             sourceNoteId: run.noteId,
             sourceRevision: run.sourceRevision,
-            title: source.title,
+            original: run.original,
+            generation: result.generation,
+            title,
             content: result.markdown,
             sources: result.sources,
             expiresAt: new Date(now + DRAFT_RETENTION_MS).toISOString(),
@@ -129,6 +151,7 @@ export function createNoteDraftStore(db: Database) {
             state: { status: "cleaning" },
             cleanupTarget: { status: "expired" },
             input: null,
+            original: null,
             expiresAt: null,
             updatedAt: at,
           })
@@ -227,11 +250,13 @@ export function createNoteDraftStore(db: Database) {
               ...data,
               id: noteId,
               ownerId: owner,
-              origin: {
+              original: draft.original,
+              generation: draft.generation,
+              origin: noteOriginSchema.parse({
                 sourceNoteId: draft.sourceNoteId,
                 sourceRevision: draft.sourceRevision,
                 sources: draft.sources,
-              },
+              }),
               createdAt: sql`clock_timestamp()`,
               updatedAt: sql`clock_timestamp()`,
             })

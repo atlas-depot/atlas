@@ -9,7 +9,8 @@ export function createAcceptanceOrganizer(): DurableOrganizer {
     },
     async submit({ sessionId, operationId, note }) {
       // Every acceptance source carries this fact. Fail if the saved input never reaches us.
-      if (!note.content.includes("Budget: 42 EUR.")) throw new Error("Missing acceptance fact.");
+      if (!("content" in note) || !note.content.includes("Budget: 42 EUR."))
+        throw new Error("Missing acceptance fact.");
       submitted.set(sessionId, 0);
       return { sessionId, deliveryId: `delivery-${operationId}` };
     },

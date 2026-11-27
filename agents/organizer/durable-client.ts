@@ -83,7 +83,7 @@ export function createDurableEveOrganizer({
     }: {
       sessionId: string;
       operationId: string;
-      note: { title: string; content: string };
+      note: { title: string; content: string; instruction?: string } | { request: string };
     }): Promise<OrganizerReference | { status: "expired" }> {
       referenceSchema.shape.sessionId.parse(sessionId);
       if (!operationId || operationId.length > 256)
@@ -368,6 +368,7 @@ function observeDraft(
   // Older deliveries returned Markdown as one or more text parts.
   let proposal: z.infer<typeof draftProposalSchema> | undefined;
   const text: string[] = [];
+  let replyRunId: string | undefined;
   for (const part of structured ? [structured] : reply) {
     if (part?.type !== "content.completed" || part.data.phase !== "reply" || part.data.interrupted)
       return { status: "failed", reason: "invalid_draft" };
@@ -377,6 +378,7 @@ function observeDraft(
     if (model?.outcome !== "completed" || (model.finishReason !== "stop" && !finalToolCall))
       return { status: "failed", reason: "generation_failed" };
 
+    replyRunId = part.data.runId;
     if (part.data.kind === "result") {
       const parsed = draftProposalSchema.safeParse(part.data.value);
       if (!parsed.success) return { status: "failed", reason: "invalid_draft" };
@@ -387,12 +389,20 @@ function observeDraft(
       return { status: "failed", reason: "invalid_draft" };
     }
   }
+  const completedAt = Date.parse(turn.meta.at);
+  if (!Number.isFinite(completedAt)) return { status: "failed", reason: "invalid_draft" };
+  const producer = scoped.findLast(
+    (event) => event.type === "model.started" && event.data.runId === replyRunId,
+  );
   const draft = generatedDraftSchema.safeParse({
+    generation: {
+      generatedAt: new Date(completedAt).toISOString(),
+      ...(producer?.type === "model.started" ? { runtimeModelId: producer.data.modelId } : {}),
+    },
     ...(proposal ?? { markdown: text.join("\n") }),
     sources: [...sources.values()],
   });
-  const completedAt = Date.parse(turn.meta.at);
-  return draft.success && Number.isFinite(completedAt)
+  return draft.success
     ? { status: "draft", draft: draft.data, completedAt }
     : { status: "failed", reason: "invalid_draft" };
 }

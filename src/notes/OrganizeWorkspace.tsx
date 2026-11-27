@@ -8,7 +8,7 @@ import { classifyFailure } from "./editor-state";
 import { AIDraftPanel } from "./AIDraftPanel";
 import "./organize-workspace.css";
 
-type Run = { runId: string; noteId: string };
+type Run = { runId: string; noteId: string | null };
 
 export function OrganizeWorkspace({
   source,
@@ -135,7 +135,7 @@ export function OrganizeWorkspace({
   const selectedPending =
     source &&
     (runs.some((run) => run.noteId === source.note.id) ||
-      drafts.some((draft) => draft.source.noteId === source.note.id));
+      drafts.some((draft) => draft.source?.noteId === source.note.id));
   return (
     <section className="organize-workspace space-y-4" aria-label="Organize notes">
       <div className="flex flex-wrap items-center gap-3">
@@ -240,7 +240,7 @@ function RunPanel({
     let timer: ReturnType<typeof setTimeout> | undefined;
     const recoveredDraft = async () => {
       const work = await client.list();
-      const found = work.drafts.find((item) => item.source.noteId === run.noteId);
+      const found = work.drafts.find((item) => item.id === run.runId);
       if (active && found) onDraft(run.runId, found);
       return found !== undefined;
     };

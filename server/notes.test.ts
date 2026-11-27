@@ -79,6 +79,30 @@ describe("notes HTTP contract with a stubbed persistence boundary", () => {
     },
   );
 
+  it("keeps request-based notes readable by legacy clients and exposes their actual provenance on opt-in", async () => {
+    const store = service();
+    const origin = { sourceNoteId: null, sourceRevision: null, sources: [] };
+    const requestNote = { ...note, origin };
+    store.list.mockResolvedValue([{ ...summary, origin }]);
+    store.read.mockResolvedValue({ note: requestNote, revision: 7 });
+    store.update.mockResolvedValue({ status: "saved", value: { note: requestNote, revision: 8 } });
+    const api = app(store);
+    const legacyList = await api.request("/notes");
+    expect(await legacyList.json()).toEqual({ notes: [summary] });
+    expect(await (await api.request(`/notes/${id}`)).json()).toEqual(note);
+    expect(
+      await (await api.request(`/notes/${id}`, request("PUT", edit, { "If-Match": tag }))).json(),
+    ).not.toHaveProperty("origin");
+
+    const headers = { Prefer: 'include="request-origin"' };
+    const list = await api.request("/notes", { headers });
+    expect(await list.json()).toMatchObject({ notes: [{ origin }] });
+    expect(await (await api.request(`/notes/${id}`, { headers })).json()).toMatchObject({ origin });
+    expect(await (await api.request(`/notes/${id}?include=original`)).json()).toMatchObject({
+      origin,
+    });
+  });
+
   it("returns sanitized 503 when storage is unconfigured", async () => {
     const response = await app().request("/notes");
     expect(response.status).toBe(503);
@@ -104,7 +128,7 @@ describe("notes HTTP contract with a stubbed persistence boundary", () => {
     expect(response.headers.get("ETag")).toBe(tag);
     expect(response.headers.get("Atlas-Revision")).toBe(tag);
     expect(await response.json()).toEqual(note);
-    expect(store.read).toHaveBeenCalledExactlyOnceWith(owner, id);
+    expect(store.read).toHaveBeenCalledExactlyOnceWith(owner, id, false);
   });
 
   it("passes a canonical creation key to storage and returns identical replay responses", async () => {

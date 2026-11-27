@@ -1,8 +1,11 @@
 import { z } from "zod";
-import { noteOriginSchema } from "./organize.ts";
+import { noteInputSchema, requestInputSchema } from "./organize-input.ts";
+import { draftGenerationSchema, noteOriginSchema } from "./organize.ts";
 import { documentContentSchema, noteTextSchema } from "./document.ts";
 
 export const noteIdSchema = z.uuid();
+/** Opts into standalone AI provenance on note responses. Older clients require a source UUID. */
+export const requestOriginPreference = 'include="request-origin"';
 /** Account-scoped key for one logical creation, reused with the original payload. */
 export const createNoteKeySchema = z.uuid().transform((value) => value.toLowerCase());
 
@@ -12,6 +15,20 @@ export const noteContentSchema = z.strictObject({
   /** Legacy Markdown or a versioned block document, never rendered HTML. */
   content: documentContentSchema,
 });
+
+/** The owner-visible source captured when an organizer run started. */
+export const savedNoteOriginalSchema = noteContentSchema.extend({
+  kind: z.literal("note"),
+  noteId: noteIdSchema,
+  revision: z.number().int().positive(),
+  instruction: noteInputSchema.shape.instruction,
+});
+export const organizerOriginalSchema = z.discriminatedUnion("kind", [
+  savedNoteOriginalSchema,
+  requestInputSchema,
+]);
+export type OrganizerOriginal = z.infer<typeof organizerOriginalSchema>;
+export type SavedNoteOriginal = z.infer<typeof savedNoteOriginalSchema>;
 
 export const createNoteSchema = noteContentSchema.extend({
   /** Client creation instant in UTC; immutable after creation. Display in the user's locale. */
@@ -23,11 +40,17 @@ export const updateNoteSchema = noteContentSchema;
 export const noteSchema = createNoteSchema.extend({
   id: noteIdSchema,
   origin: noteOriginSchema.optional(),
+  original: organizerOriginalSchema.optional(),
+  generation: draftGenerationSchema.optional(),
   /** Initially createdAt; the server sets this on successful edits, not for conflict detection. */
   updatedAt: z.iso.datetime(),
 });
 /** List rows carry metadata only; clients open a note individually for its content and ETag. */
-export const noteSummarySchema = noteSchema.omit({ content: true });
+export const noteSummarySchema = noteSchema.omit({
+  content: true,
+  original: true,
+  generation: true,
+});
 export const noteListSchema = z.strictObject({ notes: z.array(noteSummarySchema) });
 
 /**

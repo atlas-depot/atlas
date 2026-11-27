@@ -1,13 +1,21 @@
+import { createHash } from "node:crypto";
 import { and, count, eq, gt, inArray, lte, sql } from "drizzle-orm";
 import { z } from "zod";
-import { noteIdSchema } from "../../shared/notes.ts";
-import { organizerContent } from "../../shared/document.ts";
+import { noteIdSchema, type OrganizerOriginal } from "../../shared/notes.ts";
+import { canonicalJson, organizerContent } from "../../shared/document.ts";
+import { organizeInputSchema, type OrganizeInput } from "../../shared/organize-input.ts";
 import type { OrganizeRunState as PublicOrganizeRunState } from "../../shared/organize.ts";
 import { generatedDraftSchema, organizeUsageSchema, type OrganizeUsage } from "../organize-note.ts";
 import type { openDatabase } from "./connection.ts";
 import { noteTag, storedNote, type StoredNote } from "./notes.ts";
 import { createNoteDraftStore } from "./note-drafts.ts";
-import { noteDrafts, notes, organizeRuns } from "./schema.ts";
+import {
+  failedOrganizeRequests,
+  noteDrafts,
+  notes,
+  organizeRuns,
+  organizeStartRequests,
+} from "./schema.ts";
 
 type Database = ReturnType<typeof openDatabase>["db"];
 type Row = typeof organizeRuns.$inferSelect;
@@ -36,11 +44,13 @@ const stateSchema = z.union([
   z.strictObject({
     status: z.literal("draft"),
     draft: generatedDraftSchema,
-    source: z.strictObject({
-      noteId: noteIdSchema,
-      revision: z.number().int().positive(),
-      stale: z.boolean(),
-    }),
+    source: z
+      .strictObject({
+        noteId: noteIdSchema,
+        revision: z.number().int().positive(),
+        stale: z.boolean(),
+      })
+      .nullable(),
   }),
   z.strictObject({
     status: z.literal("running"),
@@ -68,7 +78,12 @@ type Expect<T extends true> = T;
 export type OrganizeRunStateContract = Expect<
   MutuallyAssignable<Exclude<OrganizeRunState, { status: "not_found" }>, PublicOrganizeRunState>
 >;
-const inputSchema = z.strictObject({ title: z.string(), content: z.string() }).nullable();
+const inputSchema = z
+  .union([
+    z.strictObject({ title: z.string(), content: z.string(), instruction: z.string().optional() }),
+    z.strictObject({ request: z.string() }),
+  ])
+  .nullable();
 const runtimeSchema = z
   .strictObject({ sessionId: z.string().min(1), deliveryId: z.string().min(1).nullable() })
   .nullable();
@@ -76,8 +91,8 @@ const runtimeSchema = z
 export type OrganizeRunRecord = {
   runId: string;
   ownerId: string;
-  noteId: string;
-  sourceRevision: number;
+  noteId: string | null;
+  sourceRevision: number | null;
   runtimeUrl: string;
   input: z.infer<typeof inputSchema>;
   runtime: z.infer<typeof runtimeSchema>;
@@ -110,7 +125,7 @@ function fromRow(row: Row): OrganizeRunRecord {
 /** Paid organize runs one account may hold at once, across all of its notes. */
 export const MAX_ACTIVE_RUNS_PER_OWNER = 3;
 
-export type OrganizeClaimFailure = "stale" | "unresolved" | "limit";
+export type OrganizeClaimFailure = "stale" | "unresolved" | "limit" | "key_conflict";
 
 export class OrganizeClaimError extends Error {
   readonly reason: OrganizeClaimFailure;
@@ -132,57 +147,119 @@ export function createOrganizeRunStore(db: Database) {
           and(eq(organizeRuns.ownerId, ownerSchema.parse(ownerId)), eq(organizeRuns.active, true)),
         );
     },
+    async listRecoverable(this: void, owner: string) {
+      const rows = await db
+        .select({
+          runId: failedOrganizeRequests.runId,
+          expiresAt: failedOrganizeRequests.expiresAt,
+        })
+        .from(failedOrganizeRequests)
+        .where(
+          and(
+            eq(failedOrganizeRequests.ownerId, owner),
+            gt(failedOrganizeRequests.expiresAt, sql`clock_timestamp()`),
+          ),
+        )
+        .orderBy(failedOrganizeRequests.expiresAt, failedOrganizeRequests.runId);
+      return rows.map((row) => ({ ...row, expiresAt: new Date(row.expiresAt).toISOString() }));
+    },
+    async recover(this: void, owner: string, runId: string) {
+      const [result] = await db
+        .select({
+          runId: failedOrganizeRequests.runId,
+          text: failedOrganizeRequests.text,
+          expiresAt: failedOrganizeRequests.expiresAt,
+        })
+        .from(failedOrganizeRequests)
+        .where(
+          and(
+            eq(failedOrganizeRequests.ownerId, owner),
+            eq(failedOrganizeRequests.runId, runId),
+            gt(failedOrganizeRequests.expiresAt, sql`clock_timestamp()`),
+          ),
+        );
+      return result && { ...result, expiresAt: new Date(result.expiresAt).toISOString() };
+    },
     async claim(
       ownerId: string,
-      noteId: string,
+      request: string | { key: string; input: OrganizeInput },
       runtimeUrl: string,
       expectedTag?: string,
     ): Promise<OrganizeRunRecord | undefined> {
       const owner = ownerSchema.parse(ownerId);
-      const id = noteIdSchema.parse(noteId);
+      const keyed = typeof request !== "string";
+      const input: OrganizeInput = organizeInputSchema.parse(
+        keyed ? request.input : { kind: "note", noteId: request },
+      );
+      const key = keyed ? noteIdSchema.parse(request.key) : null;
+      const payloadHash = createHash("sha256")
+        .update(canonicalJson({ input, expectedTag: expectedTag ?? null }))
+        .digest("hex");
       const target = runtimeUrlSchema.parse(runtimeUrl);
       return db.transaction(
         async (tx) => {
-          // Serializes claim with note edits/deletion and captures one exact source revision.
-          const [note] = await tx
-            .select()
-            .from(notes)
-            .where(and(eq(notes.ownerId, owner), eq(notes.id, id)))
-            .for("update");
-          if (!note) return undefined;
-          if (expectedTag !== undefined && expectedTag !== noteTag(note.id, note.revision))
-            throw new OrganizeClaimError("stale");
-          const [draft] = await tx
-            .select({ id: noteDrafts.id })
-            .from(noteDrafts)
-            .where(
-              and(
-                eq(noteDrafts.ownerId, owner),
-                eq(noteDrafts.sourceNoteId, id),
-                gt(noteDrafts.expiresAt, sql`clock_timestamp()`),
-              ),
-            );
-          if (draft) throw new OrganizeClaimError("unresolved");
-          const [existing] = await tx
-            .select()
-            .from(organizeRuns)
-            .where(
-              and(
-                eq(organizeRuns.ownerId, owner),
-                eq(organizeRuns.noteId, id),
-                eq(organizeRuns.active, true),
-              ),
-            );
-          if (existing) {
-            if (expectedTag !== undefined && existing.sourceRevision !== note.revision)
-              throw new OrganizeClaimError("unresolved");
-            return fromRow(existing);
-          }
-          // The note lock above only serializes claims for one note. This transaction-scoped
-          // lock serializes claims across one owner's notes, so the count cannot race an insert.
           await tx.execute(
             sql`SELECT pg_advisory_xact_lock(hashtextextended(${`organize:${owner}`}, 0))`,
           );
+          if (key) {
+            const [receipt] = await tx
+              .select()
+              .from(organizeStartRequests)
+              .where(
+                and(eq(organizeStartRequests.ownerId, owner), eq(organizeStartRequests.key, key)),
+              );
+            if (receipt) {
+              if (receipt.payloadHash !== payloadHash) throw new OrganizeClaimError("key_conflict");
+              const [run] = await tx
+                .select()
+                .from(organizeRuns)
+                .where(and(eq(organizeRuns.ownerId, owner), eq(organizeRuns.id, receipt.runId)));
+              if (!run) throw new OrganizeClaimError("key_conflict");
+              return fromRow(run);
+            }
+          }
+          let snapshot: OrganizerOriginal;
+          if (input.kind === "note") {
+            // Hold the note lock while capturing both the runtime prompt and the exact source.
+            const [note] = await tx
+              .select()
+              .from(notes)
+              .where(and(eq(notes.ownerId, owner), eq(notes.id, input.noteId)))
+              .for("update");
+            if (!note) return undefined;
+            if (expectedTag !== undefined && expectedTag !== noteTag(note.id, note.revision))
+              throw new OrganizeClaimError("stale");
+            const [draft] = await tx
+              .select({ id: noteDrafts.id })
+              .from(noteDrafts)
+              .where(
+                and(
+                  eq(noteDrafts.ownerId, owner),
+                  eq(noteDrafts.sourceNoteId, note.id),
+                  gt(noteDrafts.expiresAt, sql`clock_timestamp()`),
+                ),
+              );
+            if (draft) throw new OrganizeClaimError("unresolved");
+            const [existing] = await tx
+              .select()
+              .from(organizeRuns)
+              .where(
+                and(
+                  eq(organizeRuns.ownerId, owner),
+                  eq(organizeRuns.noteId, note.id),
+                  eq(organizeRuns.active, true),
+                ),
+              );
+            if (existing) {
+              if (key || (expectedTag !== undefined && existing.sourceRevision !== note.revision))
+                throw new OrganizeClaimError("unresolved");
+              return fromRow(existing);
+            }
+            const { title, content } = storedNote(note).note;
+            snapshot = { ...input, noteId: note.id, title, content, revision: note.revision };
+          } else {
+            snapshot = input;
+          }
           const [active] = await tx
             .select({ total: count() })
             .from(organizeRuns)
@@ -193,17 +270,29 @@ export function createOrganizeRunStore(db: Database) {
             .insert(organizeRuns)
             .values({
               ownerId: owner,
-              noteId: id,
-              sourceRevision: note.revision,
+              noteId: snapshot.kind === "note" ? snapshot.noteId : null,
+              sourceRevision: snapshot.kind === "note" ? snapshot.revision : null,
               runtimeUrl: target,
-              input: {
-                title: note.title,
-                content: organizerContent(storedNote(note).note.content),
-              },
+              input:
+                snapshot.kind === "request"
+                  ? { request: snapshot.text }
+                  : {
+                      title: snapshot.title,
+                      content: organizerContent(snapshot.content),
+                      ...(snapshot.instruction === undefined
+                        ? {}
+                        : { instruction: snapshot.instruction }),
+                    },
+              original: snapshot,
               state: { status: "running", phase: "starting" },
               active: true,
             })
             .returning();
+          if (key) {
+            await tx
+              .insert(organizeStartRequests)
+              .values({ ownerId: owner, key, payloadHash, runId: created.id });
+          }
           return fromRow(created);
         },
         // Each statement must see claims committed before this one took the owner lock.
@@ -285,6 +374,21 @@ export function createOrganizeRunStore(db: Database) {
               next.expiresAt === null
                 ? null
                 : new Date(z.number().int().safe().parse(next.expiresAt)).toISOString();
+            if (
+              !original.cleanupTarget &&
+              next.cleanupTarget?.status === "failed" &&
+              row.original?.kind === "request"
+            ) {
+              await tx
+                .insert(failedOrganizeRequests)
+                .values({
+                  runId: id,
+                  ownerId: owner,
+                  text: row.original.text,
+                  expiresAt: sql`clock_timestamp() + interval '24 hours'`,
+                })
+                .onConflictDoNothing();
+            }
             await tx
               .update(organizeRuns)
               .set({
@@ -293,6 +397,7 @@ export function createOrganizeRunStore(db: Database) {
                 state,
                 usage: organizeUsageSchema.nullable().parse(next.usage),
                 active: next.active,
+                ...(!next.active || next.cleanupTarget ? { original: null } : {}),
                 cleanupTarget: terminalSchema.nullable().parse(next.cleanupTarget),
                 expiresAt,
                 updatedAt: sql`clock_timestamp()`,
@@ -301,6 +406,7 @@ export function createOrganizeRunStore(db: Database) {
             original = structuredClone(next);
           },
           async () => {
+            if (original.noteId === null) return undefined;
             const [source] = await tx
               .select()
               .from(notes)
@@ -343,6 +449,9 @@ export function createOrganizeRunStore(db: Database) {
     },
 
     async purgeExpired(): Promise<void> {
+      await db
+        .delete(failedOrganizeRequests)
+        .where(lte(failedOrganizeRequests.expiresAt, sql`clock_timestamp()`));
       await db
         .delete(organizeRuns)
         .where(

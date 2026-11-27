@@ -6,6 +6,7 @@ import { createDurableEveOrganizer } from "./durable-client.ts";
 const reference = { sessionId: "session-1", deliveryId: "delivery-1" };
 const serviceToken = "synthetic-only-organizer-service-token";
 const completedAt = Date.parse("2026-11-01T00:00:30Z");
+const generationTime = { generatedAt: "2026-11-01T00:00:30.000Z" };
 function event(input: SessionEvent): SessionStreamEvent {
   return {
     ...input,
@@ -139,7 +140,7 @@ await test("submission retries carry the same operation identity, without browse
   const input = {
     sessionId: reference.sessionId,
     operationId: "atlas-run-1",
-    note: { title: "Note", content: "Fact" },
+    note: { title: "Note", content: "Fact", instruction: "Summarize." },
   };
   assert.deepEqual(await adapter.submit(input), reference);
   assert.deepEqual(await adapter.submit(input), reference);
@@ -157,6 +158,25 @@ await test("submission retries carry the same operation identity, without browse
   assert.equal(requests[0]?.credentials, "omit");
   assert.equal(requests[0]?.redirect, "error");
   assert.equal(new Headers(requests[0]?.headers).get("cookie"), null);
+});
+
+await test("a standalone request reaches the organizer without a fabricated source note", async () => {
+  const request = "Create a note titled Review checklist:\nCheck the source links.";
+  const { adapter } = fixture({
+    fetchImpl: async (_url, init) => {
+      assert.ok(typeof init?.body === "string");
+      assert.deepEqual(JSON.parse(JSON.parse(init.body).message), { request });
+      return Response.json({ ok: true, ...reference }, { status: 202 });
+    },
+  });
+  assert.deepEqual(
+    await adapter.submit({
+      sessionId: reference.sessionId,
+      operationId: "new-note",
+      note: { request },
+    }),
+    reference,
+  );
 });
 
 await test("a lost creation response stays uncertain and is not automatically replayed", async () => {
@@ -251,7 +271,7 @@ await test("finite inspection reconstructs a draft and finish time after a new c
   const restarted = fixture();
   const expected = {
     status: "draft",
-    draft: { markdown: "# Kept source facts", sources: [] },
+    draft: { markdown: "# Kept source facts", generation: generationTime, sources: [] },
     completedAt,
     usage: { complete: false },
   };
@@ -265,7 +285,7 @@ await test("sources come only from completed research for the accepted turn", as
   const { adapter } = fixture({ events });
   assert.deepEqual(await adapter.inspect(reference), {
     status: "draft",
-    draft: { markdown: "# Kept source facts", sources: [draftSource] },
+    draft: { markdown: "# Kept source facts", generation: generationTime, sources: [draftSource] },
     completedAt,
     usage: { complete: false },
   });
@@ -276,7 +296,7 @@ await test("sources come only from completed research for the accepted turn", as
   if (result.status === "draft") assert.deepEqual(result.draft.sources, []);
 });
 
-function proposalEvents(proposal: { title: string; markdown: string; sources?: string[] }) {
+function proposalEvents(proposal: { title: string; markdown: string }) {
   return finished.map((value) => {
     if (value.type === "model.settled")
       return event({ ...value, data: { ...value.data, finishReason: "tool-calls" } });
@@ -288,17 +308,38 @@ function proposalEvents(proposal: { title: string; markdown: string; sources?: s
 
 await test("a completed structured proposal preserves the requested title, body and recorded sources", async () => {
   const proposal = { title: "Review checklist", markdown: "Check the source links." };
-  const events = [consumed, ...research, ...proposalEvents(proposal)];
+  const started = (runId: string, attempt: number, modelId: string) =>
+    event({ type: "model.started", scope, data: { runId, attempt, modelId } });
+  const events = [
+    consumed,
+    started("model-1", 0, "original-attempt"),
+    started("model-1", 1, "producing-model"),
+    started("different-run", 0, "research-model"),
+    ...research,
+    ...proposalEvents(proposal),
+  ];
   assert.deepEqual(await fixture({ events, maxModelCalls: 1 }).adapter.inspect(reference), {
     status: "draft",
-    draft: { ...proposal, sources: [draftSource] },
+    draft: {
+      ...proposal,
+      generation: { ...generationTime, runtimeModelId: "producing-model" },
+      sources: [draftSource],
+    },
     completedAt,
     usage: { complete: false },
   });
 });
 
-await test("invalid structured titles and model-authored source metadata cannot become drafts", async () => {
-  for (const fields of [{ title: " " }, { title: "a".repeat(257) }, { title: "OK", sources: [] }]) {
+await test("invalid titles and model-authored provenance cannot become drafts", async () => {
+  for (const fields of [
+    { title: " " },
+    { title: "a".repeat(257) },
+    { title: "OK", sources: [] },
+    {
+      title: "OK",
+      generation: { generatedAt: "2099-01-01T00:00:00Z", runtimeModelId: "fake-model" },
+    },
+  ]) {
     const events = [consumed, ...proposalEvents({ ...fields, markdown: "Body" })];
     assert.deepEqual(await fixture({ events }).adapter.inspect(reference), {
       status: "failed",

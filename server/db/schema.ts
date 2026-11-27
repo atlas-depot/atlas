@@ -15,7 +15,8 @@ import {
 } from "drizzle-orm/pg-core";
 import type { OrganizeUsage } from "../organize-note.ts";
 import type { OrganizeRunState, RunTerminalState } from "./organize-runs.ts";
-import type { NoteOrigin } from "../../shared/organize.ts";
+import type { OrganizerOriginal } from "../../shared/notes.ts";
+import type { DraftGeneration, NoteOrigin } from "../../shared/organize.ts";
 import type { NoteContent } from "../../shared/document.ts";
 import type { NotePassageSource } from "../../shared/passages.ts";
 import type { IndexFailureCode } from "../../shared/index-jobs.ts";
@@ -31,6 +32,8 @@ export const notes = pgTable(
     ownerId: text("owner_id").notNull(),
     title: text("title").notNull(),
     origin: jsonb("origin").$type<NoteOrigin>(),
+    generation: jsonb("generation").$type<DraftGeneration>(),
+    original: jsonb("original").$type<OrganizerOriginal>(),
     content: jsonb("content").$type<NoteContent>().notNull(),
     /** Supplied by the client on creation and immutable in note operations. */
     createdAt: timestamp("created_at", { withTimezone: true, mode: "string" }).notNull(),
@@ -150,10 +153,13 @@ export const organizeRuns = pgTable(
     id: uuid("id").primaryKey().defaultRandom(),
     ownerId: text("owner_id").notNull(),
     // Keep the cleanup address after source deletion; cascading would orphan eve history.
-    noteId: uuid("note_id").notNull(),
-    sourceRevision: integer("source_revision").notNull(),
+    noteId: uuid("note_id"),
+    sourceRevision: integer("source_revision"),
     runtimeUrl: text("runtime_url").notNull(),
-    input: jsonb("input").$type<{ title: string; content: string }>(),
+    input: jsonb("input").$type<
+      { title: string; content: string; instruction?: string } | { request: string }
+    >(),
+    original: jsonb("original").$type<OrganizerOriginal>(),
     runtime: jsonb("runtime").$type<{ sessionId: string; deliveryId: string | null }>(),
     state: jsonb("state").$type<OrganizeRunState>().notNull(),
     usage: jsonb("usage").$type<OrganizeUsage>(),
@@ -172,6 +178,14 @@ export const organizeRuns = pgTable(
     index("organize_runs_pending_idx")
       .on(table.updatedAt)
       .where(sql`${table.active}`),
+    check(
+      "organize_runs_original_active",
+      sql`${table.original} IS NULL OR (${table.active} AND ${table.cleanupTarget} IS NULL)`,
+    ),
+    check(
+      "organize_runs_source_pair",
+      sql`(${table.noteId} IS NULL) = (${table.sourceRevision} IS NULL)`,
+    ),
     check("organize_runs_revision_positive", sql`${table.sourceRevision} > 0`),
     check(
       "organize_runs_cleanup_target",
@@ -184,23 +198,62 @@ export const organizeRuns = pgTable(
   ],
 );
 
+/** Content-free receipts survive cleanup, so a lost response cannot start a second paid run. */
+export const organizeStartRequests = pgTable(
+  "organize_start_requests",
+  {
+    ownerId: text("owner_id").notNull(),
+    key: uuid("key").notNull(),
+    payloadHash: text("payload_hash").notNull(),
+    runId: uuid("run_id").notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.ownerId, table.key] })],
+);
+
+/** Separate from idempotency receipts so rejected input can be erased without permitting a replay. */
+export const failedOrganizeRequests = pgTable(
+  "failed_organize_requests",
+  {
+    runId: uuid("run_id")
+      .primaryKey()
+      .references(() => organizeRuns.id, { onDelete: "cascade" }),
+    ownerId: text("owner_id").notNull(),
+    text: text("text").notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true, mode: "string" }).notNull(),
+  },
+  (table) => [
+    index("failed_organize_requests_owner_expiry_idx").on(table.ownerId, table.expiresAt),
+    index("failed_organize_requests_expiry_idx").on(table.expiresAt),
+  ],
+);
+
 /** Temporary user edits. The source relationship intentionally survives source deletion. */
 export const noteDrafts = pgTable(
   "note_drafts",
   {
     id: uuid("id").primaryKey(),
     ownerId: text("owner_id").notNull(),
-    sourceNoteId: uuid("source_note_id").notNull(),
-    sourceRevision: integer("source_revision").notNull(),
+    sourceNoteId: uuid("source_note_id"),
+    sourceRevision: integer("source_revision"),
     title: text("title").notNull(),
     content: jsonb("content").$type<NoteContent>().notNull(),
     sources: jsonb("sources").$type<NoteOrigin["sources"]>().notNull(),
+    generation: jsonb("generation").$type<DraftGeneration>(),
+    original: jsonb("original").$type<OrganizerOriginal>(),
     revision: integer("revision").notNull().default(1),
     expiresAt: timestamp("expires_at", { withTimezone: true, mode: "string" }).notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true, mode: "string" }).notNull(),
   },
   (table) => [
     uniqueIndex("note_drafts_source_idx").on(table.ownerId, table.sourceNoteId),
+    check(
+      "note_drafts_source_pair",
+      sql`(${table.sourceNoteId} IS NULL) = (${table.sourceRevision} IS NULL)`,
+    ),
+    check(
+      "note_drafts_request_original",
+      sql`${table.sourceNoteId} IS NOT NULL OR (${table.original} IS NOT NULL AND ${table.original}->>'kind' IS NOT DISTINCT FROM 'request')`,
+    ),
     index("note_drafts_expiry_idx").on(table.expiresAt),
     check(
       "note_drafts_revision_positive",

@@ -350,14 +350,14 @@ export function AIDraftPanel({
         </div>
       </header>
       <p className="text-sm text-muted-foreground">
-        Generated from your note. Review it before saving. This draft expires{" "}
-        {new Date(remote.expiresAt).toLocaleString()}.
+        {remote.source ? "Generated from your note." : "Generated from your request."} Review it
+        before saving. This draft expires {new Date(remote.expiresAt).toLocaleString()}.
       </p>
-      {remote.source.deleted ? (
+      {remote.source?.deleted ? (
         <p role="note">
           The source note was deleted. You can still save this draft as a separate note.
         </p>
-      ) : remote.source.stale ? (
+      ) : remote.source?.stale ? (
         <p role="note">The source note has changed. This draft belongs to an older version.</p>
       ) : null}
       {error && (
