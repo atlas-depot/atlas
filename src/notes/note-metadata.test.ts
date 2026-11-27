@@ -188,21 +188,28 @@ describe("note metadata helpers", () => {
   });
 
   it("stays bounded for large notes with and without internal links", () => {
-    const fastPath = ["[".repeat(100_000), "[](a ".repeat(20_000), "[](<\n".repeat(20_000) + ">"];
-    const parsed = [
+    const capped = [
+      "[".repeat(100_000),
+      "[](a ".repeat(20_000),
+      "[](<\n".repeat(20_000) + ">",
       "[".repeat(100_000) + ` [link](/notes/${meetingId})`,
+      `[link](/notes/${meetingId}) `.repeat(1_000),
+    ];
+    const parsed = [
+      "[".repeat(10_000) + ` [link](/notes/${meetingId})`,
       "[](a ".repeat(1_000) + ` [link](/notes/${meetingId})`,
       "[](<\n".repeat(1_000) + ">" + ` [link](/notes/${meetingId})`,
+      `[link](/notes/${meetingId}) `.repeat(300),
     ];
-    const manyLinks = `[link](/notes/${meetingId}) `.repeat(1_000);
+    const overflow = ">".repeat(10_000) + `[link](/notes/${meetingId})`;
     const startedAt = performance.now();
-    for (const content of fastPath) {
+    for (const content of capped) {
       expect(extractLinkedNoteIds(content)).toEqual([]);
     }
     for (const content of parsed) {
       expect(extractLinkedNoteIds(content)).toEqual([meetingId]);
     }
-    expect(extractLinkedNoteIds(manyLinks)).toEqual([meetingId]);
+    expect(extractLinkedNoteIds(overflow)).toEqual([]);
     expect(performance.now() - startedAt).toBeLessThan(5_000);
   });
 

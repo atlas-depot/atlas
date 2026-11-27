@@ -133,6 +133,9 @@ function collectBlockLinkHrefs(blocks: readonly AtlasBlock[], hrefs: string[]) {
 }
 
 const markdownParser = unified().use(remarkParse).use(remarkGfm);
+const NOTE_ID_PATTERN = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
+/** Source extraction is synchronous; very large documents keep their content but not derived links. */
+const MAX_SOURCE_PARSE_LENGTH = 20_000;
 
 function collectFootnoteReferences(node: Nodes, identifiers: Set<string>) {
   if (node.type === "footnoteReference") identifiers.add(node.identifier);
@@ -185,10 +188,17 @@ function collectLinkHrefs(
  * Code, raw HTML, images, unused definitions and unused footnote bodies are ignored.
  */
 function extractMarkdownLinkHrefs(markdown: string): string[] {
-  // Character references can encode part of /notes/, so parse when an ampersand is present.
-  if (!markdown.includes("notes") && !markdown.includes("&")) return [];
+  // Every internal note link contains a UUID; skip notes without one.
+  if (!NOTE_ID_PATTERN.test(markdown)) return [];
+  if (markdown.length > MAX_SOURCE_PARSE_LENGTH) return [];
 
-  const tree = markdownParser.parse(markdown);
+  let tree: Nodes;
+  try {
+    tree = markdownParser.parse(markdown);
+  } catch {
+    // The preview can still render; source metadata is best effort.
+    return [];
+  }
   const usedFootnotes = new Set<string>();
   collectFootnoteReferences(tree, usedFootnotes);
 
