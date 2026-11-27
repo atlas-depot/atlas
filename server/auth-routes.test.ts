@@ -142,6 +142,18 @@ describe("public authentication routes", () => {
     expect(callback.headers.get("Location")).toBe(`${appOrigin}/`);
   });
 
+  it("drops a return path that normalizes to a protocol-relative URL", async () => {
+    const startLogin = vi.fn<BrowserAuth["startLogin"]>(async () => ({
+      url: "https://auth.example.test/authorize?state=state_fixture",
+      transactionCookie,
+    }));
+    const login = await createTestApp(fakeBrowserAuth({ startLogin })).request(
+      `/api/auth/login?returnTo=${encodeURIComponent("/.//evil.example/notes/x")}`,
+    );
+    expect(login.status).toBe(302);
+    expect(startLogin).toHaveBeenCalledWith(undefined);
+  });
+
   it("does not leak provider errors from login", async () => {
     const log = vi.spyOn(console, "error").mockImplementation(() => {});
     onTestFinished(() => log.mockRestore());

@@ -22,7 +22,15 @@ function safeReturnTo(value: string | undefined, appOrigin: string): string | un
   try {
     const url = new URL(value, appOrigin);
     if (url.origin !== new URL(appOrigin).origin) return undefined;
-    return `${url.pathname}${url.search}${url.hash}`;
+    const destination = `${url.pathname}${url.search}${url.hash}`;
+    if (
+      destination.length > 2_048 ||
+      !destination.startsWith("/") ||
+      destination.startsWith("//")
+    ) {
+      return undefined;
+    }
+    return destination;
   } catch {
     return undefined;
   }
