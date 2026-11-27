@@ -175,6 +175,7 @@ export function NotesWorkspace({
   const deleteCancelRef = useRef<HTMLButtonElement>(null);
   const noteActionsRef = useRef<HTMLButtonElement>(null);
   const unavailableLinkRef = useRef<HTMLElement>(null);
+  const pendingSummaryReads = useRef(new Map<string, Promise<NoteSummary | null>>());
   const dirty = useMemo(
     () => !editorValid || hasUnsavedChanges(draft, saved?.note ?? null),
     [draft, saved, editorValid],
@@ -268,9 +269,12 @@ export function NotesWorkspace({
         content: snapshot.note.content,
         createdAt: snapshot.note.createdAt,
       });
-      setNotes((current) =>
-        current.map((note) => (note.id === snapshot.note.id ? toSummary(snapshot.note) : note)),
-      );
+      setNotes((current) => {
+        const summary = toSummary(snapshot.note);
+        return current.some((note) => note.id === summary.id)
+          ? current.map((note) => (note.id === summary.id ? summary : note))
+          : [summary, ...current];
+      });
       setSaved(snapshot);
       resetSelectionState();
     },
@@ -575,6 +579,37 @@ export function NotesWorkspace({
       id: target.source.noteId,
       sourceTarget: target,
     });
+  }
+
+  async function loadNoteSummary(noteId: string): Promise<NoteSummary | null> {
+    if (!requestsEnabled) return null;
+    const pending = pendingSummaryReads.current.get(noteId);
+    if (pending) return pending;
+
+    const request = (async () => {
+      try {
+        const snapshot = await store.read(noteId);
+        const summary = toSummary(snapshot.note);
+        setNotes((current) =>
+          current.some((note) => note.id === summary.id)
+            ? current.map((note) => (note.id === summary.id ? summary : note))
+            : [summary, ...current],
+        );
+        return summary;
+      } catch (error) {
+        const kind = classifyFailure(error);
+        if (kind === "unauthenticated") clearPrivateCache();
+        if (kind === "missing") {
+          setNotes((current) => current.filter((note) => note.id !== noteId));
+        }
+        return null;
+      } finally {
+        pendingSummaryReads.current.delete(noteId);
+      }
+    })();
+
+    pendingSummaryReads.current.set(noteId, request);
+    return request;
   }
 
   async function refreshNotes() {
@@ -901,6 +936,7 @@ export function NotesWorkspace({
                 onOpenSource={requestOpenSource}
                 onOpenNote={requestOpenLinkedNote}
                 onUnauthenticated={handleSearchUnauthenticated}
+                loadNoteSummary={loadNoteSummary}
               />
             )}
             <nav aria-label="Notes" className="workspace-note-list">

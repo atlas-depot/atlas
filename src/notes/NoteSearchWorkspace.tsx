@@ -56,6 +56,7 @@ export function NoteSearchWorkspace({
   onOpenSource,
   onOpenNote,
   onUnauthenticated,
+  loadNoteSummary,
 }: {
   client: NoteSearchClient;
   notes: NoteSummary[];
@@ -65,6 +66,7 @@ export function NoteSearchWorkspace({
   onOpenSource: (target: SourceTarget) => void;
   onOpenNote?: (noteId: string) => void;
   onUnauthenticated: () => void;
+  loadNoteSummary?: (noteId: string) => Promise<NoteSummary | null>;
 }) {
   const [query, setQuery] = useState("");
   const [submittedQuery, setSubmittedQuery] = useState("");
@@ -113,6 +115,14 @@ export function NoteSearchWorkspace({
       setOutcome(describeSearchOutcome(trimmed, response));
       setResultTitles(titles);
       setFailure(null);
+
+      const knownNoteIds = new Set(notes.map((note) => note.id));
+      const missingNoteIds = [
+        ...new Set(response.candidates.map((candidate) => candidate.source.noteId)),
+      ].filter((noteId) => !knownNoteIds.has(noteId));
+      if (missingNoteIds.length > 0 && loadNoteSummary) {
+        void Promise.allSettled(missingNoteIds.map((noteId) => loadNoteSummary(noteId)));
+      }
     } catch (error) {
       if (requestId !== requestIdRef.current) {
         return;

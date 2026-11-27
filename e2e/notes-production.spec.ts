@@ -2997,6 +2997,56 @@ test.describe("authorship, source links, and modification dates (#110)", () => {
     });
   });
 
+  test("loads metadata for a search result created after the note list loaded", async ({
+    page,
+  }) => {
+    const newId = "fa110005-1234-4000-8000-000000000001";
+    const newNote: Note = {
+      id: newId,
+      title: "New evidence",
+      origin: { sourceNoteId: firstId, sourceRevision: 2, sources: [] },
+      content: blockParagraph("p-new-evidence", "Fresh source text."),
+      createdAt: "2026-11-26T09:00:00.000Z",
+      updatedAt: "2026-11-26T09:30:00.000Z",
+    };
+    await serveNotes(page, [[serverNote, `"${firstId}:1"`]]);
+    await page.route(`**/api/notes/${newId}`, (route) =>
+      route.fulfill({ json: newNote, headers: { ETag: `"${newId}:1"` } }),
+    );
+    await page.route("**/api/note-search", (route) =>
+      route.fulfill({
+        json: {
+          candidates: [
+            {
+              text: "Fresh source text.",
+              score: 0.92,
+              source: {
+                kind: "block",
+                noteId: newId,
+                version: `"${newId}:1"`,
+                blockId: "p-new-evidence",
+                headingPath: [],
+              },
+            },
+          ],
+          coverage: { ready: 2, pending: 0, failed: 0 },
+        },
+      }),
+    );
+
+    await page.goto("/");
+    const search = page.getByRole("region", { name: "Search notes" });
+    await search.getByLabel("Search saved notes").fill("fresh");
+    await search.getByLabel("Search saved notes").press("Enter");
+
+    const card = search.locator(".note-search-card").filter({ hasText: "New evidence" });
+    await expect(card).toContainText("AI-generated");
+    await expect(card).toContainText("Last edited");
+    await expect(card).toContainText("Source note:");
+    await expect(card.getByRole("link", { name: "A", exact: true })).toBeVisible();
+    await expect(page.getByRole("button", { name: "New evidence", exact: true })).toBeVisible();
+  });
+
   test("shows an unavailable state for deleted and second-account sources without exposing target title or content", async ({
     page,
   }) => {
