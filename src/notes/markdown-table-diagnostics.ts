@@ -17,7 +17,8 @@ export type MarkdownTableDelimiterWarning = {
   suggestedRow: string;
 };
 
-const delimiterRowPattern = /^\s*\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)*\|?\s*$/;
+const delimiterCellPattern = /^:?-+:?$/;
+const pipeWrappedHeaderPattern = /^\s*\|.*\|\s*$/;
 const numberWords: Record<number, string> = {
   1: "one",
   2: "two",
@@ -91,11 +92,13 @@ function splitRow(line: string) {
 }
 
 function isDelimiterRow(line: string, headerLine: string) {
-  if (!delimiterRowPattern.test(line)) return false;
-  if (line.includes("|")) return true;
-  // A pipe-less row is ambiguous with a setext heading or thematic break. Only
-  // accept an explicit alignment marker under a pipe-wrapped header row.
-  return line.includes(":") && /^\s*\|.*\|\s*$/.test(headerLine);
+  if (!line.includes("|")) {
+    // A pipe-less row is ambiguous with a setext heading or thematic break. Only
+    // accept an explicit alignment marker under a pipe-wrapped header row.
+    if (!line.includes(":") || !pipeWrappedHeaderPattern.test(headerLine)) return false;
+  }
+  const cells = splitRow(line);
+  return cells.length > 0 && cells.every((cell) => delimiterCellPattern.test(cell));
 }
 
 function missingSentence(firstMissing: number, missing: number) {

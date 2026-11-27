@@ -132,6 +132,11 @@ describe("Markdown table delimiter diagnostics", () => {
     expect(findMarkdownTableDelimiterWarnings("| A | B |\n---")).toEqual([]);
   });
 
+  it("rejects a long whitespace candidate in bounded time", () => {
+    const source = `| A-B | C |\n|${" ".repeat(90_000)}x`;
+    expect(findMarkdownTableDelimiterWarnings(source)).toEqual([]);
+  }, 2_000);
+
   const ordinalCases: Array<[number, string]> = [
     [13, "13th"],
     [21, "21st"],
