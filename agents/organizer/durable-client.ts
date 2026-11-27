@@ -1,5 +1,6 @@
 import type { SessionStreamEvent } from "eve/client";
 import { z } from "zod";
+import { draftProposalSchema } from "../../shared/organize.ts";
 import {
   generatedDraftSchema,
   type GeneratedDraft,
@@ -16,6 +17,7 @@ import { API_PRINCIPAL } from "./job.ts";
 import { researchResultSchema } from "./research.ts";
 
 const referenceSchema = deliveryReceiptSchema;
+const proposalOutputSchema = z.toJSONSchema(draftProposalSchema);
 export type OrganizerReference = z.infer<typeof referenceSchema>;
 export type OrganizerAllocation = { sessionId: string; deliveryId: null };
 export type OrganizerObservation = (
@@ -81,7 +83,7 @@ export function createDurableEveOrganizer({
     }: {
       sessionId: string;
       operationId: string;
-      note: { title: string; content: string };
+      note: { title: string; content: string; instruction?: string } | { request: string };
     }): Promise<OrganizerReference | { status: "expired" }> {
       referenceSchema.shape.sessionId.parse(sessionId);
       if (!operationId || operationId.length > 256)
@@ -92,6 +94,7 @@ export function createDurableEveOrganizer({
         return await transport.deliver(sessionId, {
           idempotencyKey: operationId,
           message: JSON.stringify(note),
+          outputSchema: proposalOutputSchema,
         });
       } catch (error) {
         if (error instanceof ExpiredSubmission) return { status: "expired" };
@@ -308,11 +311,21 @@ function observeDraft(
   for (const event of scoped) {
     if (event.type === "model.settled") {
       models.set(event.data.runId, event.data);
-      if (
-        models.size > maxModelCalls ||
-        (models.size === maxModelCalls && event.data.finishReason !== "stop")
-      ) {
+      if (models.size > maxModelCalls) {
         return { status: "failed", reason: "generation_failed" };
+      }
+      if (models.size === maxModelCalls && event.data.finishReason !== "stop") {
+        // eve delivers a structured reply through its final-output tool, also at the call limit.
+        const finalResult = scoped.some(
+          (part) =>
+            part.type === "content.completed" &&
+            part.data.runId === event.data.runId &&
+            part.data.kind === "result" &&
+            part.data.phase === "reply" &&
+            !part.data.interrupted,
+        );
+        if (event.data.finishReason !== "tool-calls" || !finalResult)
+          return { status: "failed", reason: "generation_failed" };
       }
     } else if (
       event.type === "call.requested" &&
@@ -346,32 +359,50 @@ function observeDraft(
   ) {
     return { status: "failed", reason: "generation_failed" };
   }
-  const parts: string[] = [];
-  for (const partId of turn.data.reply) {
-    const part = scoped.find(
-      (event) => event.type === "content.completed" && event.data.partId === partId,
-    );
-    if (
-      part?.type !== "content.completed" ||
-      part.data.kind !== "text" ||
-      part.data.phase !== "reply" ||
-      part.data.interrupted ||
-      typeof part.data.value !== "string"
-    ) {
+  const reply = turn.data.reply.map((partId) =>
+    scoped.find((event) => event.type === "content.completed" && event.data.partId === partId),
+  );
+  const structured = reply.findLast(
+    (event) => event?.type === "content.completed" && event.data.kind === "result",
+  );
+  // Older deliveries returned Markdown as one or more text parts.
+  let proposal: z.infer<typeof draftProposalSchema> | undefined;
+  const text: string[] = [];
+  let replyRunId: string | undefined;
+  for (const part of structured ? [structured] : reply) {
+    if (part?.type !== "content.completed" || part.data.phase !== "reply" || part.data.interrupted)
+      return { status: "failed", reason: "invalid_draft" };
+
+    const model = models.get(part.data.runId);
+    const finalToolCall = part.data.kind === "result" && model?.finishReason === "tool-calls";
+    if (model?.outcome !== "completed" || (model.finishReason !== "stop" && !finalToolCall))
+      return { status: "failed", reason: "generation_failed" };
+
+    replyRunId = part.data.runId;
+    if (part.data.kind === "result") {
+      const parsed = draftProposalSchema.safeParse(part.data.value);
+      if (!parsed.success) return { status: "failed", reason: "invalid_draft" };
+      proposal = parsed.data;
+    } else if (part.data.kind === "text" && typeof part.data.value === "string") {
+      text.push(part.data.value);
+    } else {
       return { status: "failed", reason: "invalid_draft" };
     }
-    const model = models.get(part.data.runId);
-    if (model?.outcome !== "completed" || model.finishReason !== "stop") {
-      return { status: "failed", reason: "generation_failed" };
-    }
-    parts.push(part.data.value);
   }
+  const completedAt = Date.parse(turn.meta.at);
+  if (!Number.isFinite(completedAt)) return { status: "failed", reason: "invalid_draft" };
+  const producer = scoped.findLast(
+    (event) => event.type === "model.started" && event.data.runId === replyRunId,
+  );
   const draft = generatedDraftSchema.safeParse({
-    markdown: parts.join("\n"),
+    generation: {
+      generatedAt: new Date(completedAt).toISOString(),
+      ...(producer?.type === "model.started" ? { runtimeModelId: producer.data.modelId } : {}),
+    },
+    ...(proposal ?? { markdown: text.join("\n") }),
     sources: [...sources.values()],
   });
-  const completedAt = Date.parse(turn.meta.at);
-  return draft.success && Number.isFinite(completedAt)
+  return draft.success
     ? { status: "draft", draft: draft.data, completedAt }
     : { status: "failed", reason: "invalid_draft" };
 }

@@ -62,6 +62,11 @@ beforeAll(async () => {
   await connection.db.execute(
     sql.raw(await readFile(new URL("../../drizzle/0006_note-index.sql", import.meta.url), "utf8")),
   );
+  await connection.db.execute(
+    sql.raw(
+      await readFile(new URL("../../drizzle/0012_organizer-inputs.sql", import.meta.url), "utf8"),
+    ),
+  );
   store = createNoteStore(connection.db);
   reopened = openDatabase(url.href);
 });
@@ -183,7 +188,9 @@ it("projects a JSON source for the organizer without replacing or truncating the
     "https://organizer.example",
   );
   expect(run?.sourceRevision).toBe(1);
-  expect(run?.input?.content).toBe(`BlockNote JSON document:\n${canonicalNoteContent(content)}`);
+  expect(run?.input).toMatchObject({
+    content: `BlockNote JSON document:\n${canonicalNoteContent(content)}`,
+  });
   expect((await store.read("organizer-json", note.note.id))?.note.content).toEqual(content);
 });
 

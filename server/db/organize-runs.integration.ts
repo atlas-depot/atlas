@@ -58,11 +58,11 @@ function deferred() {
   return { promise, resolve };
 }
 
-async function claimed(owner: string): Promise<OrganizeRunRecord> {
+async function claimed(owner: string): Promise<OrganizeRunRecord & { noteId: string }> {
   const note = await notes.create(owner, noteInput);
   const run = await store.claim(owner, note.note.id, runtimeUrl);
-  if (!run) throw new Error("Expected owned run.");
-  return run;
+  if (!run?.noteId) throw new Error("Expected owned note run.");
+  return { ...run, noteId: run.noteId };
 }
 
 it("coalesces concurrent starts across pools and captures one immutable owned source revision", async () => {

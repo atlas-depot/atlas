@@ -1,12 +1,12 @@
 import { expect, test, type Page } from "@playwright/test";
 import { noteContentSchema, type Note } from "../shared/notes.ts";
-import { noteDraftSchema, type NoteDraft } from "../shared/drafts.ts";
+import { noteDraftSchema } from "../shared/drafts.ts";
 import { blockNoteDocumentSchema } from "../shared/document.ts";
 import { expectEditorContent } from "./notes-editor.ts";
 
 const sourceId = "00000000-0000-4000-8000-000000000001";
 const runId = "00000000-0000-4000-8000-000000000002";
-const draftId = "00000000-0000-4000-8000-000000000003";
+const draftId = runId; // Handoff uses the run ID for the draft.
 const savedId = "00000000-0000-4000-8000-000000000004";
 const date = "2026-11-05T12:00:00.000Z";
 /** GET /api/notes rows carry no content; per-note routes return the full note. */
@@ -26,7 +26,7 @@ async function fixture(page: Page) {
   };
   let sourceRevision = 1;
   let draftRevision = 1;
-  let storedDraft: NoteDraft | null = null;
+  let storedDraft: ReturnType<typeof makeDraft> | null = null;
   let saved: Note | null = null;
   let run = false;
   let failGeneration = false;
@@ -42,7 +42,7 @@ async function fixture(page: Page) {
   let handoffs = 0;
   let saves = 0;
   const makeDraft = () =>
-    noteDraftSchema.parse({
+    noteDraftSchema.extend({ source: noteDraftSchema.shape.source.unwrap() }).parse({
       id: draftId,
       title: "Organized note",
       content: "Generated note",

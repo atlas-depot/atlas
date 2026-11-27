@@ -3,7 +3,8 @@ import { eq, sql } from "drizzle-orm";
 import { Pool } from "pg";
 import { afterAll, afterEach, beforeAll, expect, it, vi } from "vite-plus/test";
 import { noteDraftSchema } from "../../shared/drafts.ts";
-import { noteSchema } from "../../shared/notes.ts";
+import { blockNoteDocumentSchema } from "../../shared/document.ts";
+import { noteListSchema, noteSchema, type CreateNote } from "../../shared/notes.ts";
 import { createApp } from "../app.ts";
 import { createDurableOrganizeRuns, type DurableOrganizer } from "../organize-runs.ts";
 import { openDatabase, readTestDatabaseUrl } from "./connection.ts";
@@ -56,11 +57,16 @@ afterAll(async () => {
   }
 });
 
-async function fixture() {
+const generation = {
+  generatedAt: "2026-11-15T14:05:00.000Z",
+  runtimeModelId: "synthetic-final-model",
+};
+
+async function fixture(proposedTitle?: string, source: CreateNote = input) {
   const owner = randomUUID();
   const foreign = randomUUID();
   const sourceStore = createNoteStore(connection.db);
-  const original = await sourceStore.create(owner, input);
+  const original = await sourceStore.create(owner, source);
   const tag = noteTag(original.note.id, original.revision);
   const clock = Date.now();
   let cleanupUnavailable = false;
@@ -75,7 +81,14 @@ async function fixture() {
       sessionId,
       deliveryId: `delivery-${operationId}`,
     }),
-    inspect: async () => ({ status: "draft", draft: generated, completedAt: clock }),
+    inspect: async () => ({
+      status: "draft",
+      draft:
+        proposedTitle === undefined
+          ? generated
+          : { ...generated, title: proposedTitle, generation },
+      completedAt: clock,
+    }),
     retire: async () => {
       retired += 1;
       await beforeRetire?.();
@@ -165,6 +178,7 @@ it("commits the draft and cleanup intent before retirement, and replays a lost h
     });
   });
   const draft = await f.handoff(id);
+  expect(draft.title).toBe(input.title); // Legacy runs have no proposed title.
   expect(await f.handoff(id)).toEqual(draft);
   expect(f.retired()).toBe(1);
   expect(await f.manager(other.db).work(f.owner)).toEqual({ runs: [], drafts: [draft] });
@@ -245,9 +259,10 @@ it("binds generation to the saved source and blocks another generation until the
 });
 
 it("persists edits without extending expiration and rejects stale or malformed writes", async () => {
-  const f = await fixture();
+  const f = await fixture("Review checklist");
   const id = await f.complete();
   const initial = await f.handoff(id);
+  expect(initial.title).toBe("Review checklist");
   const body = { title: "Edited draft", content: "Keep my exact edits 😀." };
   const response = await f.request(`/note-drafts/${id}`, {
     method: "PUT",
@@ -259,6 +274,7 @@ it("persists edits without extending expiration and rejects stale or malformed w
   expect(edited).toMatchObject({ ...body, expiresAt: initial.expiresAt });
   expect(edited.etag).not.toBe(initial.etag);
   expect(await f.manager(other.db).drafts.read(f.owner, id)).toEqual(edited);
+  expect((await f.handoff(id)).title).toBe(body.title);
   for (const suffix of ["", "/save"]) {
     const stale = await f.request(`/note-drafts/${id}${suffix}`, {
       method: suffix ? "POST" : "PUT",
@@ -319,14 +335,55 @@ it("hides every draft operation and pending-work listing from other owners", asy
   expect(await f.backend.drafts.read(f.owner, id)).toEqual(draft);
 });
 
-it("marks changed or deleted sources and saves separately with trusted provenance", async () => {
+it("erases the original when a run is cancelled even if remote cleanup is delayed", async () => {
   const f = await fixture();
+  const id = await f.start();
+  f.failCleanup(true);
+  await f.backend.cancel(f.owner, id);
+  const [pendingCleanup] = await connection.db
+    .select()
+    .from(organizeRuns)
+    .where(eq(organizeRuns.id, id));
+  expect(pendingCleanup.cleanupTarget).toEqual({ status: "cancelled" });
+  expect(pendingCleanup.original).toBeNull();
+  expect((await f.request(`/organize-runs/${id}/handoff`, { method: "POST" })).status).toBe(409);
+});
+
+it("marks changed or deleted sources and saves separately with trusted provenance", async () => {
+  const content = blockNoteDocumentSchema.parse({
+    format: "blocknote",
+    schemaVersion: 1,
+    blocks: [
+      {
+        id: "stable-code-block",
+        type: "codeBlock",
+        props: { language: "python" },
+        content: [{ type: "text", text: "if ready:\n    run()\n", styles: {} }],
+        children: [],
+      },
+    ],
+  });
+  const f = await fixture(undefined, { ...input, content });
   const id = await f.complete();
-  const draft = await f.handoff(id);
+  const original = {
+    kind: "note",
+    noteId: f.original.note.id,
+    revision: 1,
+    title: input.title,
+    content,
+  };
   await f.sourceStore.update(f.owner, f.original.note.id, 1, {
     title: "Changed source",
     content: "Keep 43.",
   });
+  const draft = await f.handoff(id);
+  expect(draft).not.toHaveProperty("original");
+  expect(await (await f.request(`/note-drafts/${id}`)).json()).not.toHaveProperty("original");
+  const draftWithOriginal = `/note-drafts/${id}?include=original`;
+  expect(await (await f.request(draftWithOriginal)).json()).toHaveProperty("original", original);
+  expect((await f.request(draftWithOriginal, {}, f.foreign)).status).toBe(404);
+  const [retired] = await other.db.select().from(organizeRuns).where(eq(organizeRuns.id, id));
+  expect(retired.original).toBeNull();
   expect((await f.backend.drafts.read(f.owner, id))?.source).toEqual({
     noteId: f.original.note.id,
     revision: 1,
@@ -347,6 +404,13 @@ it("marks changed or deleted sources and saves separately with trusted provenanc
   });
   expect(response.status).toBe(201);
   const saved = noteSchema.parse(await response.json());
+  expect(saved).not.toHaveProperty("original");
+  expect(await (await f.request(`/notes/${saved.id}`)).json()).not.toHaveProperty("original");
+  const noteWithOriginal = `/notes/${saved.id}?include=original`;
+  expect(await (await f.request(noteWithOriginal)).json()).toHaveProperty("original", original);
+  expect((await f.request(noteWithOriginal, {}, f.foreign)).status).toBe(404);
+  const list = noteListSchema.parse(await (await f.request("/notes")).json());
+  expect(list.notes[0]).not.toHaveProperty("original");
   expect(saved.id).not.toBe(f.original.note.id);
   expect(saved.origin).toEqual({
     sourceNoteId: f.original.note.id,
@@ -358,10 +422,13 @@ it("marks changed or deleted sources and saves separately with trusted provenanc
 });
 
 it("converges concurrent Saves on one note and rejects replay after edits or deletion", async () => {
-  const f = await fixture();
+  const f = await fixture("Review checklist");
   const id = await f.complete();
   const draft = await f.handoff(id);
-  const body = { title: "Final draft", content: draft.content };
+  expect((await f.manager(other.db).drafts.read(f.owner, id, true))?.generation).toEqual(
+    generation,
+  );
+  const body = { title: draft.title, content: draft.content };
   const save = () =>
     f.request(`/note-drafts/${id}/save`, {
       method: "POST",
@@ -374,12 +441,16 @@ it("converges concurrent Saves on one note and rejects replay after edits or del
     responses.map(async (response) => noteSchema.parse(await response.json())),
   );
   expect(new Set(saved.map((note) => note.id)).size).toBe(1);
+  expect((await f.sourceStore.read(f.owner, saved[0].id))?.note.title).toBe("Review checklist");
   expect(await f.sourceStore.list(f.owner)).toHaveLength(2);
   expect(await f.sourceStore.read(f.owner, f.original.note.id)).toEqual(f.original);
   await f.sourceStore.update(f.owner, saved[0].id, 1, {
     title: "Later edit",
     content: "User changed this.",
   });
+  expect((await f.sourceStore.read(f.owner, saved[0].id, true))?.note.generation).toEqual(
+    generation,
+  );
   expect((await save()).status).toBe(409);
   await f.sourceStore.delete(f.owner, saved[0].id, 2);
   expect((await save()).status).toBe(409);

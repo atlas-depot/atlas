@@ -37,13 +37,10 @@ const database = setupIndexTestDatabase(async (connection) => {
       sql.raw(await readFile(new URL(`../../drizzle/${name}.sql`, import.meta.url), "utf8")),
     );
   }
-  await connection.db.insert(notes).values({
-    ...input,
-    id: legacyId,
-    ownerId: "legacy-owner",
-    revision: 7,
-    updatedAt: input.createdAt,
-  });
+  await connection.db.execute(
+    sql`INSERT INTO notes (id, owner_id, title, content, revision, created_at, updated_at)
+        VALUES (${legacyId}, 'legacy-owner', ${input.title}, to_jsonb(${input.content}::text), 7, ${input.createdAt}, ${input.createdAt})`,
+  );
   // Exercise backfill while bringing storage up to the schema required by current note writes.
   for (const name of [
     "0006_note-index",
@@ -51,6 +48,7 @@ const database = setupIndexTestDatabase(async (connection) => {
     "0008_conversation-records",
     "0009_conversation-delivery",
     "0010_conversation-context",
+    "0012_organizer-inputs",
   ]) {
     await connection.db.execute(
       sql.raw(await readFile(new URL(`../../drizzle/${name}.sql`, import.meta.url), "utf8")),
@@ -84,7 +82,7 @@ async function temporaryDraft(owner: string) {
       updatedAt: new Date().toISOString(),
     })
     .returning();
-  return draft;
+  return { ...draft, sourceNoteId: source.note.id };
 }
 
 it("backfills an existing note at its current revision without changing its content", async () => {

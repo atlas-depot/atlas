@@ -4,6 +4,7 @@ import {
   createNoteKeySchema,
   noteIdSchema,
   noteListSchema,
+  requestOriginPreference,
   noteSchema,
   updateNoteSchema,
   type CreateNote,
@@ -29,7 +30,7 @@ export interface NotesStore {
 
 /** The list row for a note the client already holds in full. */
 export function toSummary(note: Note): NoteSummary {
-  const { content: _content, ...summary } = note;
+  const { content: _content, original: _original, generation: _generation, ...summary } = note;
   return summary;
 }
 
@@ -50,9 +51,11 @@ export function createNotesClient(
   timeoutMs = 30_000,
 ): NotesStore {
   async function response(path: string, init: RequestInit = {}, expectedStatus = 200) {
+    const headers = new Headers(init.headers);
+    headers.set("Prefer", requestOriginPreference);
     const result = await boundedFetch(
       `/api/notes${path}`,
-      { ...init, credentials: "same-origin" },
+      { ...init, headers, credentials: "same-origin" },
       timeoutMs,
       request,
     );

@@ -7,9 +7,23 @@ const sourceUrlSchema = z.url({ protocol: /^https?$/ }).refine((value) => {
   return url.username === "" && url.password === "";
 });
 
-/** Source records come from the research adapter, never from model-written links. */
-export const generatedDraftSchema = z.strictObject({
+/** New organizer turns return only these editable fields. */
+export const draftProposalSchema = z.strictObject({
+  title: noteTextSchema.max(256).refine((value) => value.trim().length > 0),
   markdown: noteTextSchema.max(100_000).refine((value) => value.trim().length > 0),
+});
+
+/** The final turn timestamp and the model selected for its successful eve call. */
+export const draftGenerationSchema = z.strictObject({
+  generatedAt: z.iso.datetime(),
+  // The provider may resolve this to another model; eve does not retain its response model ID.
+  runtimeModelId: noteTextSchema.min(1).max(512).optional(),
+});
+export type DraftGeneration = z.infer<typeof draftGenerationSchema>;
+
+/** Older runs have no proposed title. Source records always come from the research adapter. */
+export const generatedDraftSchema = draftProposalSchema.partial({ title: true }).extend({
+  generation: draftGenerationSchema.optional(),
   sources: z
     .array(
       z.strictObject({
@@ -28,11 +42,13 @@ const runStates = [
   z.object({
     status: z.literal("draft"),
     draft: generatedDraftSchema,
-    source: z.object({
-      noteId: z.uuid(),
-      revision: z.number().int().positive().safe(),
-      stale: z.boolean(),
-    }),
+    source: z
+      .object({
+        noteId: z.uuid(),
+        revision: z.number().int().positive().safe(),
+        stale: z.boolean(),
+      })
+      .nullable(),
   }),
   z.object({
     status: z.literal("running"),
@@ -64,9 +80,13 @@ export const organizeStartResponseSchema = z.strictObject({
 export type OrganizeStartResponse = z.infer<typeof organizeStartResponseSchema>;
 
 /** Server-established provenance; note write requests cannot supply this value. */
-export const noteOriginSchema = z.strictObject({
+const savedNoteOriginSchema = z.strictObject({
   sourceNoteId: z.uuid(),
   sourceRevision: z.number().int().positive(),
   sources: generatedDraftSchema.shape.sources,
 });
+export const noteOriginSchema = z.union([
+  savedNoteOriginSchema,
+  savedNoteOriginSchema.extend({ sourceNoteId: z.null(), sourceRevision: z.null() }),
+]);
 export type NoteOrigin = z.infer<typeof noteOriginSchema>;
