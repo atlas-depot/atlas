@@ -234,6 +234,7 @@ export function NotesWorkspace({
   const noteActionsRef = useRef<HTMLButtonElement>(null);
   const unavailableLinkRef = useRef<HTMLElement>(null);
   const pendingSummaryReads = useRef(new Map<string, Promise<NoteSummary | null>>());
+  const privateCacheEpoch = useRef(0);
   const dirty = useMemo(
     () => !editorValid || hasUnsavedChanges(draft, saved?.note ?? null),
     [draft, saved, editorValid],
@@ -284,6 +285,8 @@ export function NotesWorkspace({
   }, [activeSourceTarget, unavailableSourceTarget, saved]);
 
   const clearPrivateCache = useCallback(() => {
+    privateCacheEpoch.current += 1;
+    pendingSummaryReads.current.clear();
     setNotes([]);
     setSaved(null);
     setComparison(null);
@@ -359,8 +362,7 @@ export function NotesWorkspace({
       setLoadState("ready");
       const requestedId =
         typeof window === "undefined" ? null : parseInternalNoteHref(window.location.pathname);
-      const id =
-        requestedId && list.some((note) => note.id === requestedId) ? requestedId : list[0]?.id;
+      const id = requestedId ?? list[0]?.id;
       if (!id) return;
       busyRef.current = true;
       setOpeningId(id);
@@ -370,9 +372,21 @@ export function NotesWorkspace({
       } catch (error) {
         if (active) {
           const kind = classifyFailure(error);
-          setReadFailure({ id, compare: false, kind });
           if (kind === "unauthenticated") clearPrivateCache();
-          if (kind === "missing") setNotes((current) => current.filter((note) => note.id !== id));
+          if (kind === "missing") {
+            setNotes((current) =>
+              current.some((note) => note.id === id)
+                ? current.filter((note) => note.id !== id)
+                : current,
+            );
+            if (requestedId) {
+              setUnavailableLinkNotice(
+                "This source note is unavailable. It may have been deleted or belongs to another account.",
+              );
+              return;
+            }
+          }
+          setReadFailure({ id, compare: false, kind, linkedSource: Boolean(requestedId) });
         }
       } finally {
         if (active) {
@@ -655,9 +669,11 @@ export function NotesWorkspace({
       const pending = pendingSummaryReads.current.get(noteId);
       if (pending) return pending;
 
+      const epoch = privateCacheEpoch.current;
       const request = (async () => {
         try {
           const snapshot = await store.read(noteId);
+          if (epoch !== privateCacheEpoch.current) return null;
           const summary = toSummary(snapshot.note);
           setNotes((current) =>
             current.some((note) => note.id === summary.id)
@@ -666,6 +682,7 @@ export function NotesWorkspace({
           );
           return summary;
         } catch (error) {
+          if (epoch !== privateCacheEpoch.current) return null;
           const kind = classifyFailure(error);
           if (kind === "unauthenticated") handleSearchUnauthenticated();
           if (kind === "missing") {
@@ -677,7 +694,9 @@ export function NotesWorkspace({
           }
           return null;
         } finally {
-          pendingSummaryReads.current.delete(noteId);
+          if (epoch === privateCacheEpoch.current) {
+            pendingSummaryReads.current.delete(noteId);
+          }
         }
       })();
 

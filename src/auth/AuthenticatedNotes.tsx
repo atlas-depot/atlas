@@ -4,6 +4,7 @@ import { UserCircleIcon } from "@phosphor-icons/react/dist/csr/UserCircle";
 import type { SessionUser } from "../../shared/auth";
 import { Button } from "@/components/ui/button";
 import { NotesWorkspace } from "@/notes/NotesWorkspace";
+import { parseInternalNoteHref } from "@/notes/note-metadata";
 import type { NotesStore } from "@/notes/notes-store";
 import { createNoteSearchClient, type NoteSearchClient } from "@/notes/note-search-store";
 import { createConversationClient, type ConversationClient } from "@/notes/conversation-store";
@@ -195,7 +196,17 @@ export function AuthenticatedNotes({ store }: { store: NotesStore }) {
           if (active && id === requestId.current) {
             verifiedUserId.current = user?.id ?? null;
             setSessionCheck("verified");
-            setSession(user ? { kind: "ready", user } : { kind: "signed-out" });
+            setSession((current) => {
+              if (
+                current.kind === "ready" &&
+                user &&
+                current.user.id !== user.id &&
+                parseInternalNoteHref(window.location.pathname)
+              ) {
+                window.history.replaceState(null, "", "/");
+              }
+              return user ? { kind: "ready", user } : { kind: "signed-out" };
+            });
           }
         } catch {
           if (active && id === requestId.current) {

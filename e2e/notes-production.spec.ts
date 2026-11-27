@@ -285,6 +285,29 @@ test.describe("saving and conflicts", () => {
     await expect(title).toHaveValue("B");
   });
 
+  test("keeps the unavailable state and URL when opening a deleted note link directly", async ({
+    page,
+  }) => {
+    await serveNotes(page, [[serverNote, `"${firstId}:1"`]]);
+    await page.route(`**/api/notes/${secondId}`, (route) =>
+      route.fulfill({
+        status: 404,
+        json: { error: { code: "NOT_FOUND", message: "Note not found." } },
+      }),
+    );
+    await page.goto(`/notes/${secondId}`);
+    const unavailableBanner = page.getByRole("region", { name: "Unavailable source" });
+    await expect(unavailableBanner).toBeVisible();
+    await expect(unavailableBanner).toContainText("This source note is unavailable.");
+    await expect(page.getByRole("textbox", { name: "Title", exact: true })).toHaveCount(0);
+    await expect(page).toHaveURL(new RegExp(`/notes/${secondId}$`));
+
+    await page.getByRole("button", { name: "A", exact: true }).click();
+    await expect(page.getByRole("textbox", { name: "Title", exact: true })).toHaveValue("A");
+    await expect(page).toHaveURL(new RegExp(`/notes/${firstId}$`));
+    await expect(unavailableBanner).toHaveCount(0);
+  });
+
   test("copies a working note link", async ({ page }) => {
     await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
     await serveNotes(page, [[serverNote, `"${firstId}:1"`]]);
@@ -3274,6 +3297,12 @@ test.describe("authorship, source links, and modification dates (#110)", () => {
       lastName: null,
     };
     await page.reload();
+    await expect(page.getByRole("region", { name: "Unavailable source" })).toBeVisible();
+    await expect(page).toHaveURL(new RegExp(`/notes/${aliceSecretId}$`));
+    await expect(page.locator("body")).not.toContainText("Alice confidential plan");
+    await expect(page.locator("body")).not.toContainText("Top secret alpha");
+
+    await page.getByRole("button", { name: "Bob summary", exact: true }).click();
     const details = page.getByRole("region", { name: "Note details" });
     await expect(details).toContainText("AI-generated");
     await expect(details).toContainText("Source note unavailable (Revision 1)");
