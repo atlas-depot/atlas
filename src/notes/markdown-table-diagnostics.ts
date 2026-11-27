@@ -90,8 +90,12 @@ function splitRow(line: string) {
   return cells;
 }
 
-function isDelimiterRow(line: string) {
-  return line.includes("|") && delimiterRowPattern.test(line);
+function isDelimiterRow(line: string, headerLine: string) {
+  if (!delimiterRowPattern.test(line)) return false;
+  if (line.includes("|")) return true;
+  // A pipe-less row is ambiguous with a setext heading or thematic break. Only
+  // accept an explicit alignment marker under a pipe-wrapped header row.
+  return line.includes(":") && /^\s*\|.*\|\s*$/.test(headerLine);
 }
 
 function missingSentence(firstMissing: number, missing: number) {
@@ -105,8 +109,13 @@ function missingSentence(firstMissing: number, missing: number) {
   }.`;
 }
 
-function createWarning(headerCells: number, delimiterCells: number): MarkdownTableDelimiterWarning {
+function createWarning(
+  headerCells: number,
+  delimiterCellTexts: string[],
+): MarkdownTableDelimiterWarning {
+  const delimiterCells = delimiterCellTexts.length;
   const missing = headerCells - delimiterCells;
+  const suggestedCells = [...delimiterCellTexts, ...Array.from({ length: missing }, () => "---")];
   return {
     headerCells,
     delimiterCells,
@@ -114,14 +123,14 @@ function createWarning(headerCells: number, delimiterCells: number): MarkdownTab
       headerCells === 1 ? "cell" : "cells"
     }. ${missingSentence(delimiterCells + 1, missing)}`,
     suggestionLabel: missing === 1 ? "Add the missing cell:" : "Add the missing cells:",
-    suggestedRow: `| ${Array.from({ length: headerCells }, () => "---").join(" | ")} |`,
+    suggestedRow: `| ${suggestedCells.join(" | ")} |`,
   };
 }
 
 /**
- * Find top-level GFM tables whose delimiter row has fewer cells than the header row.
- * Fenced, indented and raw HTML blocks are separate AST nodes, so their examples never
- * produce a warning. Tables nested in blockquotes or lists are outside this editor
+ * Find top-level table-like blocks whose delimiter row has fewer cells than the header
+ * row. Fenced, indented and raw HTML blocks are separate AST nodes, so their examples
+ * never produce a warning. Tables nested in blockquotes or lists are outside this editor
  * diagnostic. A parse failure leaves the source unchanged.
  */
 export function findMarkdownTableDelimiterWarnings(
@@ -144,11 +153,11 @@ export function findMarkdownTableDelimiterWarnings(
     for (let index = 0; index + 1 < lines.length; index++) {
       const headerLine = lines[index];
       const delimiterLine = lines[index + 1];
-      if (!headerLine.includes("|") || !isDelimiterRow(delimiterLine)) continue;
+      if (!headerLine.includes("|") || !isDelimiterRow(delimiterLine, headerLine)) continue;
       const headerCells = splitRow(headerLine).length;
-      const delimiterCells = splitRow(delimiterLine).length;
-      if (headerCells > delimiterCells && delimiterCells > 0) {
-        warnings.push(createWarning(headerCells, delimiterCells));
+      const delimiterCellTexts = splitRow(delimiterLine);
+      if (headerCells > delimiterCellTexts.length && delimiterCellTexts.length > 0) {
+        warnings.push(createWarning(headerCells, delimiterCellTexts));
       }
     }
   }

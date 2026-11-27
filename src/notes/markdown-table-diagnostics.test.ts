@@ -98,6 +98,40 @@ describe("Markdown table delimiter diagnostics", () => {
     ]);
   });
 
+  it("preserves existing delimiter alignment in the suggested row", () => {
+    expect(
+      findMarkdownTableDelimiterWarnings("| A | B | C |\n| :--- | ---: |\n| 1 | 2 | 3 |"),
+    ).toEqual([
+      {
+        headerCells: 3,
+        delimiterCells: 2,
+        summary: "Table needs three delimiter cells. The third one is missing.",
+        suggestionLabel: "Add the missing cell:",
+        suggestedRow: "| :--- | ---: | --- |",
+      },
+    ]);
+  });
+
+  it("recognizes a centered delimiter cell with or without outer pipes", () => {
+    for (const source of ["| A | B |\n| :---: |", "| A | B |\n:---:"]) {
+      expect(findMarkdownTableDelimiterWarnings(source)).toEqual([
+        {
+          headerCells: 2,
+          delimiterCells: 1,
+          summary: "Table needs two delimiter cells. The second one is missing.",
+          suggestionLabel: "Add the missing cell:",
+          suggestedRow: "| :---: | --- |",
+        },
+      ]);
+    }
+  });
+
+  it("does not treat a setext heading or thematic break as a missing delimiter", () => {
+    expect(findMarkdownTableDelimiterWarnings("Use the pipe | symbol\n---")).toEqual([]);
+    expect(findMarkdownTableDelimiterWarnings("Use the pipe | symbol\n:---:")).toEqual([]);
+    expect(findMarkdownTableDelimiterWarnings("| A | B |\n---")).toEqual([]);
+  });
+
   const ordinalCases: Array<[number, string]> = [
     [13, "13th"],
     [21, "21st"],
