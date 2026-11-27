@@ -793,6 +793,21 @@ test.describe("recovery and auth", () => {
     await expect(page.getByRole("button", { name: "Retry loading" })).toHaveCount(0);
   });
 
+  test("preserves a note deep link through sign-in", async ({ page }) => {
+    await page.route("**/api/auth/session", (route) =>
+      route.fulfill({
+        status: 401,
+        json: { error: { code: "UNAUTHENTICATED", message: "No session" } },
+      }),
+    );
+    await page.goto(`/notes/${firstId}`);
+    const returnTo = encodeURIComponent(`/notes/${firstId}`);
+    await expect(page.getByRole("link", { name: "Sign in", exact: true })).toHaveAttribute(
+      "href",
+      `/api/auth/login?returnTo=${returnTo}`,
+    );
+  });
+
   test("production requires a browser session before requesting notes", async ({ page }) => {
     let noteRequests = 0;
     await page.route("**/api/auth/session", (route) =>

@@ -10,6 +10,24 @@ function unauthorized(c: Context) {
   return c.json(apiError("UNAUTHENTICATED", "Sign in to continue."), 401);
 }
 
+/** Only same-origin absolute paths survive the sign-in round trip. */
+function safeReturnTo(value: string | undefined, appOrigin: string): string | undefined {
+  if (!value || value.length > 2_048 || !value.startsWith("/") || value.startsWith("//")) {
+    return undefined;
+  }
+  for (const character of value) {
+    const code = character.charCodeAt(0);
+    if (code <= 0x20 || code === 0x7f) return undefined;
+  }
+  try {
+    const url = new URL(value, appOrigin);
+    if (url.origin !== new URL(appOrigin).origin) return undefined;
+    return `${url.pathname}${url.search}${url.hash}`;
+  } catch {
+    return undefined;
+  }
+}
+
 /**
  * Public authentication routes. They mount before the protected API router so
  * that login and callback requests never require an existing session.
@@ -19,7 +37,8 @@ export function createAuthRoutes(browserAuth: BrowserAuth, options: { appOrigin:
   const home = new URL("/", options.appOrigin).toString();
 
   routes.get("/login", async (c) => {
-    const { url, transactionCookie } = await browserAuth.startLogin();
+    const returnTo = safeReturnTo(c.req.query("returnTo"), options.appOrigin);
+    const { url, transactionCookie } = await browserAuth.startLogin(returnTo);
     c.header("Set-Cookie", transactionCookie, { append: true });
     return c.redirect(url, 302);
   });
@@ -56,7 +75,8 @@ export function createAuthRoutes(browserAuth: BrowserAuth, options: { appOrigin:
 
     c.header("Set-Cookie", result.clearTransactionCookie, { append: true });
     c.header("Set-Cookie", result.sessionCookie, { append: true });
-    return c.redirect(home, 303);
+    const returnTo = safeReturnTo(result.returnTo, options.appOrigin);
+    return c.redirect(returnTo ? new URL(returnTo, options.appOrigin).toString() : home, 303);
   });
 
   routes.get("/session", async (c) => {

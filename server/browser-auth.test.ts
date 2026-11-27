@@ -173,8 +173,8 @@ function createAuth(
   return createBrowserAuth(workos, { appOrigin, cookiePassword, ...overrides });
 }
 
-async function startLogin(auth: BrowserAuth) {
-  const login = await auth.startLogin();
+async function startLogin(auth: BrowserAuth, returnTo?: string) {
+  const login = await auth.startLogin(returnTo);
   const url = new URL(login.url);
   provider.challenge = url.searchParams.get("code_challenge") ?? undefined;
   return {
@@ -225,6 +225,13 @@ describe("WorkOS browser auth with a synthetic provider", () => {
     expect(started.login.transactionCookie).toContain("Secure");
     expect(started.login.transactionCookie).toContain("Max-Age=600");
     expect(provider.requests).toEqual([]);
+  });
+
+  it("keeps a requested note path through the sealed transaction", async () => {
+    const auth = createAuth();
+    const returnTo = "/notes/11111111-1111-4111-8111-111111111111";
+    const result = await complete(auth, await startLogin(auth, returnTo));
+    expect(result).toMatchObject({ ok: true, returnTo });
   });
 
   it("exchanges a valid callback and returns a sealed session cookie", async () => {
