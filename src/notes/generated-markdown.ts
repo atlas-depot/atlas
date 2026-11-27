@@ -1,8 +1,5 @@
-import remarkGfm from "remark-gfm";
-import remarkParse from "remark-parse";
-import { unified } from "unified";
+import { markdownParser } from "./markdown-ast";
 
-const parser = unified().use(remarkParse).use(remarkGfm).freeze();
 const supportedNodes = new Set([
   "root",
   "paragraph",
@@ -51,8 +48,8 @@ export function canImportGeneratedMarkdown(source: string, roundtrip: string): b
     // Positions and list spacing describe source layout. Every other AST field,
     // including code, link titles/targets and table alignment, must survive.
     return (
-      JSON.stringify(comparable(parser.parse(source))) ===
-      JSON.stringify(comparable(parser.parse(roundtrip)))
+      JSON.stringify(comparable(markdownParser.parse(source))) ===
+      JSON.stringify(comparable(markdownParser.parse(roundtrip)))
     );
   } catch {
     return false;
