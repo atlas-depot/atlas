@@ -84,7 +84,7 @@ describe("note metadata helpers", () => {
     expect(parseInternalNoteHref(`//evil.example/notes/${meetingId}`)).toBeNull();
   });
 
-  it("extracts linked note IDs from BlockNote documents and ignores code and unused references in Markdown", () => {
+  it("extracts linked note IDs from BlockNote documents and rendered Markdown links", () => {
     const doc: BlockNoteDocument = {
       format: "blocknote",
       schemaVersion: 1,
@@ -114,30 +114,36 @@ describe("note metadata helpers", () => {
 
     const markdown = [
       `Review [Meeting agenda](/notes/${meetingId}) and [missing](/notes/${foreignId}).`,
+      `Titled [Planning notes](/notes/${planningId} "planning") also counts.`,
       "",
       "```md",
-      `[Inside fenced code](/notes/${planningId})`,
+      `[Fenced code](/notes/${planId})`,
       "```",
       "",
-      `    [Inside indented code](/notes/${planId})`,
+      `    [Indented code](/notes/${planId})`,
       "",
       `Inline code \`[ignored](/notes/${planId})\` stays ignored.`,
+      "",
+      `![Image destination](/notes/${planId})`,
+      "",
+      `<a href="/notes/${planId}">Raw HTML stays ignored</a>`,
+      "",
+      "See [Meeting agenda][agenda], [collapsed][], and [shortcut].",
+      "",
+      `[agenda]: /notes/${checklistId}`,
+      `[collapsed]: /notes/${planningId}`,
+      `[shortcut]: /notes/${foreignId}`,
+      `[unused]: /notes/${planId}`,
     ].join("\n");
-    expect(extractLinkedNoteIds(markdown)).toEqual([meetingId, foreignId]);
+    expect(extractLinkedNoteIds(markdown)).toEqual([meetingId, foreignId, planningId, checklistId]);
 
-    // Unused reference definitions produce no source; used reference links resolve normally.
     const unusedRefOnly = `[unused]: /notes/${meetingId}\n`;
     expect(extractLinkedNoteIds(unusedRefOnly)).toEqual([]);
 
-    const usedRefs = [
-      "See [Meeting agenda][agenda], [Planning][], and [Checklist].",
-      "",
-      `[agenda]: /notes/${meetingId}`,
-      `[planning]: /notes/${planningId}`,
-      `[checklist]: /notes/${checklistId}`,
-      `[unused]: /notes/${foreignId}`,
-    ].join("\n");
-    expect(extractLinkedNoteIds(usedRefs)).toEqual([meetingId, planningId, checklistId]);
+    const absolute = `[Meeting agenda](https://atlas.example/notes/${meetingId})`;
+    expect(extractLinkedNoteIds(absolute, { currentOrigin: "https://atlas.example" })).toEqual([
+      meetingId,
+    ]);
 
     const autolinks = [
       `Angle autolink <https://atlas.example/notes/${meetingId}> and bare https://atlas.example/notes/${planningId}.`,
@@ -149,12 +155,18 @@ describe("note metadata helpers", () => {
     ]);
   });
 
-  it("handles pathological unmatched brackets and malformed links in linear time", () => {
-    const unmatchedBrackets = "[".repeat(100_000);
-    const malformedLinks = "[](a ".repeat(20_000);
+  it("stays fast for large notes with and without internal links", () => {
+    const pathological = [
+      "[".repeat(100_000),
+      "[](a ".repeat(20_000),
+      "[](<\n".repeat(20_000) + ">",
+    ];
+    const manyLinks = `[link](/notes/${meetingId}) `.repeat(1_500);
     const startedAt = performance.now();
-    expect(extractLinkedNoteIds(unmatchedBrackets)).toEqual([]);
-    expect(extractLinkedNoteIds(malformedLinks)).toEqual([]);
+    for (const content of pathological) {
+      expect(extractLinkedNoteIds(content)).toEqual([]);
+    }
+    expect(extractLinkedNoteIds(manyLinks)).toEqual([meetingId]);
     expect(performance.now() - startedAt).toBeLessThan(1_000);
   });
 

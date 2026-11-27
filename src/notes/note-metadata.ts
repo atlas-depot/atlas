@@ -1,3 +1,7 @@
+import type { Nodes } from "mdast";
+import remarkGfm from "remark-gfm";
+import remarkParse from "remark-parse";
+import { unified } from "unified";
 import type { AtlasBlock, NoteContent } from "../../shared/document";
 import { noteIdSchema, type Note, type NoteSummary } from "../../shared/notes";
 import type { NoteOrigin } from "../../shared/organize";
@@ -117,262 +121,38 @@ function collectBlockLinkHrefs(blocks: readonly AtlasBlock[], hrefs: string[]) {
   }
 }
 
-function normalizeReferenceLabel(label: string): string {
-  return label.trim().replace(/\s+/g, " ").toLowerCase();
+const markdownParser = unified().use(remarkParse).use(remarkGfm);
+
+function walkMarkdown(node: Nodes, visit: (node: Nodes) => void) {
+  visit(node);
+  if ("children" in node) {
+    for (const child of node.children) walkMarkdown(child, visit);
+  }
 }
 
-/** Extract link destinations from Markdown in linear time, skipping code and unused references. */
+/**
+ * Extract destinations from links the Markdown preview can render.
+ * Code, raw HTML, images and unused reference definitions are ignored.
+ */
 function extractMarkdownLinkHrefs(markdown: string): string[] {
+  // Most notes contain no internal links, so avoid parsing them only for source metadata.
+  if (!markdown.includes("/notes/")) return [];
+
+  const tree = markdownParser.parse(markdown);
+  const definitions = new Map<string, string>();
+  walkMarkdown(tree, (node) => {
+    if (node.type === "definition") definitions.set(node.identifier, node.url);
+  });
+
   const hrefs: string[] = [];
-  const lines = markdown.split(/\r?\n/);
-  const proseLines: string[] = [];
-  const refDefinitions = new Map<string, string>();
-  let fenceChar: "`" | "~" | null = null;
-  let fenceLength = 0;
-  let inParagraph = false;
-
-  for (const line of lines) {
-    const fenceMatch = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(line);
-    if (fenceChar === null) {
-      if (fenceMatch) {
-        const marker = fenceMatch[1];
-        const char = marker[0] as "`" | "~";
-        if (char === "~" || !fenceMatch[2].includes("`")) {
-          fenceChar = char;
-          fenceLength = marker.length;
-          inParagraph = false;
-          continue;
-        }
-      }
-      if (line.trim() === "") {
-        inParagraph = false;
-        proseLines.push("");
-        continue;
-      }
-      // CommonMark indented code blocks start with 4 spaces or a tab outside an active paragraph.
-      if (!inParagraph && /^(?: {4}|\t)/.test(line)) {
-        continue;
-      }
-      if (!inParagraph) {
-        const refDef = /^ {0,3}\[([^\]\n]+)\]:[ \t]*(?:<([^>\n]+)>|([^\s]+))/.exec(line);
-        if (refDef) {
-          const normalized = normalizeReferenceLabel(refDef[1]);
-          const destination = refDef[2] ?? refDef[3];
-          if (normalized && destination && !refDefinitions.has(normalized)) {
-            refDefinitions.set(normalized, destination);
-          }
-          continue;
-        }
-      }
-      inParagraph = true;
-      proseLines.push(line);
-    } else if (
-      fenceMatch &&
-      fenceMatch[1][0] === fenceChar &&
-      fenceMatch[1].length >= fenceLength &&
-      fenceMatch[2].trim() === ""
-    ) {
-      fenceChar = null;
-      fenceLength = 0;
+  walkMarkdown(tree, (node) => {
+    if (node.type === "link") {
+      hrefs.push(node.url);
+    } else if (node.type === "linkReference") {
+      const destination = definitions.get(node.identifier);
+      if (destination) hrefs.push(destination);
     }
-  }
-
-  const text = proseLines.join("\n");
-  const openBrackets: Array<{ index: number; isImage: boolean }> = [];
-  const failedTickLengths = new Set<number>();
-  let failedParenUntil = -1;
-  let failedAngleUntil = -1;
-  let index = 0;
-
-  while (index < text.length) {
-    const char = text[index];
-    if (char === "\\") {
-      index += 2;
-      continue;
-    }
-    if (char === "`") {
-      let tickCount = 1;
-      while (text[index + tickCount] === "`") tickCount++;
-      if (!failedTickLengths.has(tickCount)) {
-        const closing = text.indexOf("`".repeat(tickCount), index + tickCount);
-        if (closing !== -1) {
-          index = closing + tickCount;
-          continue;
-        }
-        failedTickLengths.add(tickCount);
-      }
-      index += tickCount;
-      continue;
-    }
-    if (char === "<" && index >= failedAngleUntil) {
-      const rest = text.slice(index + 1, index + 9).toLowerCase();
-      if (rest.startsWith("http://") || rest.startsWith("https://")) {
-        let end = index + 1;
-        while (
-          end < text.length &&
-          text[end] !== ">" &&
-          text[end] !== "<" &&
-          text[end] !== " " &&
-          text[end] !== "\t" &&
-          text[end] !== "\n"
-        ) {
-          end++;
-        }
-        if (text[end] === ">") {
-          hrefs.push(text.slice(index + 1, end));
-          index = end + 1;
-          continue;
-        }
-        if (end >= text.length) {
-          failedAngleUntil = text.length;
-        }
-      }
-    }
-    if (
-      (char === "h" || char === "H") &&
-      (index === 0 || /[\s([{"']/.test(text[index - 1])) &&
-      /^https?:\/\//i.test(text.slice(index, index + 8))
-    ) {
-      let end = index;
-      while (end < text.length && !/[\s<>"']/.test(text[end])) {
-        end++;
-      }
-      let candidate = text.slice(index, end);
-      while (candidate.length > 0 && /[.,;:!?)]$/.test(candidate)) {
-        candidate = candidate.slice(0, -1);
-      }
-      if (candidate.length > 8) {
-        hrefs.push(candidate);
-      }
-      index = end;
-      continue;
-    }
-    if (char === "[") {
-      let backslashes = 0;
-      let back = index - 2;
-      while (back >= 0 && text[back] === "\\") {
-        backslashes++;
-        back--;
-      }
-      const isImage = text[index - 1] === "!" && backslashes % 2 === 0;
-      openBrackets.push({ index, isImage });
-      index++;
-      continue;
-    }
-    if (char === "]") {
-      const opener = openBrackets.pop();
-      if (!opener || opener.isImage) {
-        index++;
-        continue;
-      }
-
-      const afterClose = index + 1;
-      if (text[afterClose] === "(" && afterClose >= failedParenUntil) {
-        let cursor = afterClose + 1;
-        while (cursor < text.length && (text[cursor] === " " || text[cursor] === "\t")) {
-          cursor++;
-        }
-        let destination = "";
-        let closeParen = -1;
-        let scanEnd = cursor;
-        if (text[cursor] === "<") {
-          const endAngle = text.indexOf(">", cursor + 1);
-          if (endAngle !== -1 && !text.slice(cursor + 1, endAngle).includes("\n")) {
-            destination = text.slice(cursor + 1, endAngle);
-            let afterAngle = endAngle + 1;
-            while (
-              afterAngle < text.length &&
-              (text[afterAngle] === " " || text[afterAngle] === "\t")
-            ) {
-              afterAngle++;
-            }
-            if (text[afterAngle] === ")") {
-              closeParen = afterAngle;
-            }
-            scanEnd = afterAngle;
-          } else if (endAngle === -1) {
-            failedAngleUntil = Math.max(failedAngleUntil, text.length);
-            scanEnd = text.length;
-          }
-        } else {
-          const start = cursor;
-          let parenDepth = 0;
-          while (cursor < text.length) {
-            const current = text[cursor];
-            if (current === "\\") {
-              cursor += 2;
-              continue;
-            }
-            if (current === "(") {
-              parenDepth++;
-            } else if (current === ")") {
-              if (parenDepth === 0) {
-                closeParen = cursor;
-                break;
-              }
-              parenDepth--;
-            } else if (current === " " || current === "\t" || current === "\n") {
-              break;
-            }
-            cursor++;
-          }
-          scanEnd = cursor;
-          destination = text.slice(start, cursor);
-          if (closeParen === -1 && destination.length > 0 && text[cursor] !== "\n") {
-            let tail = cursor;
-            while (tail < text.length && text[tail] !== ")" && text[tail] !== "\n") {
-              if (text[tail] === "\\") tail += 2;
-              else tail++;
-            }
-            scanEnd = tail;
-            if (text[tail] === ")") closeParen = tail;
-          }
-        }
-
-        if (closeParen !== -1 && destination.length > 0) {
-          hrefs.push(destination);
-          index = closeParen + 1;
-          continue;
-        }
-        if (closeParen === -1 && (scanEnd >= text.length || text[scanEnd] === "\n")) {
-          failedParenUntil = Math.max(failedParenUntil, scanEnd);
-        }
-      } else if (text[afterClose] === "[") {
-        let cursor = afterClose + 1;
-        while (
-          cursor < text.length &&
-          text[cursor] !== "]" &&
-          text[cursor] !== "[" &&
-          text[cursor] !== "\n"
-        ) {
-          if (text[cursor] === "\\") cursor += 2;
-          else cursor++;
-        }
-        if (text[cursor] === "]") {
-          const rawRef = text.slice(afterClose + 1, cursor);
-          const label = normalizeReferenceLabel(
-            rawRef.length > 0 ? rawRef : text.slice(opener.index + 1, index),
-          );
-          const destination = refDefinitions.get(label);
-          if (destination) {
-            hrefs.push(destination);
-            index = cursor + 1;
-            continue;
-          }
-        }
-      } else {
-        const label = normalizeReferenceLabel(text.slice(opener.index + 1, index));
-        const destination = refDefinitions.get(label);
-        if (destination) {
-          hrefs.push(destination);
-        }
-      }
-      index++;
-      continue;
-    }
-    index++;
-  }
-
+  });
   return hrefs;
 }
 
