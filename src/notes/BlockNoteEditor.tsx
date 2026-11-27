@@ -285,10 +285,10 @@ function RichDocumentEditor({
         if (event.detail !== 0 && (event.button !== 0 || event.shiftKey || event.altKey)) {
           return;
         }
+        // A plain click places the caret in the editable link text. Open on keyboard or Ctrl/Cmd.
+        if (event.detail !== 0 && !event.metaKey && !event.ctrlKey) return;
         event.preventDefault();
-        if (event.detail === 0 || event.metaKey || event.ctrlKey || disabled) {
-          onOpenNoteLink(linkedNoteId);
-        }
+        onOpenNoteLink(linkedNoteId);
       }}
     >
       <div className="editor-history" aria-label="Editing history">

@@ -2794,6 +2794,12 @@ test.describe("authorship, source links, and modification dates (#110)", () => {
     const originalCreatedAt = savedChecklist.createdAt;
     expect(JSON.stringify(savedChecklist.content)).toContain(meetingLinkUrl);
 
+    // A copied note URL opens that note on a fresh load.
+    await page.goto(`/notes/${checklistId}`);
+    await expect(page.getByRole("textbox", { name: "Title", exact: true })).toHaveValue(
+      "Evaluation checklist",
+    );
+
     // Create unlinked "Open questions".
     await page.getByRole("button", { name: "New note", exact: true }).click();
     await page.getByRole("textbox", { name: "Title", exact: true }).fill("Open questions");
@@ -2982,6 +2988,8 @@ test.describe("authorship, source links, and modification dates (#110)", () => {
     const aliceSecretId = "fa110003-1234-4000-8000-000000000001";
     const bobGeneratedId = "fa110003-1234-4000-8000-000000000002";
     const bobLinkedId = "fa110003-1234-4000-8000-000000000003";
+    const deletedSourceId = "fa110003-1234-4000-8000-000000000004";
+    const bobDeletedGeneratedId = "fa110003-1234-4000-8000-000000000005";
 
     const aliceSecret: Note = {
       id: aliceSecretId,
@@ -3009,10 +3017,22 @@ test.describe("authorship, source links, and modification dates (#110)", () => {
       createdAt: "2026-11-24T11:00:00.000Z",
       updatedAt: "2026-11-24T11:30:00.000Z",
     };
+    const bobDeletedGenerated: Note = {
+      id: bobDeletedGeneratedId,
+      title: "Bob deleted-source summary",
+      origin: {
+        sourceNoteId: deletedSourceId,
+        sourceRevision: 3,
+        sources: [],
+      },
+      content: blockParagraph("p-bob-deleted", "Summary whose source was deleted."),
+      createdAt: "2026-11-24T12:00:00.000Z",
+      updatedAt: "2026-11-24T12:30:00.000Z",
+    };
 
     const notesByOwner: Record<string, Note[]> = {
       user_alice: [aliceSecret],
-      user_bob: [bobGenerated, bobLinked],
+      user_bob: [bobGenerated, bobLinked, bobDeletedGenerated],
     };
     let activeUser = {
       id: "user_alice",
@@ -3058,8 +3078,19 @@ test.describe("authorship, source links, and modification dates (#110)", () => {
                 headingPath: [],
               },
             },
+            {
+              text: "Summary whose source was deleted.",
+              score: 0.9,
+              source: {
+                kind: "block",
+                noteId: bobDeletedGeneratedId,
+                version: `"${bobDeletedGeneratedId}:1"`,
+                blockId: "p-bob-deleted",
+                headingPath: [],
+              },
+            },
           ],
-          coverage: { ready: 2, pending: 0, failed: 0 },
+          coverage: { ready: 3, pending: 0, failed: 0 },
         },
       }),
     );
@@ -3092,6 +3123,18 @@ test.describe("authorship, source links, and modification dates (#110)", () => {
     await expect(card).toContainText("AI-generated");
     await expect(card).toContainText("Source note unavailable (Revision 1)");
     await expect(card.getByRole("link")).toHaveCount(0);
+
+    // A deleted source shows the same unavailable state without exposing a title.
+    const deletedCard = search
+      .locator(".note-search-card")
+      .filter({ hasText: "Bob deleted-source summary" });
+    await expect(deletedCard).toContainText("AI-generated");
+    await expect(deletedCard).toContainText("Source note unavailable (Revision 3)");
+    await expect(deletedCard.getByRole("link")).toHaveCount(0);
+    await page.getByRole("button", { name: "Bob deleted-source summary", exact: true }).click();
+    await expect(details).toContainText("AI-generated");
+    await expect(details).toContainText("Source note unavailable (Revision 3)");
+    await expect(details.getByRole("link")).toHaveCount(0);
 
     // Open Bob's authored note linking to Alice's note ID.
     await page.getByRole("button", { name: "Bob checklist", exact: true }).click();

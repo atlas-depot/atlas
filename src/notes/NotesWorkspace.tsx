@@ -53,6 +53,7 @@ import {
   formatNoteAuthorship,
   formatNoteTimestamp,
   getNoteAuthorship,
+  parseInternalNoteHref,
   resolveNoteSources,
 } from "./note-metadata";
 import {
@@ -72,7 +73,9 @@ type ReadFailure = {
   compare: boolean;
   kind: RequestFailure;
   sourceTarget?: SourceTarget;
+  linkedSource?: boolean;
 };
+type CopyLinkNotice = { noteId: string; message: string };
 type SaveState = "idle" | "saving" | RequestFailure;
 const BlockNoteEditor = lazy(() =>
   import("./BlockNoteEditor").then((module) => ({ default: module.BlockNoteEditor })),
@@ -133,7 +136,7 @@ export function NotesWorkspace({
   const [activeSourceTarget, setActiveSourceTarget] = useState<SourceTarget | null>(null);
   const [unavailableSourceTarget, setUnavailableSourceTarget] = useState<SourceTarget | null>(null);
   const [unavailableLinkNotice, setUnavailableLinkNotice] = useState<string | null>(null);
-  const [copyLinkNotice, setCopyLinkNotice] = useState<string | null>(null);
+  const [copyLinkNotice, setCopyLinkNotice] = useState<CopyLinkNotice | null>(null);
   const [searchResetToken, setSearchResetToken] = useState(0);
   const desktop = useSyncExternalStore(subscribeDesktop, isDesktop);
   const [chatVisibility, setChatOpen] = useState<boolean | null>(null);
@@ -291,8 +294,10 @@ export function NotesWorkspace({
       if (!active) return;
       setNotes(list);
       setLoadState("ready");
-      if (!list[0]) return;
-      const id = list[0].id;
+      const requestedId =
+        typeof window === "undefined" ? null : parseInternalNoteHref(window.location.pathname);
+      const id = requestedId ?? list[0]?.id;
+      if (!id) return;
       busyRef.current = true;
       setOpeningId(id);
       try {
@@ -365,6 +370,7 @@ export function NotesWorkspace({
     setReadFailure(null);
     setDeleteNotice(null);
     setUnavailableLinkNotice(null);
+    setCopyLinkNotice(null);
     if (sourceTarget) {
       setActiveSourceTarget(null);
       setUnavailableSourceTarget(null);
@@ -389,14 +395,14 @@ export function NotesWorkspace({
           );
           return;
         }
-        setReadFailure({ id, compare, kind, sourceTarget });
+        setReadFailure({ id, compare, kind, sourceTarget, linkedSource });
         if (sourceTarget) {
           setActiveSourceTarget(null);
           setUnavailableSourceTarget(sourceTarget);
         }
         return;
       }
-      setReadFailure({ id, compare, kind, sourceTarget });
+      setReadFailure({ id, compare, kind, sourceTarget, linkedSource });
     } finally {
       busyRef.current = false;
       setOpeningId(null);
@@ -551,9 +557,7 @@ export function NotesWorkspace({
       return;
     }
     if (dirty || pendingCreation !== null) {
-      setUnavailableLinkNotice(
-        "This source note is unavailable. It may have been deleted or belongs to another account.",
-      );
+      requestSelection({ kind: "read", id: normalizedId, linkedSource: true });
       return;
     }
     void openNote(normalizedId, false, undefined, true);
@@ -701,14 +705,20 @@ export function NotesWorkspace({
   async function copyNoteLink(noteId: string) {
     const href = buildInternalNoteHref(noteId, window.location.origin);
     if (!navigator.clipboard?.writeText) {
-      setCopyLinkNotice("Could not copy note link. Clipboard access is unavailable.");
+      setCopyLinkNotice({
+        noteId,
+        message: "Could not copy note link. Clipboard access is unavailable.",
+      });
       return;
     }
     try {
       await navigator.clipboard.writeText(href);
-      setCopyLinkNotice("Note link copied.");
+      setCopyLinkNotice({ noteId, message: "Note link copied." });
     } catch {
-      setCopyLinkNotice("Could not copy note link. Check clipboard permissions and try again.");
+      setCopyLinkNotice({
+        noteId,
+        message: "Could not copy note link. Check clipboard permissions and try again.",
+      });
     }
   }
 
@@ -825,6 +835,7 @@ export function NotesWorkspace({
                       kind: "read",
                       id: readFailure.id,
                       sourceTarget: readFailure.sourceTarget,
+                      linkedSource: readFailure.linkedSource,
                     });
                 }}
               >
@@ -1107,9 +1118,9 @@ export function NotesWorkspace({
                             </ul>
                           </div>
                         )}
-                        {copyLinkNotice && (
+                        {copyLinkNotice && copyLinkNotice.noteId === saved.note.id && (
                           <span role="note" aria-live="polite" className="note-meta-item">
-                            {copyLinkNotice}
+                            {copyLinkNotice.message}
                           </span>
                         )}
                       </section>

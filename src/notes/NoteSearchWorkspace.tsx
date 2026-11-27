@@ -72,7 +72,6 @@ export function NoteSearchWorkspace({
   const [outcome, setOutcome] = useState<SearchOutcome | null>(null);
   const [failure, setFailure] = useState<string | null>(null);
   const [resultTitles, setResultTitles] = useState<Record<string, string>>({});
-  const [resultSummaries, setResultSummaries] = useState<Record<string, NoteSummary>>({});
   const requestIdRef = useRef(0);
   const inFlightIdRef = useRef(0);
   const enabledRef = useRef(enabled);
@@ -100,7 +99,6 @@ export function NoteSearchWorkspace({
     const titles = Object.fromEntries(
       notes.map((note) => [note.id, note.title.trim() || "Untitled note"]),
     );
-    const summaries = Object.fromEntries(notes.map((note) => [note.id, note]));
     const requestId = ++requestIdRef.current;
     inFlightIdRef.current = requestId;
     setSubmittedQuery(trimmed);
@@ -114,7 +112,6 @@ export function NoteSearchWorkspace({
       }
       setOutcome(describeSearchOutcome(trimmed, response));
       setResultTitles(titles);
-      setResultSummaries(summaries);
       setFailure(null);
     } catch (error) {
       if (requestId !== requestIdRef.current) {
@@ -143,10 +140,10 @@ export function NoteSearchWorkspace({
 
   function resolveNoteTitle(noteId: string): string {
     const found = notes.find((item) => item.id === noteId);
-    if (!found) {
-      return resultTitles[noteId] ?? "Saved note";
-    }
-    return found.title.trim() || "Untitled note";
+    if (found) return found.title.trim() || "Untitled note";
+    // Keep the label from the search that produced this result after its note disappears,
+    // but never reuse cached authorship or provenance metadata.
+    return resultTitles[noteId] ?? "Saved note";
   }
 
   const trimmedQuery = query.trim();
@@ -247,8 +244,7 @@ export function NoteSearchWorkspace({
                 const locationLabel = formatSourceLocation(source);
                 const revisionLabel = formatSourceRevision(source.version);
                 const noteTitle = resolveNoteTitle(source.noteId);
-                const summary =
-                  notes.find((item) => item.id === source.noteId) ?? resultSummaries[source.noteId];
+                const summary = notes.find((item) => item.id === source.noteId);
                 const originSource = resolveOriginSource(summary?.origin, notes);
                 const isActive =
                   activeSourceTarget?.source.noteId === source.noteId &&
