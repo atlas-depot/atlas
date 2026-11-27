@@ -258,7 +258,7 @@ export function resolveOriginSource(
   origin: NoteOrigin | undefined,
   ownedNotes: readonly NoteSummary[],
 ): ResolvedOriginSource | null {
-  if (!origin) return null;
+  if (!origin || !origin.sourceNoteId || !origin.sourceRevision) return null;
   const targetId = origin.sourceNoteId.toLowerCase();
   const owned = ownedNotes.find((note) => note.id.toLowerCase() === targetId);
   if (owned) {
