@@ -9,6 +9,8 @@ type MarkdownNode = {
   children?: MarkdownNode[];
 };
 
+type SourceRange = { start: number; end: number };
+
 export type MarkdownTableDelimiterWarning = {
   headerCells: number;
   delimiterCells: number;
@@ -130,11 +132,52 @@ function createWarning(
   };
 }
 
+function collectInlineCodeRanges(node: MarkdownNode) {
+  const ranges: SourceRange[] = [];
+  const pending = [...(node.children ?? [])];
+  while (pending.length > 0) {
+    const child = pending.pop();
+    if (!child) continue;
+    if (child.type === "inlineCode") {
+      const start = child.position?.start.offset;
+      const end = child.position?.end.offset;
+      if (typeof start === "number" && typeof end === "number" && end > start) {
+        ranges.push({ start, end });
+      }
+      continue;
+    }
+    if (child.children) pending.push(...child.children);
+  }
+  return ranges;
+}
+
+/** Keep line breaks inside inline code while hiding its table-like text. */
+function maskInlineCode(source: string, start: number, end: number, ranges: SourceRange[]) {
+  const sorted = ranges
+    .map((range) => ({
+      start: Math.max(range.start, start),
+      end: Math.min(range.end, end),
+    }))
+    .filter((range) => range.end > range.start)
+    .sort((left, right) => left.start - right.start);
+  if (sorted.length === 0) return source.slice(start, end);
+  let masked = "";
+  let cursor = start;
+  for (const range of sorted) {
+    if (range.start > cursor) masked += source.slice(cursor, range.start);
+    const from = Math.max(cursor, range.start);
+    masked += source.slice(from, range.end).replace(/[^\r\n]/g, " ");
+    cursor = Math.max(cursor, range.end);
+  }
+  return masked + source.slice(cursor, end);
+}
+
 /**
  * Find top-level table-like blocks whose delimiter row has fewer cells than the header
- * row. Fenced, indented and raw HTML blocks are separate AST nodes, so their examples
- * never produce a warning. Tables nested in blockquotes or lists are outside this editor
- * diagnostic. A parse failure leaves the source unchanged.
+ * row. Fenced, indented and raw HTML blocks are separate AST nodes, and inline code
+ * spans are masked, so their examples never produce a warning. Tables nested in
+ * blockquotes or lists are outside this editor diagnostic. A parse failure leaves the
+ * source unchanged.
  */
 export function findMarkdownTableDelimiterWarnings(
   source: string,
@@ -152,7 +195,8 @@ export function findMarkdownTableDelimiterWarnings(
     const start = node.position?.start.offset;
     const end = node.position?.end.offset;
     if (typeof start !== "number" || typeof end !== "number" || end <= start) continue;
-    const lines = source.slice(start, end).split(/\r?\n/);
+    const masked = maskInlineCode(source, start, end, collectInlineCodeRanges(node));
+    const lines = masked.split(/\r\n|[\r\n]/);
     for (let index = 0; index + 1 < lines.length; index++) {
       const headerLine = lines[index];
       const delimiterLine = lines[index + 1];

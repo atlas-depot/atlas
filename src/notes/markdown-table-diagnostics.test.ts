@@ -74,6 +74,15 @@ describe("Markdown table delimiter diagnostics", () => {
     }
   });
 
+  it("ignores a multiline inline code example", () => {
+    for (const source of [
+      "`| Task | Status |\n| --- |`\n| Check sources | Open |",
+      "`| Task | Status |\n| --- |\n| Check sources | Open |`",
+    ]) {
+      expect(findMarkdownTableDelimiterWarnings(source)).toEqual([]);
+    }
+  });
+
   it("ignores an unclosed fence", () => {
     expect(findMarkdownTableDelimiterWarnings("```markdown\n| Task | Status |\n| --- |")).toEqual(
       [],
@@ -130,6 +139,7 @@ describe("Markdown table delimiter diagnostics", () => {
     expect(findMarkdownTableDelimiterWarnings("Use the pipe | symbol\n---")).toEqual([]);
     expect(findMarkdownTableDelimiterWarnings("Use the pipe | symbol\n:---:")).toEqual([]);
     expect(findMarkdownTableDelimiterWarnings("| A | B |\n---")).toEqual([]);
+    expect(findMarkdownTableDelimiterWarnings("Task | Status\n:---:")).toEqual([]);
   });
 
   it("rejects a long whitespace candidate in bounded time", () => {
@@ -152,9 +162,10 @@ describe("Markdown table delimiter diagnostics", () => {
     expect(warning?.summary).toContain(`The ${ordinal} one is missing.`);
   });
 
-  it("handles CRLF and multiple malformed tables", () => {
-    const source = ["| A | B |", "| --- |", "", "| C | D | E |", "| --- |"].join("\r\n");
-    expect(findMarkdownTableDelimiterWarnings(source)).toHaveLength(2);
+  it("handles CRLF, bare CR and multiple malformed tables", () => {
+    const lines = ["| A | B |", "| --- |", "", "| C | D | E |", "| --- |"];
+    expect(findMarkdownTableDelimiterWarnings(lines.join("\r\n"))).toHaveLength(2);
+    expect(findMarkdownTableDelimiterWarnings(lines.join("\r"))).toHaveLength(2);
   });
 
   it("leaves nested tables and unrelated Markdown alone", () => {
