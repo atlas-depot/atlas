@@ -332,10 +332,10 @@ export default async function setup() {
     );
     const app = new Hono();
     app.all("/api/*", (c) => api.fetch(c.req.raw));
-    app.use(
-      "*",
-      serveStatic({ root: fileURLToPath(new URL("../.cache/api-build/", import.meta.url)) }),
-    );
+    const staticRoot = fileURLToPath(new URL("../.cache/api-build/", import.meta.url));
+    app.use("*", serveStatic({ root: staticRoot }));
+    // Mirror the production /notes/:id rewrite so a reload reaches the SPA shell.
+    app.get("/notes/*", serveStatic({ root: staticRoot, path: "index.html" }));
     await new Promise<void>((resolve, reject) => {
       server = serve(
         { fetch: app.fetch, hostname: "127.0.0.1", port: 4185, overrideGlobalObjects: false },
