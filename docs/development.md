@@ -181,7 +181,8 @@ The `organize_runs` migration adds owner-bound transient run records alongside n
 Start either Figure 4 flow with `POST /api/organize-runs` and a UUID `Idempotency-Key`.
 Send `{"kind":"request","text":"Create a note titled Review checklist: check the source links."}`
 for standalone input. For an existing note, send `{"kind":"note","noteId":"…","instruction":"List the open questions."}`
-with the source's `If-Match` revision. The instruction is optional. Reuse the same key and payload
+and copy the `Atlas-Revision` header from the note's GET response into `If-Match`, including
+the quotation marks (use the strong `ETag` if `Atlas-Revision` is absent). The instruction is optional. Reuse the same key and payload
 if the response is lost. Changing the payload or bound revision under that key returns 409.
 
 `GET /api/organize-work?include=requests` includes standalone work. After failed standalone

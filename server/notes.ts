@@ -45,7 +45,7 @@ const stale = () =>
   apiError("PRECONDITION_FAILED", "The note has changed. Reload before retrying.");
 const etag = (value: StoredNote) => noteTag(value.note.id, value.revision);
 
-function withCompatibleOrigin<T extends NoteSummary>(note: T, supportsRequests: boolean): T {
+export function withCompatibleOrigin<T extends NoteSummary>(note: T, supportsRequests: boolean): T {
   return !supportsRequests && note.origin?.sourceNoteId === null
     ? { ...note, origin: undefined }
     : note;

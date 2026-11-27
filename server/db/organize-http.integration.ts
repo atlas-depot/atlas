@@ -219,15 +219,22 @@ it("saves Review checklist once and reopens its exact private request after a re
   const editable = noteDraftSchema.parse(handed.body);
   expect(editable.title).toBe("Review checklist");
   expect(editable.content).toBe("Check the source links.");
-  const save = () =>
+  const save = (prefer: Record<string, string> = {}) =>
     secondProcess.request(`/note-drafts/${editable.id}/save`, {
       method: "POST",
-      headers: { "Content-Type": "application/json", "If-Match": editable.etag },
+      headers: { ...prefer, "Content-Type": "application/json", "If-Match": editable.etag },
       body: JSON.stringify({ title: editable.title, content: editable.content }),
     });
   const saved = await save();
   expect(saved.status).toBe(201);
+  expect(saved.body).not.toHaveProperty("origin");
   expect(await save()).toEqual(saved);
+  const modern = await save({ Prefer: 'include="request-origin"' });
+  expect(modern.status).toBe(201);
+  expect(modern.body).toEqual({
+    ...noteSchema.parse(saved.body),
+    origin: { sourceNoteId: null, sourceRevision: null, sources: [] },
+  });
   const { id } = noteSchema.parse(saved.body);
   const path = `/notes/${id}?include=original`;
   expect((await f.http.request(path)).body).toMatchObject({

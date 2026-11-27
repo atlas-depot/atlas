@@ -84,7 +84,15 @@ describe("notes HTTP contract with a stubbed persistence boundary", () => {
     const origin = { sourceNoteId: null, sourceRevision: null, sources: [] };
     const requestNote = { ...note, origin };
     store.list.mockResolvedValue([{ ...summary, origin }]);
-    store.read.mockResolvedValue({ note: requestNote, revision: 7 });
+    const original = { kind: "request" as const, text: "Write a checklist." };
+    const generation = {
+      generatedAt: "2026-10-30T10:05:00.000Z",
+      runtimeModelId: "provider/model",
+    };
+    store.read.mockImplementation(async (_owner, _id, includeOriginal) => ({
+      note: includeOriginal ? { ...requestNote, original, generation } : requestNote,
+      revision: 7,
+    }));
     store.update.mockResolvedValue({ status: "saved", value: { note: requestNote, revision: 8 } });
     const api = app(store);
     const legacyList = await api.request("/notes");
@@ -97,9 +105,11 @@ describe("notes HTTP contract with a stubbed persistence boundary", () => {
     const headers = { Prefer: 'include="request-origin"' };
     const list = await api.request("/notes", { headers });
     expect(await list.json()).toMatchObject({ notes: [{ origin }] });
-    expect(await (await api.request(`/notes/${id}`, { headers })).json()).toMatchObject({ origin });
-    expect(await (await api.request(`/notes/${id}?include=original`)).json()).toMatchObject({
-      origin,
+    expect(await (await api.request(`/notes/${id}`, { headers })).json()).toEqual(requestNote);
+    expect(await (await api.request(`/notes/${id}?include=original`)).json()).toEqual({
+      ...requestNote,
+      original,
+      generation,
     });
   });
 

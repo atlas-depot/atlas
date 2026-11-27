@@ -1,8 +1,8 @@
 import { randomUUID } from "node:crypto";
 import { expect, test, type BrowserContext, type Page } from "@playwright/test";
 import { noteListSchema, noteSchema, type Note, type NoteSummary } from "../shared/notes.ts";
-import { organizeWorkSchema } from "../shared/drafts.ts";
-import { organizeRunResponseSchema } from "../shared/organize.ts";
+import { noteDraftSchema, organizeWorkSchema } from "../shared/drafts.ts";
+import { organizeRunResponseSchema, organizeStartResponseSchema } from "../shared/organize.ts";
 import { expectEditorContent } from "./notes-editor.ts";
 
 const origin = "http://127.0.0.1:4185";
@@ -46,6 +46,40 @@ async function createSource(page: Page) {
 
 test.beforeEach(async ({ context }) => {
   await signIn(context);
+});
+
+test("a standalone request produces a titled draft without creating a source note", async ({
+  page,
+}) => {
+  const input = { kind: "request", text: "Create a plan for the review.\nBudget: 42 EUR." };
+  const start = await page.request.post("/api/organize-runs", {
+    headers: { Origin: origin, "Idempotency-Key": randomUUID() },
+    data: input,
+  });
+  expect(start.status()).toBe(202);
+  const { runId, status } = organizeStartResponseSchema.parse(await start.json());
+  expect(status).toBe("accepted");
+  const runPath = `/api/organize-runs/${runId}`;
+  await expect
+    .poll(async () => {
+      const read = await page.request.get(runPath);
+      expect(read.status()).toBe(200);
+      return organizeRunResponseSchema.parse(await read.json()).status;
+    })
+    .toBe("draft");
+
+  const handoff = await page.request.post(`${runPath}/handoff`, { headers: { Origin: origin } });
+  expect(handoff.status()).toBe(200);
+  const { id } = noteDraftSchema.parse(await handoff.json());
+  const read = await page.request.get(`/api/note-drafts/${id}?include=original`);
+  expect(read.status()).toBe(200);
+  expect(noteDraftSchema.parse(await read.json())).toMatchObject({
+    title: "Organized plan",
+    content: "# Organized plan\n\nBudget: 42 EUR.",
+    source: null,
+    original: input,
+  });
+  expect(await notes(page)).toEqual([]);
 });
 
 test("reload reconnects to the same persisted generation", async ({ page }) => {

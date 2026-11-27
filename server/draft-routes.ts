@@ -1,9 +1,10 @@
 import { wakeNoteIndex, type NoteSaved } from "./note-index-routes.ts";
 import { Hono } from "hono";
 import { apiError, ifMatchSchema, revisionHeaders } from "../shared/http.ts";
-import { noteContentSchema, noteIdSchema } from "../shared/notes.ts";
+import { noteContentSchema, noteIdSchema, requestOriginPreference } from "../shared/notes.ts";
 import type { AuthEnv } from "./auth.ts";
 import { noteTag } from "./db/notes.ts";
+import { withCompatibleOrigin } from "./notes.ts";
 import { reportStorageFailure } from "./http-errors.ts";
 import type { OrganizeService } from "./organize-routes.ts";
 import { hasEmptyBody, readJson } from "./request-body.ts";
@@ -98,7 +99,10 @@ export function createDraftRoutes(service?: OrganizeService, onSaved?: NoteSaved
           if ("value" in result) {
             wakeNoteIndex(onSaved, result.value.note.id);
             return c.json(
-              result.value.note,
+              withCompatibleOrigin(
+                result.value.note,
+                c.req.header("Prefer") === requestOriginPreference,
+              ),
               201,
               revisionHeaders(noteTag(result.value.note.id, result.value.revision)),
             );
