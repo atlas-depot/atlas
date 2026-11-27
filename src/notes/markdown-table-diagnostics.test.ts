@@ -89,6 +89,22 @@ describe("Markdown table delimiter diagnostics", () => {
     );
   });
 
+  it("counts header cells containing inline code without outer pipes", () => {
+    for (const header of ["`Task` | Status", "Task | `Status`"]) {
+      const warnings = findMarkdownTableDelimiterWarnings(`${header}\n| --- |`);
+      expect(warnings.map((warning) => warning.suggestedRow)).toEqual(["| --- | --- |"]);
+    }
+    // GFM splits an unescaped pipe even inside a single-line code span.
+    const warnings = findMarkdownTableDelimiterWarnings("`A|B` | C\n| --- | --- |");
+    expect(warnings.map((warning) => warning.suggestedRow)).toEqual(["| --- | --- | --- |"]);
+  });
+
+  it("keeps code next to dashes from being mistaken for a delimiter row", () => {
+    for (const row of ["| --- `skip` |", "| --- `skip\ncontinued` |"]) {
+      expect(findMarkdownTableDelimiterWarnings(`| Task | Status |\n${row}`)).toEqual([]);
+    }
+  });
+
   it("counts escaped pipes without losing cells", () => {
     expect(findMarkdownTableDelimiterWarnings("| A \\| B | C |\n| --- |")).toHaveLength(1);
     expect(findMarkdownTableDelimiterWarnings("| A \\\\| B |\n| --- |")).toHaveLength(1);
