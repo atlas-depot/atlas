@@ -1,3 +1,4 @@
+import type { OrganizeInput } from "../shared/organize-input.ts";
 import type {
   createOrganizeRunStore,
   OrganizeRunRecord,
@@ -22,7 +23,7 @@ export type DurableOrganizer = {
   submit(input: {
     sessionId: string;
     operationId: string;
-    note: { title: string; content: string };
+    note: NonNullable<OrganizeRunRecord["input"]>;
   }): Promise<(RuntimeReference & { deliveryId: string }) | { status: "expired" }>;
   inspect(reference: RuntimeReference & { deliveryId: string }): Promise<
     (
@@ -77,7 +78,7 @@ export function createDurableOrganizeRuns({
     // idle session; never send a note until its fixed session identity is committed.
     await store.withRun(ownerId, runId, async (record, save, readSource) => {
       if (!record.active || record.cleanupTarget || record.runtime) return;
-      if (!(await readSource())) {
+      if (record.noteId !== null && !(await readSource())) {
         await save({
           ...record,
           input: null,
@@ -92,7 +93,7 @@ export function createDurableOrganizeRuns({
     });
     return store.withRun(ownerId, runId, async (record, save, readSource) => {
       if (!record.active || record.cleanupTarget || record.runtime?.deliveryId) return record;
-      if (!(await readSource())) {
+      if (record.noteId !== null && !(await readSource())) {
         const missing: OrganizeRunRecord = {
           ...record,
           input: null,
@@ -114,7 +115,10 @@ export function createDurableOrganizeRuns({
           ...record,
           input: null,
           state: { status: "cleaning" },
-          cleanupTarget: { status: "expired" },
+          cleanupTarget:
+            record.noteId === null
+              ? { status: "failed", reason: "generation_failed" }
+              : { status: "expired" },
         };
         await save(expired);
         return expired;
@@ -209,16 +213,19 @@ export function createDurableOrganizeRuns({
     result?: Inspection,
   ): Promise<{ record: OrganizeRunRecord; inspect?: DeliveredReference }> => {
     if (!record.active || record.cleanupTarget) return { record };
-    const current = await readSource();
+    const current = record.noteId === null ? undefined : await readSource();
     let target: RunTerminalState | undefined;
-    if (!current) target = { status: "not_found" };
+    if (record.noteId !== null && !current) target = { status: "not_found" };
     else if (record.expiresAt !== null && record.expiresAt <= now()) target = { status: "expired" };
     else if (record.state.status === "draft") {
       const refreshed = {
         ...record,
         state: {
           ...record.state,
-          source: { ...record.state.source, stale: current.revision !== record.sourceRevision },
+          source:
+            current && record.state.source
+              ? { ...record.state.source, stale: current.revision !== record.sourceRevision }
+              : null,
         },
       };
       await save(refreshed);
@@ -229,7 +236,8 @@ export function createDurableOrganizeRuns({
       return { record, inspect: { ...record.runtime, deliveryId: record.runtime.deliveryId } };
     } else if (result.status === "draft") {
       const draft = generatedDraftSchema.safeParse(result.draft);
-      if (!draft.success) target = { status: "failed", reason: "invalid_draft" };
+      if (!draft.success || (record.noteId === null && draft.data.title === undefined))
+        target = { status: "failed", reason: "invalid_draft" };
       else {
         const expiresAt = (result.completedAt ?? now()) + resultRetentionMs;
         if (expiresAt <= now()) target = { status: "expired" };
@@ -239,11 +247,14 @@ export function createDurableOrganizeRuns({
             state: {
               status: "draft",
               draft: draft.data,
-              source: {
-                noteId: record.noteId,
-                revision: record.sourceRevision,
-                stale: current.revision !== record.sourceRevision,
-              },
+              source:
+                current && record.sourceRevision !== null
+                  ? {
+                      noteId: current.note.id,
+                      revision: record.sourceRevision,
+                      stale: current.revision !== record.sourceRevision,
+                    }
+                  : null,
             },
             expiresAt,
           };
@@ -258,9 +269,12 @@ export function createDurableOrganizeRuns({
       return { record: next };
     } else if (result.status === "failed") {
       target =
-        result.reason === "expired"
+        result.reason === "expired" && record.noteId !== null
           ? { status: "expired" }
-          : { status: "failed", reason: result.reason };
+          : {
+              status: "failed",
+              reason: result.reason === "expired" ? "generation_failed" : result.reason,
+            };
     } else {
       // Copy only the status: a cancelled answer can carry usage, which is not terminal state.
       target = { status: result.status };
@@ -313,6 +327,8 @@ export function createDurableOrganizeRuns({
 
   return {
     drafts: store.drafts,
+    listRecoverable: store.listRecoverable,
+    recover: store.recover,
     async work(ownerId: string) {
       const drafts = await store.drafts.list(ownerId);
       const ids = new Set(drafts.map((draft) => draft.id));
@@ -334,10 +350,10 @@ export function createDurableOrganizeRuns({
     },
     async start(
       ownerId: string,
-      noteId: string,
+      input: string | { key: string; input: OrganizeInput },
       expectedTag?: string,
     ): Promise<{ runId: string; status?: "cleanup_pending" } | { status: "not_found" }> {
-      const record = await store.claim(ownerId, noteId, runtimeUrl, expectedTag);
+      const record = await store.claim(ownerId, input, runtimeUrl, expectedTag);
       if (!record) return { status: "not_found" };
       if (record.cleanupTarget) return { runId: record.runId, status: "cleanup_pending" };
       const started = await ensureStarted(ownerId, record.runId);

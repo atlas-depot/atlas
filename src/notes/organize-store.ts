@@ -1,7 +1,13 @@
 import { apiErrorSchema, ifMatchSchema, readRevision } from "../../shared/http";
 import { noteDraftSchema, organizeWorkSchema, type NoteDraft } from "../../shared/drafts";
 import { organizeRunResponseSchema, organizeStartResponseSchema } from "../../shared/organize";
-import { noteContentSchema, noteIdSchema, noteSchema, type UpdateNote } from "../../shared/notes";
+import {
+  noteContentSchema,
+  noteIdSchema,
+  noteSchema,
+  requestOriginPreference,
+  type UpdateNote,
+} from "../../shared/notes";
 import { boundedFetch } from "../lib/http";
 import { NotesRequestError, type NoteSnapshot } from "./notes-store";
 
@@ -29,7 +35,7 @@ export function createOrganizeClient(request: typeof fetch = globalThis.fetch) {
     return value;
   }
   const id = (value: string) => noteIdSchema.parse(value);
-  const update = (input: UpdateNote, etag: string): RequestInit => ({
+  const update = (input: UpdateNote, etag: string) => ({
     method: "PUT",
     headers: { "Content-Type": "application/json", "If-Match": ifMatchSchema.parse(etag) },
     body: JSON.stringify(noteContentSchema.parse(input)),
@@ -74,8 +80,10 @@ export function createOrganizeClient(request: typeof fetch = globalThis.fetch) {
       });
     },
     async save(draftId: string, input: UpdateNote, etag: string): Promise<NoteSnapshot> {
+      const change = update(input, etag);
       const result = await response(`/note-drafts/${id(draftId)}/save`, {
-        ...update(input, etag),
+        ...change,
+        headers: { ...change.headers, Prefer: requestOriginPreference },
         method: "POST",
       });
       return {

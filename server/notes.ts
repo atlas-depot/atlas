@@ -6,6 +6,7 @@ import {
   createNoteKeySchema,
   createNoteSchema,
   noteIdSchema,
+  requestOriginPreference,
   updateNoteSchema,
   type CreateNote,
   type NoteSummary,
@@ -17,7 +18,7 @@ import { reportStorageFailure } from "./http-errors.ts";
 
 export interface NoteService {
   list(ownerId: string): Promise<NoteSummary[]>;
-  read(ownerId: string, id: string): Promise<StoredNote | undefined>;
+  read(ownerId: string, id: string, includeOriginal?: boolean): Promise<StoredNote | undefined>;
   createIdempotent(
     ownerId: string,
     key: string,
@@ -44,6 +45,12 @@ const stale = () =>
   apiError("PRECONDITION_FAILED", "The note has changed. Reload before retrying.");
 const etag = (value: StoredNote) => noteTag(value.note.id, value.revision);
 
+export function withCompatibleOrigin<T extends NoteSummary>(note: T, supportsRequests: boolean): T {
+  return !supportsRequests && note.origin?.sourceNoteId === null
+    ? { ...note, origin: undefined }
+    : note;
+}
+
 /** Mounted behind requireAuth and the app's cookie-origin protection. */
 export function createNoteRoutes(store?: NoteService, onSaved?: NoteSaved) {
   const routes = new Hono<AuthEnv>();
@@ -51,7 +58,11 @@ export function createNoteRoutes(store?: NoteService, onSaved?: NoteSaved) {
   routes.get("/", async (c) => {
     if (!store) return c.json(unavailable(), 503);
     try {
-      return c.json({ notes: await store.list(c.get("user").userId) });
+      const rows = await store.list(c.get("user").userId);
+      const supportsRequests = c.req.header("Prefer") === requestOriginPreference;
+      return c.json({
+        notes: supportsRequests ? rows : rows.map((row) => withCompatibleOrigin(row, false)),
+      });
     } catch (error) {
       reportStorageFailure(c, error);
       return c.json(unavailable(), 503);
@@ -85,9 +96,19 @@ export function createNoteRoutes(store?: NoteService, onSaved?: NoteSaved) {
     const id = noteIdSchema.safeParse(c.req.param("id"));
     if (!id.success) return c.json(invalid(), 400);
     try {
-      const value = await store.read(c.get("user").userId, id.data);
+      const value = await store.read(
+        c.get("user").userId,
+        id.data,
+        c.req.query("include") === "original",
+      );
       if (!value) return c.json(notFound(), 404);
-      return c.json(value.note, 200, revisionHeaders(etag(value)));
+      const supportsRequests =
+        c.req.query("include") === "original" || c.req.header("Prefer") === requestOriginPreference;
+      return c.json(
+        withCompatibleOrigin(value.note, supportsRequests),
+        200,
+        revisionHeaders(etag(value)),
+      );
     } catch (error) {
       reportStorageFailure(c, error);
       return c.json(unavailable(), 503);
@@ -123,7 +144,14 @@ export function createNoteRoutes(store?: NoteService, onSaved?: NoteSaved) {
       if (result.status === "conflict") return c.json(stale(), 412);
       if (result.status === "saved") {
         wakeNoteIndex(onSaved, result.value.note.id);
-        return c.json(result.value.note, 200, revisionHeaders(etag(result.value)));
+        return c.json(
+          withCompatibleOrigin(
+            result.value.note,
+            c.req.header("Prefer") === requestOriginPreference,
+          ),
+          200,
+          revisionHeaders(etag(result.value)),
+        );
       }
       return c.body(null, 204);
     } catch (error) {

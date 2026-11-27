@@ -178,6 +178,25 @@ Live Neon development verification and the branch inventory from 2026-11-01 are 
 
 The `organize_runs` migration adds owner-bound transient run records alongside notes. Apply it with the normal reviewed migration command. A partial unique index coalesces active work for one owner/note, including pending cleanup. The note relation deliberately does not cascade-delete cleanup references. Handoff commits a separate temporary draft and cleanup intent together before remote retirement. Successful cleanup leaves an expiring content-free run tombstone. Temporary drafts expire 24 hours after handoff, independently of run metadata. The enabled maintenance sweep physically deletes expired draft content; API reads and writes reject it at expiration even before the next sweep.
 
+Start either Figure 4 flow with `POST /api/organize-runs` and a UUID `Idempotency-Key`.
+Send `{"kind":"request","text":"Create a note titled Review checklist: check the source links."}`
+for standalone input. For an existing note, send `{"kind":"note","noteId":"…","instruction":"List the open questions."}`
+and copy the `Atlas-Revision` header from the note's GET response into `If-Match`, including
+the quotation marks (use the strong `ETag` if `Atlas-Revision` is absent). The instruction is optional. Reuse the same key and payload
+if the response is lost. Changing the payload or bound revision under that key returns 409.
+
+`GET /api/organize-work?include=requests` includes standalone work. After failed standalone
+generation, `GET /api/organize-requests` lists the owner's recoverable run IDs and expiry times.
+`GET /api/organize-requests/:id` returns the exact text for 24 hours after failure.
+An intentional new generation uses a fresh key. Starting a run or recovering input creates no note.
+
+The owner can inspect `GET /api/note-drafts/:id?include=original` before Save and
+`GET /api/notes/:id?include=original` afterward. Standalone originals contain the request text.
+Saved-note originals contain the submitted revision, title, rich content and any instruction.
+The saved copy survives later edits or deletion of its source and disappears with the new note.
+Legacy records can omit provenance fields. The notes client uses `Prefer: include="request-origin"`
+to distinguish notes generated from standalone requests in library results.
+
 `pnpm test:db` also exercises run recovery, concurrency, source revision/deletion races and cleanup using separate pools and Node processes. Runtime transport is mocked in database tests. See the [organizer](../agents/organizer/README.md) for the eve/Vercel build, private service and explicitly enabled maintenance settings. Organize HTTP routes use the existing authentication middleware; note CRUD uses the same authenticated API boundary. Database tests inject synthetic authentication and mock runtime transport, so they do not establish live WorkOS or model behavior.
 
 ### Organizer configuration

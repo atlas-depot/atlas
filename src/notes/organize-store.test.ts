@@ -130,6 +130,7 @@ describe("organize REST client", () => {
     expect(url).toBe(`/api/note-drafts/${draftId}/save`);
     expect(init?.method).toBe("POST");
     const headers = new Headers(init?.headers);
+    expect(headers.get("Prefer")).toBe('include="request-origin"');
     expect(headers.get("Content-Type")).toBe("application/json");
     expect(headers.get("If-Match")).toBe('"draft-v1"');
     if (typeof init?.body !== "string") throw new Error("Expected JSON save body");

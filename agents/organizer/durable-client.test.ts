@@ -6,6 +6,7 @@ import { createDurableEveOrganizer } from "./durable-client.ts";
 const reference = { sessionId: "session-1", deliveryId: "delivery-1" };
 const serviceToken = "synthetic-only-organizer-service-token";
 const completedAt = Date.parse("2026-11-01T00:00:30Z");
+const generationTime = { generatedAt: "2026-11-01T00:00:30.000Z" };
 function event(input: SessionEvent): SessionStreamEvent {
   return {
     ...input,
@@ -18,11 +19,7 @@ const consumed = event({
   data: { ...reference, turnId: "turn-1", parts: [] },
 });
 const finished = [
-  event({
-    type: "model.settled",
-    scope,
-    data: { runId: "model-1", outcome: "completed", finishReason: "stop" },
-  }),
+  // eve writes the completed reply before the model settlement.
   event({
     type: "content.completed",
     scope,
@@ -33,6 +30,11 @@ const finished = [
       phase: "reply",
       value: "# Kept source facts",
     },
+  }),
+  event({
+    type: "model.settled",
+    scope,
+    data: { runId: "model-1", outcome: "completed", finishReason: "stop" },
   }),
   event({
     type: "turn.settled",
@@ -78,6 +80,7 @@ function fixture({
   endError,
   initialActiveReads = 0,
   requestTimeoutMs,
+  maxModelCalls,
   fetchImpl = async () => Response.json({ ok: true, ...reference }, { status: 202 }),
 }: {
   events?: SessionStreamEvent[];
@@ -85,6 +88,7 @@ function fixture({
   endError?: Error;
   initialActiveReads?: number;
   requestTimeoutMs?: number;
+  maxModelCalls?: number;
   fetchImpl?: typeof fetch;
 } = {}) {
   const calls = { ends: 0, reads: 0 };
@@ -92,6 +96,7 @@ function fixture({
     baseUrl: "https://organizer.example.com",
     serviceToken,
     requestTimeoutMs,
+    maxModelCalls,
     fetchImpl,
     client: {
       sessions: {
@@ -144,13 +149,40 @@ await test("submission retries carry the same operation identity, without browse
   const body = requests[0]?.body;
   assert.equal(typeof body, "string");
   if (typeof body !== "string") throw new Error("Expected JSON request body");
-  assert.deepEqual(JSON.parse(body), {
+  const { outputSchema, ...delivery } = JSON.parse(body);
+  assert.deepEqual(delivery, {
     idempotencyKey: "atlas-run-1",
     message: JSON.stringify(input.note),
   });
+  assert.deepEqual(outputSchema.required, ["title", "markdown"]);
+  assert.equal(outputSchema.additionalProperties, false);
   assert.equal(requests[0]?.credentials, "omit");
   assert.equal(requests[0]?.redirect, "error");
   assert.equal(new Headers(requests[0]?.headers).get("cookie"), null);
+});
+
+await test("explicit instructions and standalone requests retain their distinct wire shapes", async () => {
+  const request = "Create a note titled Review checklist:\nCheck the source links.";
+  const messages: unknown[] = [];
+  const { adapter } = fixture({
+    fetchImpl: async (_url, init) => {
+      assert.ok(typeof init?.body === "string");
+      messages.push(JSON.parse(JSON.parse(init.body).message));
+      return Response.json({ ok: true, ...reference }, { status: 202 });
+    },
+  });
+  const saved = { title: "Planning notes", content: "Test 30 notes." };
+  await adapter.submit({
+    sessionId: reference.sessionId,
+    operationId: "saved-instruction",
+    note: { ...saved, instruction: "List objectives." },
+  });
+  await adapter.submit({
+    sessionId: reference.sessionId,
+    operationId: "new-note",
+    note: { request },
+  });
+  assert.deepEqual(messages, [{ ...saved, instruction: "List objectives." }, { request }]);
 });
 
 await test("a lost creation response stays uncertain and is not automatically replayed", async () => {
@@ -245,7 +277,7 @@ await test("finite inspection reconstructs a draft and finish time after a new c
   const restarted = fixture();
   const expected = {
     status: "draft",
-    draft: { markdown: "# Kept source facts", sources: [] },
+    draft: { markdown: "# Kept source facts", generation: generationTime, sources: [] },
     completedAt,
     usage: { complete: false },
   };
@@ -259,7 +291,7 @@ await test("sources come only from completed research for the accepted turn", as
   const { adapter } = fixture({ events });
   assert.deepEqual(await adapter.inspect(reference), {
     status: "draft",
-    draft: { markdown: "# Kept source facts", sources: [draftSource] },
+    draft: { markdown: "# Kept source facts", generation: generationTime, sources: [draftSource] },
     completedAt,
     usage: { complete: false },
   });
@@ -268,6 +300,67 @@ await test("sources come only from completed research for the accepted turn", as
   const result = await without.adapter.inspect(reference);
   assert.equal(result.status, "draft");
   if (result.status === "draft") assert.deepEqual(result.draft.sources, []);
+});
+
+function proposalEvents(proposal: { title: string; markdown: string }) {
+  return finished.map((value) => {
+    if (value.type === "model.settled")
+      return event({ ...value, data: { ...value.data, finishReason: "tool-calls" } });
+    if (value.type === "content.completed")
+      return event({ ...value, data: { ...value.data, kind: "result", value: proposal } });
+    return value;
+  });
+}
+
+await test("a completed structured proposal preserves the requested title, body and recorded sources", async () => {
+  const proposal = { title: "Review checklist", markdown: "Check the source links." };
+  const started = (runId: string, attempt: number, modelId: string) =>
+    event({ type: "model.started", scope, data: { runId, attempt, modelId } });
+  const events = [
+    consumed,
+    started("model-1", 0, "original-attempt"),
+    started("model-1", 1, "producing-model"),
+    started("different-run", 0, "research-model"),
+    ...research,
+    ...proposalEvents(proposal),
+  ];
+  assert.deepEqual(await fixture({ events, maxModelCalls: 1 }).adapter.inspect(reference), {
+    status: "draft",
+    draft: {
+      ...proposal,
+      generation: { ...generationTime, runtimeModelId: "producing-model" },
+      sources: [draftSource],
+    },
+    completedAt,
+    usage: { complete: false },
+  });
+});
+
+await test("the final allowed model step can await delivery only if it produced the reply", async () => {
+  const [reply, settled] = proposalEvents({ title: "Plan", markdown: "Test 30 notes." });
+  const observe = (events: SessionStreamEvent[]) =>
+    fixture({ events: [consumed, ...events], maxModelCalls: 1 }).adapter.inspect(reference);
+  assert.equal((await observe([reply!, settled!])).status, "running");
+  assert.equal((await observe([research[0]!, settled!])).status, "failed");
+});
+
+await test("invalid titles and model-authored provenance cannot become drafts", async () => {
+  for (const fields of [
+    { title: " " },
+    { title: "a".repeat(257) },
+    { title: "OK", sources: [] },
+    {
+      title: "OK",
+      generation: { generatedAt: "2099-01-01T00:00:00Z", runtimeModelId: "fake-model" },
+    },
+  ]) {
+    const events = [consumed, ...proposalEvents({ ...fields, markdown: "Body" })];
+    assert.deepEqual(await fixture({ events }).adapter.inspect(reference), {
+      status: "failed",
+      reason: "invalid_draft",
+      usage: { complete: false },
+    });
+  }
 });
 
 await test("unfinished research is progress, never a completed draft", async () => {
@@ -575,7 +668,8 @@ await test("running usage is provisional while another model has no settled metr
     scope,
     data: { runId: "model-2", owner: { turnId: "turn-1" } },
   });
-  const events = [consumed, finished[0]!, usageEvent("model-1", 20, 5, 0.01), requested];
+  const settled = finished.find((entry) => entry.type === "model.settled")!;
+  const events = [consumed, settled, usageEvent("model-1", 20, 5, 0.01), requested];
   const result = await fixture({ events }).adapter.inspect(reference);
   assert.equal(result.status, "running");
   assert.deepEqual(result.usage, {

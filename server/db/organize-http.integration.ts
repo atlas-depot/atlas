@@ -16,6 +16,8 @@ import {
 import { openDatabase, readTestDatabaseUrl } from "./connection.ts";
 import { applyMigrations } from "./migrations.ts";
 import { organizeStartResponseSchema } from "../../shared/organize.ts";
+import { noteDraftSchema } from "../../shared/drafts.ts";
+import { noteSchema } from "../../shared/notes.ts";
 import { createNoteStore, noteTag } from "./notes.ts";
 import { createOrganizeRunStore, MAX_ACTIVE_RUNS_PER_OWNER } from "./organize-runs.ts";
 import { notes, organizeRuns } from "./schema.ts";
@@ -115,6 +117,7 @@ async function fixture() {
   const listen = async (backend = manager()) => {
     const app = createApp(authenticate, {
       appOrigin,
+      notes: noteStore,
       organizer: backend,
     });
     const server = createServer(getRequestListener(app.fetch));
@@ -177,6 +180,108 @@ async function fixture() {
     },
   };
 }
+
+it("saves Review checklist once and reopens its exact private request after a restart", async () => {
+  const f = await fixture();
+  const text = "Create a note titled Review checklist: check the source links.\n\n`verbatim`";
+  const create = {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "Idempotency-Key": randomUUID() },
+    body: JSON.stringify({ kind: "request", text }),
+  };
+  const invalid = await f.http.request("/organize-runs", {
+    ...create,
+    body: JSON.stringify({ kind: "request", text: " \n\t" }),
+  });
+  expect(invalid.status).toBe(400);
+  expect(f.runtime.allocate).not.toHaveBeenCalled();
+  const first = await f.http.request("/organize-runs", create);
+  expect(first.status).toBe(202);
+  const { runId } = organizeStartResponseSchema.parse(first.body);
+  const secondProcess = await f.listen(f.manager());
+  expect(await secondProcess.request("/organize-runs", create)).toEqual(first);
+  expect(f.runtime.submit).toHaveBeenCalledTimes(1);
+  expect(await f.noteStore.list(f.owner)).toHaveLength(1); // Only the fixture's pre-existing note.
+  f.observe({
+    status: "draft",
+    draft: { title: "Review checklist", markdown: "Check the source links.", sources: [] },
+    completedAt: f.clock,
+  });
+  expect((await secondProcess.request(`/organize-runs/${runId}`)).body).toMatchObject({
+    status: "draft",
+    source: null,
+  });
+  const handoff = () =>
+    secondProcess.request(`/organize-runs/${runId}/handoff`, { method: "POST" });
+  const handed = await handoff();
+  expect(handed.status).toBe(200);
+  expect(await handoff()).toEqual(handed);
+  const editable = noteDraftSchema.parse(handed.body);
+  expect(editable.title).toBe("Review checklist");
+  expect(editable.content).toBe("Check the source links.");
+  const save = (prefer: Record<string, string> = {}) =>
+    secondProcess.request(`/note-drafts/${editable.id}/save`, {
+      method: "POST",
+      headers: { ...prefer, "Content-Type": "application/json", "If-Match": editable.etag },
+      body: JSON.stringify({ title: editable.title, content: editable.content }),
+    });
+  const saved = await save();
+  expect(saved.status).toBe(201);
+  expect(saved.body).not.toHaveProperty("origin");
+  expect(await save()).toEqual(saved);
+  const modern = await save({ Prefer: 'include="request-origin"' });
+  expect(modern.status).toBe(201);
+  expect(modern.body).toEqual({
+    ...noteSchema.parse(saved.body),
+    origin: { sourceNoteId: null, sourceRevision: null, sources: [] },
+  });
+  const { id } = noteSchema.parse(saved.body);
+  const path = `/notes/${id}?include=original`;
+  expect((await f.http.request(path)).body).toMatchObject({
+    title: "Review checklist",
+    content: "Check the source links.",
+    original: { kind: "request", text },
+  });
+  expect(
+    (await f.http.request(path, { headers: { Authorization: "Bearer synthetic-stranger" } }))
+      .status,
+  ).toBe(404);
+  expect(await f.noteStore.list(f.owner)).toHaveLength(2);
+});
+
+it("binds the optional instruction to the submitted note revision and operation key", async () => {
+  const f = await fixture();
+  const id = f.note.note.id;
+  const instruction = "Split into objective, method and open questions.\nKeep the test size.";
+  const headers = {
+    "Content-Type": "application/json",
+    "Idempotency-Key": randomUUID(),
+    "If-Match": noteTag(id, f.note.revision),
+  };
+  const body = JSON.stringify({ kind: "note", noteId: id, instruction });
+  const post = (payload: string, extra: Record<string, string> = {}) =>
+    f.http.request("/organize-runs", {
+      method: "POST",
+      headers: { ...headers, ...extra },
+      body: payload,
+    });
+  expect((await post(body, { Authorization: "Bearer synthetic-stranger" })).status).toBe(404);
+  expect((await post(body, { "If-Match": noteTag(id, f.note.revision + 1) })).status).toBe(412);
+  expect(f.runtime.submit).not.toHaveBeenCalled();
+  const first = await post(body);
+  expect(first.status).toBe(202);
+  expect(await post(body)).toEqual(first);
+  expect(
+    (await post(JSON.stringify({ kind: "note", noteId: id, instruction: "A different edit" })))
+      .status,
+  ).toBe(409);
+  expect(f.runtime.submit).toHaveBeenCalledTimes(1);
+  expect(f.runtime.submit.mock.calls[0]?.[0].note).toMatchObject({
+    content: source.content,
+    instruction,
+  });
+  expect((await f.noteStore.read(f.owner, id))?.note).toEqual(f.note.note);
+});
 
 it("enforces authentication, cookie origin and bodyless UUID routes before dispatch", async () => {
   const f = await fixture();

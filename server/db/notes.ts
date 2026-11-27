@@ -1,11 +1,12 @@
 import { createHash, randomUUID } from "node:crypto";
-import { and, desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq, getTableColumns, sql } from "drizzle-orm";
 import { z } from "zod";
 import { noteOriginSchema } from "../../shared/organize.ts";
 import { canonicalJson, documentContentSchema } from "../../shared/document.ts";
 import {
   createNoteKeySchema,
   noteIdSchema,
+  organizerOriginalSchema,
   type CreateNote,
   type Note,
   type NoteSummary,
@@ -46,10 +47,21 @@ function noteSummary(row: SummaryRow): NoteSummary {
 }
 
 /** Parses stored content because legacy JSONB rows predate the document schema. */
-export function storedNote(row: Row): StoredNote {
+const { original, generation, ...noteColumns } = getTableColumns(notes);
+type NoteRow = Omit<Row, "original" | "generation"> & Partial<Pick<Row, "original" | "generation">>;
+export function storedNote(row: NoteRow, includeOriginal = false): StoredNote {
   const { id, title, ...metadata } = noteSummary(row);
   return {
-    note: { id, title, content: documentContentSchema.parse(row.content), ...metadata },
+    note: {
+      id,
+      title,
+      content: documentContentSchema.parse(row.content),
+      ...metadata,
+      ...(includeOriginal && row.generation ? { generation: row.generation } : {}),
+      ...(includeOriginal && row.original
+        ? { original: organizerOriginalSchema.parse(row.original) }
+        : {}),
+    },
     revision: row.revision,
   };
 }
@@ -151,14 +163,18 @@ export function createNoteStore(db: Database) {
       return rows.map((row) => noteSummary(row));
     },
 
-    async read(ownerId: string, id: string): Promise<StoredNote | undefined> {
+    async read(
+      ownerId: string,
+      id: string,
+      includeOriginal = false,
+    ): Promise<StoredNote | undefined> {
       const [row] = await db
-        .select()
+        .select(includeOriginal ? { ...noteColumns, original, generation } : noteColumns)
         .from(notes)
         .where(
           and(eq(notes.ownerId, ownerSchema.parse(ownerId)), eq(notes.id, noteIdSchema.parse(id))),
         );
-      return row ? storedNote(row) : undefined;
+      return row ? storedNote(row, includeOriginal) : undefined;
     },
 
     async update(

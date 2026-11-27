@@ -24,6 +24,9 @@ describe("notes REST client", () => {
     expect(await client.list()).toEqual([summary]);
     expect(await client.read(id)).toEqual({ note, etag: '"opaque-17"' });
     expect(request.mock.calls.map(([url]) => url)).toEqual(["/api/notes", `/api/notes/${id}`]);
+    expect(new Headers(request.mock.calls[0][1]?.headers).get("Prefer")).toBe(
+      'include="request-origin"',
+    );
     expect(request.mock.calls[1][1]).toMatchObject({
       credentials: "same-origin",
       signal: expect.any(AbortSignal),

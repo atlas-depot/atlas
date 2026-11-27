@@ -1,8 +1,10 @@
 import { randomUUID } from "node:crypto";
 import { expect, test, type BrowserContext, type Page } from "@playwright/test";
+import { noteContentPlainText } from "../shared/document.ts";
+import { readRevision } from "../shared/http.ts";
 import { noteListSchema, noteSchema, type Note, type NoteSummary } from "../shared/notes.ts";
-import { organizeWorkSchema } from "../shared/drafts.ts";
-import { organizeRunResponseSchema } from "../shared/organize.ts";
+import { noteDraftSchema, organizeWorkSchema } from "../shared/drafts.ts";
+import { organizeRunResponseSchema, organizeStartResponseSchema } from "../shared/organize.ts";
 import { expectEditorContent } from "./notes-editor.ts";
 
 const origin = "http://127.0.0.1:4185";
@@ -31,11 +33,11 @@ async function work(page: Page) {
   expect(response.status()).toBe(200);
   return organizeWorkSchema.parse(await response.json());
 }
-async function createSource(page: Page) {
+async function createSource(page: Page, title = "Acceptance source") {
   const response = await page.request.post("/api/notes", {
     headers: { Origin: origin, "Idempotency-Key": randomUUID() },
     data: {
-      title: "Acceptance source",
+      title,
       content: "Budget: 42 EUR.",
       createdAt: "2026-11-05T12:00:00.000Z",
     },
@@ -46,6 +48,40 @@ async function createSource(page: Page) {
 
 test.beforeEach(async ({ context }) => {
   await signIn(context);
+});
+
+test("a standalone request produces a titled draft without creating a source note", async ({
+  page,
+}) => {
+  const input = { kind: "request", text: "Create a plan for the review.\nBudget: 42 EUR." };
+  const start = await page.request.post("/api/organize-runs", {
+    headers: { Origin: origin, "Idempotency-Key": randomUUID() },
+    data: input,
+  });
+  expect(start.status()).toBe(202);
+  const { runId, status } = organizeStartResponseSchema.parse(await start.json());
+  expect(status).toBe("accepted");
+  const runPath = `/api/organize-runs/${runId}`;
+  await expect
+    .poll(async () => {
+      const read = await page.request.get(runPath);
+      expect(read.status()).toBe(200);
+      return organizeRunResponseSchema.parse(await read.json()).status;
+    })
+    .toBe("draft");
+
+  const handoff = await page.request.post(`${runPath}/handoff`, { headers: { Origin: origin } });
+  expect(handoff.status()).toBe(200);
+  const { id } = noteDraftSchema.parse(await handoff.json());
+  const read = await page.request.get(`/api/note-drafts/${id}?include=original`);
+  expect(read.status()).toBe(200);
+  expect(noteDraftSchema.parse(await read.json())).toMatchObject({
+    title: "Organized plan",
+    content: "# Organized plan\n\nBudget: 42 EUR.",
+    source: null,
+    original: input,
+  });
+  expect(await notes(page)).toEqual([]);
 });
 
 test("reload reconnects to the same persisted generation", async ({ page }) => {
@@ -76,7 +112,7 @@ test("reload reconnects to the same persisted generation", async ({ page }) => {
   const resumed = await work(page);
   expect(resumed.runs).toEqual([]);
   expect(resumed.drafts).toHaveLength(1);
-  expect(resumed.drafts[0].source.noteId).toBe(source.id);
+  expect(resumed.drafts[0].source?.noteId).toBe(source.id);
   expect(await notes(page)).toEqual([summaryOf(source)]);
 });
 
@@ -174,12 +210,15 @@ test("a source deleted after handoff still permits a separate save with provenan
   expect((await page.request.get(`/api/notes/${source.id}`)).status()).toBe(404);
 });
 
-test("temporary drafts stay account-scoped and discard removes them across reload", async ({
+test("discarding an edited private draft preserves the Planning notes source across reload", async ({
   page,
   context,
 }) => {
   const owner = await signIn(context);
-  const source = await createSource(page);
+  const source = await createSource(page, "Planning notes");
+  const sourcePath = `/api/notes/${source.id}`;
+  const before = await page.request.get(sourcePath);
+  const revision = readRevision(new Headers(before.headers()));
   await page.goto("/");
   await page.getByRole("button", { name: "Organize", exact: true }).click();
   const panel = page.getByRole("region", { name: "AI draft", exact: true });
@@ -192,7 +231,13 @@ test("temporary drafts stay account-scoped and discard removes them across reloa
   expect((await page.request.get(`/api/note-drafts/${draft.id}`)).status()).toBe(404);
   await signIn(context, owner);
   await page.reload();
-  await expect(panel.getByRole("textbox", { name: "Draft title", exact: true })).toBeVisible();
+  const draftEditor = panel.getByRole("textbox", { name: /^(Note content|Markdown source)$/ });
+  const edit = "Only the draft should contain this edit.";
+  await draftEditor.press("End");
+  await page.keyboard.insertText(edit);
+  await expect
+    .poll(async () => noteContentPlainText((await work(page)).drafts[0].content))
+    .toContain(edit);
   await panel.getByRole("button", { name: "Discard draft", exact: true }).click();
   await page
     .getByRole("alertdialog")
@@ -202,4 +247,8 @@ test("temporary drafts stay account-scoped and discard removes them across reloa
   await page.reload();
   await expect(panel).toHaveCount(0);
   expect(await notes(page)).toEqual([summaryOf(source)]);
+  const after = await page.request.get(sourcePath);
+  expect(after.status()).toBe(200);
+  expect(await after.json()).toEqual(source);
+  expect(readRevision(new Headers(after.headers()))).toBe(revision);
 });
