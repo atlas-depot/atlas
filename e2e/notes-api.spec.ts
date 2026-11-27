@@ -285,6 +285,135 @@ test("structured blocks persist IDs, nested lists and tables through save and AP
   });
 });
 
+test("a malformed table names its missing delimiter and survives the saved-note round trip", async ({
+  page,
+}, testInfo) => {
+  // Figure 7 content, plus the issue's fenced copy requirement.
+  const table = "| Task | Status |\n| --- |\n| Check sources | Open |";
+  const content = [
+    "## Evaluation set",
+    "",
+    "Set aside time for a trial run before collecting results.",
+    "",
+    table,
+    "",
+    "## Review checklist",
+    "",
+    "- Check each answer against its source.",
+    "",
+    "## Example check",
+    "",
+    "```text",
+    "within_target = result_rank <= 3",
+    "```",
+    "",
+    "Source: [Meeting agenda](https://example.com/meeting-agenda)",
+    "",
+    "## Table source example",
+    "",
+    "```markdown",
+    table,
+    "```",
+  ].join("\n");
+  const delimiterFixed = content.replace("| --- |\n", "| --- | --- |\n");
+  const corrected = delimiterFixed.replace("| Check sources | Open |", "| Check sources | Done |");
+
+  const created = await page.request.post("/api/notes", {
+    headers: { Origin: origin, "Idempotency-Key": randomUUID() },
+    data: {
+      title: "Evaluation checklist",
+      content,
+      createdAt: "2026-11-25T12:00:00.000Z",
+    },
+  });
+  expect(created.status()).toBe(201);
+  const note = noteSchema.parse(await created.json());
+
+  await page.goto("/");
+  await expect(page.getByRole("textbox", { name: "Title", exact: true })).toHaveValue(
+    "Evaluation checklist",
+  );
+  const source = page.getByRole("textbox", { name: "Markdown source", exact: true });
+  await expect(source).toHaveValue(content);
+  const warning = page.locator('[data-test="markdown-table-warning"]');
+  await expect(warning).toHaveCount(1);
+  await expect(warning).toContainText("Table needs two delimiter cells.");
+  await expect(warning).toContainText("The second one is missing.");
+  await expect(warning).toContainText("Add the missing cell:");
+  await expect(warning).toContainText("| --- | --- |");
+  await page.screenshot({
+    path: testInfo.outputPath("malformed-table-before.png"),
+    fullPage: true,
+  });
+  await page.setViewportSize({ width: 375, height: 812 });
+  expect(await page.evaluate("document.documentElement.scrollWidth <= window.innerWidth")).toBe(
+    true,
+  );
+  await page.screenshot({
+    path: testInfo.outputPath("malformed-table-before-mobile.png"),
+    fullPage: true,
+  });
+  await page.setViewportSize({ width: 1280, height: 720 });
+
+  await source.fill(delimiterFixed);
+  await expect(page.getByRole("status")).toHaveText("Unsaved changes");
+  await expect(warning).toHaveCount(0);
+  const preview = page.getByRole("region", { name: "Markdown preview" });
+  await expect(preview.locator("table")).toHaveCount(1);
+  await expect(preview.locator("table")).toContainText("Open");
+
+  await source.fill(corrected);
+  await page.keyboard.press("ControlOrMeta+s");
+  await expect(page.getByRole("status")).toHaveText("Saved");
+  const saved = await readNote(page, note.id);
+  expect(typeof saved.content).toBe("string");
+  expect(saved.content).toBe(corrected);
+
+  await page.reload();
+  await expect(source).toHaveValue(corrected);
+  await expect(warning).toHaveCount(0);
+  const rendered = page.getByRole("region", { name: "Markdown preview" });
+  const renderedTable = rendered.locator("table");
+  await expect(renderedTable).toHaveCount(1);
+  await expect(renderedTable.locator("th").nth(0)).toHaveText("Task");
+  await expect(renderedTable.locator("th").nth(1)).toHaveText("Status");
+  await expect(renderedTable.locator("td").nth(0)).toHaveText("Check sources");
+  await expect(renderedTable.locator("td").nth(1)).toHaveText("Done");
+  await expect(rendered.getByRole("heading", { name: "Evaluation set" })).toBeVisible();
+  await expect(
+    rendered.getByText("Set aside time for a trial run before collecting results."),
+  ).toBeVisible();
+  await expect(rendered.getByRole("heading", { name: "Review checklist" })).toBeVisible();
+  await expect(rendered.getByText("Check each answer against its source.")).toBeVisible();
+  await expect(rendered.getByRole("heading", { name: "Example check" })).toBeVisible();
+  await expect(rendered.getByRole("link", { name: "Meeting agenda" })).toHaveAttribute(
+    "href",
+    "https://example.com/meeting-agenda",
+  );
+  await expect(
+    rendered.locator("pre code").filter({ hasText: "within_target = result_rank <= 3" }),
+  ).toBeVisible();
+  const fencedTable = rendered.locator("pre code").filter({ hasText: "| Check sources | Open |" });
+  await expect(fencedTable).toContainText("| --- |");
+  await expect(fencedTable).not.toContainText("| --- | --- |");
+  await rendered.screenshot({
+    path: testInfo.outputPath("malformed-table-after-preview.png"),
+  });
+  await page.screenshot({
+    path: testInfo.outputPath("malformed-table-after.png"),
+    fullPage: true,
+  });
+
+  await page.setViewportSize({ width: 375, height: 812 });
+  expect(await page.evaluate("document.documentElement.scrollWidth <= window.innerWidth")).toBe(
+    true,
+  );
+  await page.screenshot({
+    path: testInfo.outputPath("malformed-table-after-mobile.png"),
+    fullPage: true,
+  });
+});
+
 test("keyboard search and source opening work on narrow mobile through the real API path", async ({
   page,
 }, testInfo) => {

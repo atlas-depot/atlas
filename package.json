@@ -15,6 +15,7 @@
     "coverage": "vp test run --coverage",
     "test:e2e": "playwright test",
     "test:e2e:db": "playwright test --config=playwright.api.config.ts",
+    "test:perf": "playwright test --config=playwright.perf.config.ts",
     "build": "vp build",
     "preview": "vp preview",
     "db:generate": "drizzle-kit generate --config=server/db/drizzle.config.ts",
