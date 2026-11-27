@@ -17,6 +17,12 @@ const checklistId = "22222222-2222-4222-8222-222222222222";
 const planningId = "33333333-3333-4333-8333-333333333333";
 const planId = "44444444-4444-4444-8444-444444444444";
 const foreignId = "55555555-5555-4555-8555-555555555555";
+const fencedId = "66666666-6666-4666-8666-666666666666";
+const indentedId = "77777777-7777-4777-8777-777777777777";
+const inlineCodeId = "88888888-8888-4888-8888-888888888888";
+const imageId = "99999999-9999-4999-8999-999999999999";
+const htmlId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+const unusedId = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
 
 const ownedNotes: NoteSummary[] = [
   {
@@ -115,30 +121,56 @@ describe("note metadata helpers", () => {
     const markdown = [
       `Review [Meeting agenda](/notes/${meetingId}) and [missing](/notes/${foreignId}).`,
       `Titled [Planning notes](/notes/${planningId} "planning") also counts.`,
+      `Encoded [Plan](/no&#116;es/${planId}) also counts.`,
       "",
       "```md",
-      `[Fenced code](/notes/${planId})`,
+      `[Fenced code](/notes/${fencedId})`,
       "```",
       "",
-      `    [Indented code](/notes/${planId})`,
+      `    [Indented code](/notes/${indentedId})`,
       "",
-      `Inline code \`[ignored](/notes/${planId})\` stays ignored.`,
+      `Inline code \`[ignored](/notes/${inlineCodeId})\` stays ignored.`,
       "",
-      `![Image destination](/notes/${planId})`,
+      `![Image destination](/notes/${imageId})`,
       "",
-      `<a href="/notes/${planId}">Raw HTML stays ignored</a>`,
+      `<a href="/notes/${htmlId}">Raw HTML stays ignored</a>`,
       "",
       "See [Meeting agenda][agenda], [collapsed][], and [shortcut].",
       "",
       `[agenda]: /notes/${checklistId}`,
       `[collapsed]: /notes/${planningId}`,
       `[shortcut]: /notes/${foreignId}`,
-      `[unused]: /notes/${planId}`,
+      `[unused]: /notes/${unusedId}`,
     ].join("\n");
-    expect(extractLinkedNoteIds(markdown)).toEqual([meetingId, foreignId, planningId, checklistId]);
+    expect(extractLinkedNoteIds(markdown)).toEqual([
+      meetingId,
+      foreignId,
+      planningId,
+      planId,
+      checklistId,
+    ]);
 
-    const unusedRefOnly = `[unused]: /notes/${meetingId}\n`;
+    const unusedRefOnly = `[unused]: /notes/${unusedId}\n`;
     expect(extractLinkedNoteIds(unusedRefOnly)).toEqual([]);
+
+    const encoded = `[Plan](/no&#116;es/${meetingId})`;
+    expect(extractLinkedNoteIds(encoded)).toEqual([meetingId]);
+
+    const duplicateDefinitions = [
+      "See [Agenda].",
+      "",
+      `[Agenda]: /notes/${meetingId}`,
+      `[Agenda]: /notes/${foreignId}`,
+    ].join("\n");
+    expect(extractLinkedNoteIds(duplicateDefinitions)).toEqual([meetingId]);
+
+    const footnotes = [
+      "Used footnote[^used].",
+      "",
+      `[^used]: [Agenda](/notes/${meetingId})`,
+      `[^unused]: [Missing](/notes/${foreignId})`,
+    ].join("\n");
+    expect(extractLinkedNoteIds(footnotes)).toEqual([meetingId]);
 
     const absolute = `[Meeting agenda](https://atlas.example/notes/${meetingId})`;
     expect(extractLinkedNoteIds(absolute, { currentOrigin: "https://atlas.example" })).toEqual([
@@ -156,18 +188,22 @@ describe("note metadata helpers", () => {
   });
 
   it("stays fast for large notes with and without internal links", () => {
-    const pathological = [
-      "[".repeat(100_000),
-      "[](a ".repeat(20_000),
-      "[](<\n".repeat(20_000) + ">",
+    const fastPath = ["[".repeat(100_000), "[](a ".repeat(20_000), "[](<\n".repeat(20_000) + ">"];
+    const parsed = [
+      "[".repeat(100_000) + ` [link](/notes/${meetingId})`,
+      "[](a ".repeat(5_000) + ` [link](/notes/${meetingId})`,
+      "[](<\n".repeat(5_000) + ">" + ` [link](/notes/${meetingId})`,
     ];
     const manyLinks = `[link](/notes/${meetingId}) `.repeat(1_500);
     const startedAt = performance.now();
-    for (const content of pathological) {
+    for (const content of fastPath) {
       expect(extractLinkedNoteIds(content)).toEqual([]);
     }
+    for (const content of parsed) {
+      expect(extractLinkedNoteIds(content)).toEqual([meetingId]);
+    }
     expect(extractLinkedNoteIds(manyLinks)).toEqual([meetingId]);
-    expect(performance.now() - startedAt).toBeLessThan(1_000);
+    expect(performance.now() - startedAt).toBeLessThan(2_000);
   });
 
   it("resolves owned and unavailable sources without exposing inaccessible target metadata", () => {

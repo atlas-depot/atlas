@@ -123,36 +123,69 @@ function collectBlockLinkHrefs(blocks: readonly AtlasBlock[], hrefs: string[]) {
 
 const markdownParser = unified().use(remarkParse).use(remarkGfm);
 
-function walkMarkdown(node: Nodes, visit: (node: Nodes) => void) {
-  visit(node);
+function collectFootnoteReferences(node: Nodes, identifiers: Set<string>) {
+  if (node.type === "footnoteReference") identifiers.add(node.identifier);
   if ("children" in node) {
-    for (const child of node.children) walkMarkdown(child, visit);
+    for (const child of node.children) collectFootnoteReferences(child, identifiers);
+  }
+}
+
+function collectDefinitions(
+  node: Nodes,
+  usedFootnotes: Set<string>,
+  definitions: Map<string, string>,
+) {
+  if (node.type === "footnoteDefinition" && !usedFootnotes.has(node.identifier)) return;
+  if (node.type === "definition") {
+    // CommonMark resolves a reference to the first definition of its label.
+    if (!definitions.has(node.identifier)) definitions.set(node.identifier, node.url);
+    return;
+  }
+  if ("children" in node) {
+    for (const child of node.children) collectDefinitions(child, usedFootnotes, definitions);
+  }
+}
+
+function collectLinkHrefs(
+  node: Nodes,
+  usedFootnotes: Set<string>,
+  definitions: Map<string, string>,
+  hrefs: string[],
+) {
+  if (node.type === "footnoteDefinition" && !usedFootnotes.has(node.identifier)) return;
+  if (node.type === "link") {
+    hrefs.push(node.url);
+    return;
+  }
+  if (node.type === "linkReference") {
+    const destination = definitions.get(node.identifier);
+    if (destination) hrefs.push(destination);
+    return;
+  }
+  if ("children" in node) {
+    for (const child of node.children) {
+      collectLinkHrefs(child, usedFootnotes, definitions, hrefs);
+    }
   }
 }
 
 /**
  * Extract destinations from links the Markdown preview can render.
- * Code, raw HTML, images and unused reference definitions are ignored.
+ * Code, raw HTML, images, unused definitions and unused footnote bodies are ignored.
  */
 function extractMarkdownLinkHrefs(markdown: string): string[] {
-  // Most notes contain no internal links, so avoid parsing them only for source metadata.
-  if (!markdown.includes("/notes/")) return [];
+  // Character references can encode part of /notes/, so parse when an ampersand is present.
+  if (!markdown.includes("notes") && !markdown.includes("&")) return [];
 
   const tree = markdownParser.parse(markdown);
+  const usedFootnotes = new Set<string>();
+  collectFootnoteReferences(tree, usedFootnotes);
+
   const definitions = new Map<string, string>();
-  walkMarkdown(tree, (node) => {
-    if (node.type === "definition") definitions.set(node.identifier, node.url);
-  });
+  collectDefinitions(tree, usedFootnotes, definitions);
 
   const hrefs: string[] = [];
-  walkMarkdown(tree, (node) => {
-    if (node.type === "link") {
-      hrefs.push(node.url);
-    } else if (node.type === "linkReference") {
-      const destination = definitions.get(node.identifier);
-      if (destination) hrefs.push(destination);
-    }
-  });
+  collectLinkHrefs(tree, usedFootnotes, definitions, hrefs);
   return hrefs;
 }
 
