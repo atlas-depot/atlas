@@ -29,6 +29,7 @@ export type CompleteLoginResult =
       user: SessionUser;
       sessionCookie: string;
       clearTransactionCookie: string;
+      returnTo?: string;
     }>
   | Readonly<{
       ok: false;
@@ -43,7 +44,7 @@ export type CompleteLoginResult =
 export type BrowserAuth = Readonly<{
   authenticate: AuthenticateRequest;
   readSession: (request: Request, responseHeaders?: Headers) => Promise<SessionUser | null>;
-  startLogin: () => Promise<{ url: string; transactionCookie: string }>;
+  startLogin: (returnTo?: string) => Promise<{ url: string; transactionCookie: string }>;
   completeLogin: (input: {
     code: string;
     state: string;
@@ -164,7 +165,7 @@ export function createBrowserAuth(workos: WorkOS, options: BrowserAuthOptions): 
 
     readSession,
 
-    startLogin: async () => {
+    startLogin: async (returnTo) => {
       const authorization = await workos.userManagement.getAuthorizationUrlWithPKCE({
         provider: "authkit",
         redirectUri,
@@ -173,6 +174,7 @@ export function createBrowserAuth(workos: WorkOS, options: BrowserAuthOptions): 
         state: authorization.state,
         codeVerifier: authorization.codeVerifier,
         expiresAt: now() + transactionTtlSeconds * 1_000,
+        returnTo,
       });
       return {
         url: authorization.url,
@@ -204,6 +206,7 @@ export function createBrowserAuth(workos: WorkOS, options: BrowserAuthOptions): 
           user: toSessionUser(response.user),
           sessionCookie: sessionCookie(response.sealedSession),
           clearTransactionCookie,
+          returnTo: transaction.returnTo,
         };
       } catch (error) {
         if (isClientAuthError(error)) {

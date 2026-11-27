@@ -174,7 +174,7 @@ test("Save & organize keeps its source and saves an edited derivative through re
     origin: { sourceNoteId: source.id, sourceRevision: 2, sources: edited.sources },
   });
   expect((await work(page)).drafts).toEqual([]);
-  await page.reload();
+  await page.goto(`/notes/${derivative.id}`);
   expect(await notes(page)).toEqual(after);
   await expectEditorContent(
     page.getByRole("textbox", { name: /^(Note content|Markdown source)$/ }),

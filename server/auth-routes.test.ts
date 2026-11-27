@@ -89,6 +89,71 @@ describe("public authentication routes", () => {
     expect(response.headers.get("Cache-Control")).toBe("no-store");
   });
 
+  it("carries a safe note path through login and the callback", async () => {
+    const returnTo = "/notes/11111111-1111-4111-8111-111111111111";
+    const startLogin = vi.fn<BrowserAuth["startLogin"]>(async () => ({
+      url: "https://auth.example.test/authorize?state=state_fixture",
+      transactionCookie,
+    }));
+    const login = await createTestApp(fakeBrowserAuth({ startLogin })).request(
+      `/api/auth/login?returnTo=${encodeURIComponent(returnTo)}`,
+    );
+    expect(login.status).toBe(302);
+    expect(startLogin).toHaveBeenCalledWith(returnTo);
+
+    const completeLogin = vi.fn<BrowserAuth["completeLogin"]>(async () => ({
+      ok: true,
+      user: alice,
+      sessionCookie,
+      clearTransactionCookie,
+      returnTo,
+    }));
+    const callback = await createTestApp(fakeBrowserAuth({ completeLogin })).request(
+      "/api/auth/callback?code=code_fixture&state=state_fixture",
+      { headers: { Cookie: `${LOGIN_TRANSACTION_COOKIE_NAME}=txn` } },
+    );
+    expect(callback.status).toBe(303);
+    expect(callback.headers.get("Location")).toBe(`${appOrigin}${returnTo}`);
+  });
+
+  it("drops an external return path from login and callback", async () => {
+    const startLogin = vi.fn<BrowserAuth["startLogin"]>(async () => ({
+      url: "https://auth.example.test/authorize?state=state_fixture",
+      transactionCookie,
+    }));
+    const login = await createTestApp(fakeBrowserAuth({ startLogin })).request(
+      `/api/auth/login?returnTo=${encodeURIComponent("https://evil.example/notes/x")}`,
+    );
+    expect(login.status).toBe(302);
+    expect(startLogin).toHaveBeenCalledWith(undefined);
+
+    const completeLogin = vi.fn<BrowserAuth["completeLogin"]>(async () => ({
+      ok: true,
+      user: alice,
+      sessionCookie,
+      clearTransactionCookie,
+      returnTo: "//evil.example/notes/x",
+    }));
+    const callback = await createTestApp(fakeBrowserAuth({ completeLogin })).request(
+      "/api/auth/callback?code=code_fixture&state=state_fixture",
+      { headers: { Cookie: `${LOGIN_TRANSACTION_COOKIE_NAME}=txn` } },
+    );
+    expect(callback.status).toBe(303);
+    expect(callback.headers.get("Location")).toBe(`${appOrigin}/`);
+  });
+
+  it("drops a return path that normalizes to a protocol-relative URL", async () => {
+    const startLogin = vi.fn<BrowserAuth["startLogin"]>(async () => ({
+      url: "https://auth.example.test/authorize?state=state_fixture",
+      transactionCookie,
+    }));
+    const login = await createTestApp(fakeBrowserAuth({ startLogin })).request(
+      `/api/auth/login?returnTo=${encodeURIComponent("/.//evil.example/notes/x")}`,
+    );
+    expect(login.status).toBe(302);
+    expect(startLogin).toHaveBeenCalledWith(undefined);
+  });
+
   it("does not leak provider errors from login", async () => {
     const log = vi.spyOn(console, "error").mockImplementation(() => {});
     onTestFinished(() => log.mockRestore());

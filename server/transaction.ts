@@ -7,6 +7,7 @@ export type LoginTransaction = Readonly<{
   state: string;
   codeVerifier: string;
   expiresAt: number;
+  returnTo?: string;
 }>;
 
 function isLoginTransaction(value: unknown): value is LoginTransaction {
@@ -18,7 +19,12 @@ function isLoginTransaction(value: unknown): value is LoginTransaction {
     typeof transaction.codeVerifier === "string" &&
     transaction.codeVerifier.length > 0 &&
     typeof transaction.expiresAt === "number" &&
-    Number.isFinite(transaction.expiresAt)
+    Number.isFinite(transaction.expiresAt) &&
+    (transaction.returnTo === undefined ||
+      (typeof transaction.returnTo === "string" &&
+        transaction.returnTo.startsWith("/") &&
+        !transaction.returnTo.startsWith("//") &&
+        transaction.returnTo.length <= 2_048))
   );
 }
 

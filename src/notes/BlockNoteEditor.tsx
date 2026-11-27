@@ -9,6 +9,7 @@ import { noteSchema as schema } from "./editor-schema";
 import { noteSyntaxHighlighting } from "./code-theme";
 import { createCodePasteHandler } from "./code-detection";
 import { AtlasEditorControls, atlasShadcnComponents } from "./editor-controls";
+import { parseInternalNoteHref } from "./note-metadata";
 import { BlockNoteEditor as CoreEditor } from "@blocknote/core";
 import { useCreateBlockNote } from "@blocknote/react";
 import { BlockNoteView } from "@blocknote/shadcn";
@@ -49,6 +50,7 @@ type EditorProps = {
   onChange: (content: NoteContent) => void;
   onModeChange: (mode: EditorMode) => void;
   onValidityChange: (valid: boolean) => void;
+  onOpenNoteLink?: (noteId: string) => void;
 };
 
 export function BlockNoteEditor(props: EditorProps) {
@@ -228,6 +230,7 @@ function RichDocumentEditor({
   onChange,
   onModeChange,
   onValidityChange,
+  onOpenNoteLink,
   importedFromMarkdown = false,
 }: EditorProps & { document: BlockNoteDocument; importedFromMarkdown?: boolean }) {
   const contentId = useId();
@@ -303,6 +306,22 @@ function RichDocumentEditor({
       aria-label="Note editor"
       data-cited-block-id={highlightedBlockId}
       data-cited-range={citedRangeAttr}
+      onClick={(event) => {
+        if (!onOpenNoteLink) return;
+        const anchor = (event.target as Element | null)?.closest("a[href]");
+        if (!anchor) return;
+        const href = anchor.getAttribute("href");
+        if (!href) return;
+        const linkedNoteId = parseInternalNoteHref(href, window.location.origin);
+        if (!linkedNoteId) return;
+        if (event.detail !== 0 && (event.button !== 0 || event.shiftKey || event.altKey)) {
+          return;
+        }
+        // A plain click places the caret in the editable link text. Open on keyboard or Ctrl/Cmd.
+        if (event.detail !== 0 && !event.metaKey && !event.ctrlKey) return;
+        event.preventDefault();
+        onOpenNoteLink(linkedNoteId);
+      }}
     >
       <div className="editor-history" aria-label="Editing history">
         <Button
@@ -360,7 +379,7 @@ function RichDocumentEditor({
           }
         }}
       >
-        <AtlasEditorControls />
+        <AtlasEditorControls onOpenNoteLink={onOpenNoteLink} />
       </BlockNoteView>
     </section>
   );

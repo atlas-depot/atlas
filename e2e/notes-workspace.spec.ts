@@ -276,9 +276,10 @@ test("expired-session save preserves the current text and removes other cached n
   await page.getByRole("button", { name: "Save", exact: true }).click();
   await expect(page.getByRole("alert")).toContainText("Your session has ended.");
   await expectEditorContent(source, "Copy this text before signing in again.");
+  const returnTo = encodeURIComponent(new URL(page.url()).pathname);
   await expect(page.getByRole("link", { name: "Sign in again" })).toHaveAttribute(
     "href",
-    "/api/auth/login",
+    `/api/auth/login?returnTo=${returnTo}`,
   );
   await expect(page.getByRole("navigation", { name: "Notes" }).getByRole("button")).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Save", exact: true })).toBeDisabled();

@@ -15,6 +15,13 @@ import { classifyFailure } from "./editor-state";
 import { NotesRequestError } from "./notes-store";
 import type { NoteSearchClient } from "./note-search-store";
 import {
+  buildInternalNoteHref,
+  formatNoteAuthorship,
+  formatNoteTimestamp,
+  getNoteAuthorship,
+  resolveOriginSource,
+} from "./note-metadata";
+import {
   createSearchSourceTarget,
   describeSearchOutcome,
   formatHeadingPath,
@@ -47,7 +54,9 @@ export function NoteSearchWorkspace({
   canOpenSource,
   activeSourceTarget,
   onOpenSource,
+  onOpenNote,
   onUnauthenticated,
+  loadNoteSummary,
 }: {
   client: NoteSearchClient;
   notes: NoteSummary[];
@@ -55,7 +64,9 @@ export function NoteSearchWorkspace({
   canOpenSource: boolean;
   activeSourceTarget: SourceTarget | null;
   onOpenSource: (target: SourceTarget) => void;
+  onOpenNote?: (noteId: string) => void;
   onUnauthenticated: () => void;
+  loadNoteSummary?: (noteId: string) => Promise<NoteSummary | null>;
 }) {
   const [query, setQuery] = useState("");
   const [submittedQuery, setSubmittedQuery] = useState("");
@@ -83,6 +94,19 @@ export function NoteSearchWorkspace({
     };
   }, []);
 
+  useEffect(() => {
+    if (!loadNoteSummary) return;
+    const missingOriginIds = new Set<string>();
+    for (const candidate of outcome?.candidates ?? []) {
+      const summary = notes.find((note) => note.id === candidate.source.noteId);
+      const originId = summary?.origin?.sourceNoteId;
+      if (originId && !notes.some((note) => note.id === originId)) {
+        missingOriginIds.add(originId);
+      }
+    }
+    for (const noteId of missingOriginIds) void loadNoteSummary(noteId);
+  }, [loadNoteSummary, notes, outcome]);
+
   async function runSearch(rawQuery: string) {
     const trimmed = rawQuery.trim();
     if (!enabledRef.current || trimmed.length === 0) return;
@@ -104,6 +128,14 @@ export function NoteSearchWorkspace({
       setOutcome(describeSearchOutcome(trimmed, response));
       setResultTitles(titles);
       setFailure(null);
+
+      const knownNoteIds = new Set(notes.map((note) => note.id));
+      const missingNoteIds = [
+        ...new Set(response.candidates.map((candidate) => candidate.source.noteId)),
+      ].filter((noteId) => !knownNoteIds.has(noteId));
+      if (missingNoteIds.length > 0 && loadNoteSummary) {
+        void Promise.allSettled(missingNoteIds.map((noteId) => loadNoteSummary(noteId)));
+      }
     } catch (error) {
       if (requestId !== requestIdRef.current) {
         return;
@@ -131,10 +163,10 @@ export function NoteSearchWorkspace({
 
   function resolveNoteTitle(noteId: string): string {
     const found = notes.find((item) => item.id === noteId);
-    if (!found) {
-      return resultTitles[noteId] ?? "Saved note";
-    }
-    return found.title.trim() || "Untitled note";
+    if (found) return found.title.trim() || "Untitled note";
+    // Keep the label from the search that produced this result after its note disappears,
+    // but never reuse cached authorship or provenance metadata.
+    return resultTitles[noteId] ?? "Saved note";
   }
 
   const trimmedQuery = query.trim();
@@ -235,6 +267,8 @@ export function NoteSearchWorkspace({
                 const locationLabel = formatSourceLocation(source);
                 const revisionLabel = formatSourceRevision(source.version);
                 const noteTitle = resolveNoteTitle(source.noteId);
+                const summary = notes.find((item) => item.id === source.noteId);
+                const originSource = resolveOriginSource(summary?.origin, notes);
                 const isActive =
                   activeSourceTarget?.source.noteId === source.noteId &&
                   activeSourceTarget?.source.version === source.version &&
@@ -257,6 +291,22 @@ export function NoteSearchWorkspace({
                             {headingPath ? `${headingPath} - ` : ""}
                             {locationLabel} - {revisionLabel}
                           </span>
+                          {summary ? (
+                            <span className="note-search-meta">
+                              <span
+                                className="note-authorship-badge"
+                                data-authorship={getNoteAuthorship(summary)}
+                              >
+                                {formatNoteAuthorship(summary)}
+                              </span>
+                              <span className="note-meta-timestamp">
+                                Last edited{" "}
+                                <time dateTime={summary.updatedAt}>
+                                  {formatNoteTimestamp(summary.updatedAt)}
+                                </time>
+                              </span>
+                            </span>
+                          ) : null}
                         </CardDescription>
                         <CardAction>
                           <Button
@@ -275,8 +325,50 @@ export function NoteSearchWorkspace({
                           </Button>
                         </CardAction>
                       </CardHeader>
-                      <CardContent>
+                      <CardContent className="space-y-2">
                         <blockquote className="note-search-excerpt">{candidate.text}</blockquote>
+                        {originSource ? (
+                          <div
+                            className="note-search-origin"
+                            data-source-state={originSource.status}
+                          >
+                            <span className="note-meta-label">Source note:</span>
+                            {originSource.status === "available" ? (
+                              <>
+                                <a
+                                  href={buildInternalNoteHref(originSource.noteId)}
+                                  className="note-source-link"
+                                  aria-disabled={!enabled || !canOpenSource || undefined}
+                                  tabIndex={!enabled || !canOpenSource ? -1 : undefined}
+                                  onClick={(event) => {
+                                    if (
+                                      !onOpenNote ||
+                                      event.metaKey ||
+                                      event.ctrlKey ||
+                                      event.shiftKey ||
+                                      event.altKey ||
+                                      event.button !== 0
+                                    ) {
+                                      return;
+                                    }
+                                    event.preventDefault();
+                                    if (!enabled || !canOpenSource) return;
+                                    onOpenNote(originSource.noteId);
+                                  }}
+                                >
+                                  {originSource.title}
+                                </a>
+                                <span className="note-meta-revision">
+                                  (Revision {originSource.revision})
+                                </span>
+                              </>
+                            ) : (
+                              <span className="note-source-unavailable">
+                                Source note unavailable (Revision {originSource.revision})
+                              </span>
+                            )}
+                          </div>
+                        ) : null}
                       </CardContent>
                     </Card>
                   </li>

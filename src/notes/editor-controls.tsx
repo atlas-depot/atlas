@@ -1,4 +1,4 @@
-import { forwardRef, useMemo, type ReactNode } from "react";
+import { createContext, forwardRef, useContext, useMemo, type ReactNode } from "react";
 import { Menu } from "@base-ui/react/menu";
 import { getDefaultBlockTypeItems } from "@blocknote/core";
 import {
@@ -92,6 +92,9 @@ import {
   type Icon,
 } from "@phosphor-icons/react";
 import { LiveBlockColorsItem } from "./color-picker";
+import { parseInternalNoteHref } from "./note-metadata";
+
+const OpenNoteLinkContext = createContext<((noteId: string) => void) | undefined>(undefined);
 
 // Icons are supplied at each semantic control. The stock control still owns
 // selection, shortcuts and focus; we never inspect or rewrite its React nodes.
@@ -260,15 +263,33 @@ export function AtlasFormattingToolbar() {
 }
 
 export function AtlasLinkToolbar(props: LinkToolbarProps) {
+  const Components = useComponentsContext()!;
+  const onOpenNoteLink = useContext(OpenNoteLinkContext);
+  const origin = typeof window === "undefined" ? undefined : window.location.origin;
+  const linkedNoteId = onOpenNoteLink ? parseInternalNoteHref(props.url, origin) : null;
   return (
     <LinkFields>
       <LinkToolbar {...props}>
         <ControlIcon family="LinkToolbar" icon={PencilSimple}>
           <EditLinkButton {...props} />
         </ControlIcon>
-        <ControlIcon family="LinkToolbar" icon={ArrowSquareOut}>
-          <OpenLinkButton url={props.url} />
-        </ControlIcon>
+        {linkedNoteId && onOpenNoteLink ? (
+          <Components.LinkToolbar.Button
+            className="bn-button"
+            label="Open linked note"
+            mainTooltip="Open linked note"
+            isSelected={false}
+            onClick={() => {
+              props.setToolbarOpen?.(false);
+              onOpenNoteLink(linkedNoteId);
+            }}
+            icon={<ArrowSquareOut size={18} aria-hidden="true" />}
+          />
+        ) : (
+          <ControlIcon family="LinkToolbar" icon={ArrowSquareOut}>
+            <OpenLinkButton url={props.url} />
+          </ControlIcon>
+        )}
         <ControlIcon family="LinkToolbar" icon={LinkBreak}>
           <DeleteLinkButton range={props.range} setToolbarOpen={props.setToolbarOpen} />
         </ControlIcon>
@@ -376,7 +397,11 @@ function AtlasExtendButton(props: ExtendButtonProps) {
   );
 }
 
-export function AtlasEditorControls() {
+export function AtlasEditorControls({
+  onOpenNoteLink,
+}: {
+  onOpenNoteLink?: (noteId: string) => void;
+}) {
   const editor = useBlockNoteEditor();
   const base = useComponentsContext()!;
   const components = useMemo(
@@ -391,32 +416,34 @@ export function AtlasEditorControls() {
     [base],
   );
   return (
-    <ComponentsContext.Provider value={components}>
-      <FormattingToolbarController formattingToolbar={AtlasFormattingToolbar} />
-      <SideMenuController sideMenu={AtlasSideMenu} />
-      <LinkToolbarController linkToolbar={AtlasLinkToolbar} />
-      {"table" in editor.schema.blockSchema && (
-        <TableHandlesController
-          tableHandle={AtlasTableHandle}
-          tableCellHandle={AtlasTableCellHandle}
-          extendButton={AtlasExtendButton}
+    <OpenNoteLinkContext.Provider value={onOpenNoteLink}>
+      <ComponentsContext.Provider value={components}>
+        <FormattingToolbarController formattingToolbar={AtlasFormattingToolbar} />
+        <SideMenuController sideMenu={AtlasSideMenu} />
+        <LinkToolbarController linkToolbar={AtlasLinkToolbar} />
+        {"table" in editor.schema.blockSchema && (
+          <TableHandlesController
+            tableHandle={AtlasTableHandle}
+            tableCellHandle={AtlasTableCellHandle}
+            extendButton={AtlasExtendButton}
+          />
+        )}
+        <SuggestionMenuController
+          triggerCharacter="/"
+          getItems={async (query) =>
+            filterSuggestionItems(
+              getDefaultSlashMenuItems(editor)
+                .filter((item) => item.key !== "emoji")
+                .map((item) => {
+                  const Icon = blockIcons[item.key] ?? TextT;
+                  return { ...item, icon: <Icon size={18} aria-hidden="true" /> };
+                }),
+              query,
+            )
+          }
         />
-      )}
-      <SuggestionMenuController
-        triggerCharacter="/"
-        getItems={async (query) =>
-          filterSuggestionItems(
-            getDefaultSlashMenuItems(editor)
-              .filter((item) => item.key !== "emoji")
-              .map((item) => {
-                const Icon = blockIcons[item.key] ?? TextT;
-                return { ...item, icon: <Icon size={18} aria-hidden="true" /> };
-              }),
-            query,
-          )
-        }
-      />
-    </ComponentsContext.Provider>
+      </ComponentsContext.Provider>
+    </OpenNoteLinkContext.Provider>
   );
 }
 
